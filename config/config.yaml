@@ -1,12 +1,16 @@
 # ABOUTME: Simple configuration for Zettelkasten automation
-# ABOUTME: Paths are in .env, this file contains settings only
+# ABOUTME: Edit vault.root to point to your Obsidian vault
 
 vault:
+  root: "/Users/jnk789/Library/Mobile Documents/iCloud~md~obsidian/Documents/Brain/"
   sources_dir: "10_SOURCES"
   zettel_dir: "20_ZETTLEKASTEN"
+  template_path: "60_TEMPLATES/Note Template.md"
 
 llm:
-  model: "gpt-4o"
+  model: "gpt-5-mini"
 
 embeddings:
+  db_path: "chromastores/.chromadb"
   top_k: 5
+  max_distance: 0.5  # Lower = stricter (0.3 very similar, 0.5 related, 0.8 loosely related)
