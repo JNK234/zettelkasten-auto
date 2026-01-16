@@ -141,20 +141,26 @@ def main() -> None:
     print(f"Similarity threshold: max_distance={max_distance}")
     client = get_client(db_path)
 
-    # Index existing zettels
+    # Index existing zettels (skip unchanged files)
     existing_zettels = list(zettel_dir.glob("*.md"))
-    print(f"Indexing {len(existing_zettels)} existing zettels...")
+    print(f"Checking {len(existing_zettels)} existing zettels...")
+    indexed_count = 0
+    skipped_count = 0
     for zettel_path in existing_zettels:
         zettel_content = zettel_path.read_text().strip()
         zettel_title = zettel_path.stem
         if not zettel_content:
-            print(f"  Skipping empty file: {zettel_path.name}")
+            skipped_count += 1
             continue
         try:
-            index_zettel(client, zettel_title, zettel_content, embedding_provider, embedding_model)
+            was_indexed = index_zettel(client, zettel_title, zettel_content, embedding_provider, embedding_model)
+            if was_indexed:
+                indexed_count += 1
+            else:
+                skipped_count += 1
         except Exception as e:
             print(f"  Error indexing {zettel_path.name}: {e}")
-    print("Indexing complete.")
+    print(f"Indexing complete. Indexed: {indexed_count}, Skipped (unchanged): {skipped_count}")
 
     sources_processed = 0
     zettels_created = 0

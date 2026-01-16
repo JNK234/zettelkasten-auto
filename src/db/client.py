@@ -35,22 +35,58 @@ def _content_hash(content: str) -> str:
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
+def needs_indexing(
+    client: chromadb.PersistentClient,
+    title: str,
+    content: str,
+    provider: EmbeddingProvider = "openai",
+    model_name: str | None = None,
+) -> bool:
+    """Check if a zettel needs to be indexed (new or changed)."""
+    collection = get_collection(client, provider, model_name)
+    content_hash = _content_hash(content)
+
+    # Try to get existing record
+    try:
+        result = collection.get(ids=[title], include=["metadatas"])
+        if result and result["ids"] and result["metadatas"]:
+            existing_hash = result["metadatas"][0].get("content_hash")
+            return existing_hash != content_hash
+    except Exception:
+        pass
+
+    return True  # New file or error, needs indexing
+
+
 def index_zettel(
     client: chromadb.PersistentClient,
     title: str,
     content: str,
     provider: EmbeddingProvider = "openai",
     model_name: str | None = None,
-) -> None:
-    """Upsert a zettel with content hash in metadata for change detection."""
+    force: bool = False,
+) -> bool:
+    """Index a zettel if new or changed. Returns True if indexed, False if skipped."""
     collection = get_collection(client, provider, model_name)
     content_hash = _content_hash(content)
+
+    # Skip if unchanged (unless forced)
+    if not force:
+        try:
+            result = collection.get(ids=[title], include=["metadatas"])
+            if result and result["ids"] and result["metadatas"]:
+                existing_hash = result["metadatas"][0].get("content_hash")
+                if existing_hash == content_hash:
+                    return False  # Unchanged, skip
+        except Exception:
+            pass  # Proceed with indexing
 
     collection.upsert(
         ids=[title],
         documents=[content],
         metadatas=[{"title": title, "content_hash": content_hash}],
     )
+    return True
 
 
 def find_similar(

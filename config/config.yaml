@@ -16,7 +16,7 @@ llm:
   # Gemini models: gemini-1.5-flash, gemini-1.5-pro
 
 embeddings:
-  db_path: "chromastores/.chromadb"
+  db_path: "zettelkasten-auto/chromastores/zettledb_stf"
   provider: "sentence-transformer"  # "openai" or "sentence-transformer"
   model: "all-MiniLM-L6-v2"  # Optional: override default model
   # OpenAI default: text-embedding-3-small
