@@ -1,8 +1,7 @@
 # ABOUTME: Simple configuration for Zettelkasten automation
-# ABOUTME: Defines vault paths, LLM model, and embedding settings
+# ABOUTME: Paths are in .env, this file contains settings only
 
 vault:
-  root: "/Users/jnk789/Library/Mobile Documents/iCloud~md~obsidian/Documents/Brain"
   sources_dir: "10_SOURCES"
   zettel_dir: "20_ZETTLEKASTEN"
 
@@ -10,5 +9,4 @@ llm:
   model: "gpt-4o"
 
 embeddings:
-  db_path: ".zettel/chromadb"
   top_k: 5

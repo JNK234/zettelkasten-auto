@@ -11,8 +11,14 @@ Converts source notes into atomic Zettelkasten notes using LLM extraction and em
 
 ## Installation
 
+Using uv (recommended):
 ```bash
-pip install -r requirements.txt
+uv sync
+```
+
+Or using pip:
+```bash
+pip install -e .
 ```
 
 ## Configuration
@@ -32,8 +38,14 @@ pip install -r requirements.txt
 
 ## Usage
 
+Using the CLI command:
 ```bash
-python -m src.main
+zettel
+```
+
+Or run directly:
+```bash
+uv run python -m src.main
 ```
 
 The script will:
@@ -53,9 +65,10 @@ zettelkasten-auto/
 ├── src/
 │   ├── db.py          # ChromaDB operations
 │   ├── llm.py         # LLM concept extraction
+│   ├── prompts.py     # Extraction prompts
 │   └── main.py        # Orchestration
-├── .env               # API keys (not tracked)
-└── requirements.txt
+├── pyproject.toml     # Package configuration
+└── .env               # API keys (not tracked)
 ```
 
 ## How It Works
