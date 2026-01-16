@@ -12,5 +12,9 @@ llm:
 
 embeddings:
   db_path: "chromastores/.chromadb"
+  provider: "sentence-transformer"  # "openai" or "sentence-transformer"
+  # model: "all-MiniLM-L6-v2"  # Optional: override default model
+  # OpenAI default: text-embedding-3-small
+  # SentenceTransformer default: all-MiniLM-L6-v2
   top_k: 5
   max_distance: 0.5  # Lower = stricter (0.3 very similar, 0.5 related, 0.8 loosely related)

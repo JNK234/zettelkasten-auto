@@ -125,7 +125,13 @@ def main() -> None:
     db_path = str(vault_root / config["embeddings"]["db_path"])
     top_k = config["embeddings"].get("top_k", 5)
     max_distance = config["embeddings"].get("max_distance", 0.5)
+    embedding_provider = config["embeddings"].get("provider", "openai")
+    embedding_model = config["embeddings"].get("model", None)
+
     print(f"ChromaDB path: {db_path}")
+    print(f"Embedding provider: {embedding_provider}")
+    if embedding_model:
+        print(f"Embedding model: {embedding_model}")
     print(f"Similarity threshold: max_distance={max_distance}")
     client = get_client(db_path)
 
@@ -139,7 +145,7 @@ def main() -> None:
             print(f"  Skipping empty file: {zettel_path.name}")
             continue
         try:
-            index_zettel(client, zettel_title, zettel_content)
+            index_zettel(client, zettel_title, zettel_content, embedding_provider, embedding_model)
         except Exception as e:
             print(f"  Error indexing {zettel_path.name}: {e}")
     print("Indexing complete.")
@@ -166,7 +172,10 @@ def main() -> None:
             print(f"      Tags: {concept.get('suggested_tags', [])}")
 
             # find_similar returns list of title strings
-            similar_titles = find_similar(client, concept["content"], top_k, max_distance)
+            similar_titles = find_similar(
+                client, concept["content"], top_k, max_distance,
+                embedding_provider, embedding_model
+            )
             if similar_titles:
                 print(f"      Similar notes: {similar_titles[:3]}...")
 
@@ -189,7 +198,7 @@ def main() -> None:
 
             # Index the newly created zettel
             new_content = zettel_path.read_text()
-            index_zettel(client, concept["title"], new_content)
+            index_zettel(client, concept["title"], new_content, embedding_provider, embedding_model)
             zettels_created += 1
 
         if not args.dry_run:

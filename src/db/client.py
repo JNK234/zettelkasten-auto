@@ -1,12 +1,12 @@
-# ABOUTME: ChromaDB operations for zettel embeddings and similarity search
-# ABOUTME: Uses OpenAI text-embedding-3-small for vector embeddings
+# ABOUTME: ChromaDB client and collection operations.
+# ABOUTME: Handles indexing and similarity search for zettels.
 
 import hashlib
-import os
 from typing import List
 
 import chromadb
-from chromadb.utils.embedding_functions import OpenAIEmbeddingFunction
+
+from src.db.embeddings import get_embedding_function, EmbeddingProvider
 
 
 COLLECTION_NAME = "zettels"
@@ -17,13 +17,13 @@ def get_client(db_path: str) -> chromadb.PersistentClient:
     return chromadb.PersistentClient(path=db_path)
 
 
-def get_collection(client: chromadb.PersistentClient):
-    """Gets or creates the zettels collection with OpenAI embeddings."""
-    api_key = os.environ.get("OPENAI_API_KEY")
-    embedding_fn = OpenAIEmbeddingFunction(
-        api_key=api_key,
-        model_name="text-embedding-3-small"
-    )
+def get_collection(
+    client: chromadb.PersistentClient,
+    provider: EmbeddingProvider = "openai",
+    model_name: str | None = None,
+):
+    """Gets or creates the zettels collection with configured embeddings."""
+    embedding_fn = get_embedding_function(provider, model_name)
     return client.get_or_create_collection(
         name=COLLECTION_NAME,
         embedding_function=embedding_fn,
@@ -35,9 +35,15 @@ def _content_hash(content: str) -> str:
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
-def index_zettel(client: chromadb.PersistentClient, title: str, content: str) -> None:
+def index_zettel(
+    client: chromadb.PersistentClient,
+    title: str,
+    content: str,
+    provider: EmbeddingProvider = "openai",
+    model_name: str | None = None,
+) -> None:
     """Upsert a zettel with content hash in metadata for change detection."""
-    collection = get_collection(client)
+    collection = get_collection(client, provider, model_name)
     content_hash = _content_hash(content)
 
     collection.upsert(
@@ -52,6 +58,8 @@ def find_similar(
     content: str,
     top_k: int = 5,
     max_distance: float = 1.0,
+    provider: EmbeddingProvider = "openai",
+    model_name: str | None = None,
 ) -> List[str]:
     """Query for similar notes, returning list of titles that meet threshold.
 
@@ -60,10 +68,12 @@ def find_similar(
         content: Text to find similar notes for
         top_k: Maximum number of results to return
         max_distance: Maximum distance threshold (lower = more similar).
-                      OpenAI embeddings use cosine distance where 0 = identical, 2 = opposite.
-                      Typical useful range: 0.3 (very similar) to 0.8 (somewhat related)
+                      Cosine distance: 0 = identical, 2 = opposite.
+                      Typical range: 0.3 (very similar) to 0.8 (loosely related)
+        provider: Embedding provider to use
+        model_name: Specific model name (optional)
     """
-    collection = get_collection(client)
+    collection = get_collection(client, provider, model_name)
 
     results = collection.query(
         query_texts=[content],
