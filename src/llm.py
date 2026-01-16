@@ -5,6 +5,8 @@ import os
 import json
 from openai import OpenAI
 
+from src.prompts import EXTRACTION_PROMPT, SYSTEM_CONTEXT
+
 
 def extract_concepts(content: str, model: str = "gpt-4o") -> list[dict]:
     """Extract atomic Zettelkasten concepts from source text.
@@ -18,21 +20,14 @@ def extract_concepts(content: str, model: str = "gpt-4o") -> list[dict]:
     """
     client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
-    prompt = f"""Given this source note, extract all atomic Zettelkasten concepts.
-
-Each concept should be:
-- Self-contained (understandable without the source)
-- Atomic (one idea per concept)
-- Linked (suggest 2-3 tags that group related concepts)
-
-Source note:
----
-{content}
----"""
+    prompt = EXTRACTION_PROMPT.format(content=content)
 
     response = client.chat.completions.create(
         model=model,
-        messages=[{"role": "user", "content": prompt}],
+        messages=[
+            {"role": "system", "content": SYSTEM_CONTEXT},
+            {"role": "user", "content": prompt}
+        ],
         response_format={
             "type": "json_schema",
             "json_schema": {
