@@ -8,12 +8,17 @@ vault:
   template_path: "60_TEMPLATES/Note Template.md"
 
 llm:
-  model: "gpt-5-mini"
+  provider: "openai"  # "openai", "ollama", or "gemini"
+  model: "gpt-4o-mini"  # Model name (provider-specific)
+  base_url: "http://localhost:11434"  # Only for Ollama (optional)
+  # OpenAI models: gpt-4o, gpt-4o-mini
+  # Ollama models: llama3.1:8b, mistral:7b, qwen2.5:7b
+  # Gemini models: gemini-1.5-flash, gemini-1.5-pro
 
 embeddings:
   db_path: "chromastores/.chromadb"
   provider: "sentence-transformer"  # "openai" or "sentence-transformer"
-  # model: "all-MiniLM-L6-v2"  # Optional: override default model
+  model: "all-MiniLM-L6-v2"  # Optional: override default model
   # OpenAI default: text-embedding-3-small
   # SentenceTransformer default: all-MiniLM-L6-v2
   top_k: 5

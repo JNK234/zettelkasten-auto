@@ -106,7 +106,11 @@ def main() -> None:
     vault_root = Path(config["vault"]["root"])
     zettel_dir = vault_root / config["vault"]["zettel_dir"]
     sources_dir = vault_root / config["vault"]["sources_dir"]
-    model = config["llm"].get("model", "gpt-4o")
+
+    # LLM configuration
+    llm_provider = config["llm"].get("provider", "openai")
+    llm_model = config["llm"].get("model", None)
+    llm_base_url = config["llm"].get("base_url", None)
 
     template_path = vault_root / config["vault"]["template_path"]
 
@@ -114,7 +118,9 @@ def main() -> None:
     print(f"Sources dir: {sources_dir}")
     print(f"Zettel dir: {zettel_dir}")
     print(f"Template: {template_path}")
-    print(f"Model: {model}")
+    print(f"LLM provider: {llm_provider}")
+    if llm_model:
+        print(f"LLM model: {llm_model}")
     if args.dry_run:
         print("*** DRY RUN MODE - No files will be written ***")
 
@@ -164,7 +170,8 @@ def main() -> None:
         source_name = source_path.stem
 
         print(f"  Extracting concepts via LLM...")
-        concepts = extract_concepts(content, model)
+        llm_kwargs = {"base_url": llm_base_url} if llm_base_url else {}
+        concepts = extract_concepts(content, llm_provider, llm_model, **llm_kwargs)
         print(f"  Found {len(concepts)} concepts.")
 
         for concept in concepts:
