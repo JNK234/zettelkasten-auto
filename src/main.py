@@ -66,21 +66,23 @@ def write_zettel(
     if similar:
         see_also = "# See Also\n\n" + "\n".join(f"- [[{s}]]" for s in similar)
 
+    # Build references section
+    references = f"# References\n\n1. [[{source}]]"
+
     # Replace Obsidian Templater placeholders
     zettel_content = template
     zettel_content = zettel_content.replace("{{date}}", date_str)
     zettel_content = zettel_content.replace("{{time}}", time_str)
-    zettel_content = zettel_content.replace("{{Title}}", title)
     zettel_content = zettel_content.replace("Tags:", f"Tags: {tags_str}" if tags_str else "Tags:")
 
-    # Insert content after the title heading
-    zettel_content = zettel_content.replace(f"# {title}\n", f"# {title}\n\n{content}\n")
+    # Replace title placeholder and insert content after it
+    zettel_content = zettel_content.replace("# {{Title}}", f"# {title}\n\n{content}")
 
-    # Insert see_also before References
-    zettel_content = zettel_content.replace("# References", f"{see_also}\n\n# References")
-
-    # Add source reference
-    zettel_content = zettel_content.replace("# References\n", f"# References\n\n1. [[{source}]]\n")
+    # Replace References section with see_also + references
+    if see_also:
+        zettel_content = zettel_content.replace("# References", f"{see_also}\n\n{references}")
+    else:
+        zettel_content = zettel_content.replace("# References", references)
 
     output_path.write_text(zettel_content)
     return output_path
@@ -170,10 +172,17 @@ def main() -> None:
         source_files = source_files[:args.limit]
     print(f"Found {len(source_files)} source files to process.")
 
+    MIN_CONTENT_LENGTH = 100  # Skip files with less than 100 characters
+
     for source_path in source_files:
         print(f"\n--- Processing: {source_path.name} ---")
-        content = source_path.read_text()
+        content = source_path.read_text().strip()
         source_name = source_path.stem
+
+        # Skip empty or too short files
+        if len(content) < MIN_CONTENT_LENGTH:
+            print(f"  Skipping: content too short ({len(content)} chars, min {MIN_CONTENT_LENGTH})")
+            continue
 
         print(f"  Extracting concepts via LLM...")
         llm_kwargs = {"base_url": llm_base_url} if llm_base_url else {}
@@ -193,6 +202,8 @@ def main() -> None:
                 print(f"      Similar notes: {similar_titles[:3]}...")
 
             if args.dry_run:
+                print(f"      Type: {concept.get('concept_type', 'N/A')}")
+                print(f"      Level: {concept.get('abstraction_level', 'N/A')}")
                 print(f"      --- Content ---")
                 print(f"      {concept['content']}")
                 print(f"      --- End Content ---")

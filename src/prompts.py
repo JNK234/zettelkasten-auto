@@ -1,102 +1,71 @@
 # ABOUTME: Extraction prompts for Zettelkasten concept extraction.
-# ABOUTME: Focuses on reusable concepts, not project-specific procedures.
+# ABOUTME: Strictly grounded to source content - no hallucinated definitions.
 
-EXTRACTION_PROMPT = """You are a knowledge curator building a personal knowledge base (Zettelkasten).
+SYSTEM_CONTEXT = """You are a meticulous knowledge architect. Your purpose is to deconstruct complex information into discrete, verifiable concepts for a knowledge graph.
 
-Your task: Identify REUSABLE CONCEPTS mentioned or discussed in the source note below.
+Your primary directive is absolute fidelity to the provided source text. Never invent, infer, or add external information. If the source is insufficient to meet the extraction criteria, you extract nothing."""
 
-## What is a Reusable Concept?
 
-A reusable concept is an idea, tool, technique, principle, or mental model that:
-- Can be referenced from MULTIPLE different contexts/projects
-- Has value BEYOND the specific source it appears in
-- Someone might want to LINK TO from other notes
-- Could be explained to someone unfamiliar with the source material
+EXTRACTION_PROMPT = """# Task
+From the Source Note provided below, extract all substantive, atomic concepts suitable for a Zettelkasten knowledge vault.
 
-## Examples of Good vs Bad Extractions
+# Instructions
+1.  **Identify Candidates**: Scan the entire Source Note to identify all potential concepts.
+2.  **Filter Rigorously**: Apply the `Substantive Concept Rules` below. Discard any concept that does not meet the criteria.
+3.  **Format Output**: For each passing concept, format according to the `Output Specification`.
+4.  **Final Output**: Return a single JSON array. If no concepts meet the criteria, return an empty array `[]`.
 
-Source: "I used sbt to build the NetLogo extension, running ./sbt from the project root"
-
-BAD extraction (too specific):
-- "Running sbt from the NetLogo project root" - Only useful for NetLogo
-
-GOOD extraction:
-- "sbt (Simple Build Tool)" - A general concept about Scala build tooling that applies everywhere
-
-Source: "I applied Tree of Thoughts prompting to improve the agent's reasoning"
-
-BAD extraction:
-- "Using Tree of Thoughts for my agent project" - Too narrow
-
-GOOD extraction:
-- "Tree of Thoughts Prompting" - A prompting technique applicable to any LLM work
-
-## Extraction Rules
-
-1. Extract the UNDERLYING CONCEPT, not the specific application
-2. Title should be the concept name (e.g., "sbt", "Git Submodules", "Chain of Thought Prompting")
-3. Content should be grounded in what the source says, enriched to be complete
-4. Prefer fewer high-quality concepts over many narrow ones
-5. If a concept is too basic/obvious (like "Git" or "Python"), skip it unless the source has specific insights worth noting
-
-## Content Requirements
-
-For each concept, provide:
-- Title: The concept name (concise, reusable)
-- Content: A well-structured note (150-400 words) following this format:
-
-  ## Definition
-  1-2 sentences defining what this concept is. Clear, precise, no fluff.
-
-  ## Key Points
-  The core insights, characteristics, or mechanics. Use bullet points when listing multiple items, but write in prose if explaining a single coherent idea. Include:
-  - What makes this concept important or useful
-  - How it works or key characteristics
-  - Specific insights from the source note
-  - Practical considerations or gotchas (if any)
-
-  ## When to Use (optional - include only if relevant)
-  Brief context on when/where this applies.
-
-- Tags: 2-3 domain categories this concept belongs to
-
-## Formatting Rules
-- Use markdown headers (##) to structure sections
-- Use bullet points (-) for lists of distinct items
-- Use prose for explanations that flow naturally
-- Do NOT force bullet points everywhere - use them only when listing multiple related items
-- Keep it scannable but not choppy
-- No filler phrases like "In conclusion" or "It's important to note that"
-- Be direct and specific
-
-## Content Sourcing
-Base the content primarily on what the SOURCE NOTE says about the concept:
-- Capture the author's specific insights, examples, and context
-- Enrich with general knowledge only to fill gaps and make it complete
-- The note should stand alone but preserve the source's perspective
-- If the source has unique takes or practical lessons, prioritize those over generic definitions
-
-## What to Extract:
-- Tools and technologies (sbt, ChromaDB, etc.)
-- Techniques and methods (Tree of Thoughts, TDD, etc.)
-- Principles and mental models
-- Frameworks and architectures
-- Key terminology worth having a note for
-
-## What NOT to Extract:
-- Project-specific procedures ("How to set up X for project Y")
-- Obvious/basic concepts everyone knows
-- Specific commands or code snippets (those belong in the source)
-- Anything that only makes sense in the context of this one source
-
-## Source Note:
+# Source Note
 ---
 {content}
 ---
 
-Extract only the reusable concepts. Quality over quantity. If the source is purely procedural with no reusable concepts, return an empty list."""
+# Substantive Concept Rules
+Extract a concept ONLY IF the source provides **substantive detail** on at least ONE of:
+-   **Mechanism**: Explains *how* it works (process, causality, internal behavior).
+-   **Rationale**: Explains *why* it matters (impact, trade-offs, implications).
+-   **Application**: Provides concrete examples/use-cases WITH explanation.
+-   **Pitfalls**: Describes non-obvious constraints, failure modes, or gotchas.
 
+AND enough material for a definition + at least 3 distinct key points.
 
-SYSTEM_CONTEXT = """You are a knowledge curator. Your goal is to identify concepts worth having permanent notes about.
-Think: "Would I want to link to this from multiple other notes?" If no, don't extract it.
-Extract the concept itself, not how it was used in this specific source."""
+**DO NOT** extract if:
+-   Mentioned only briefly (1-2 sentences).
+-   A tool/person mentioned without deep insight attached.
+-   Generic, Wikipedia-like common knowledge.
+
+# Output Specification
+For each valid concept, generate a JSON object:
+
+-   `title`: (String) Concise, reusable, context-free. 2-6 words.
+-   `content`: (String) Markdown, 200-400 words. Write for both human understanding AND embedding quality. MUST contain:
+    ## Definition
+    2-3 sentences that capture the essence. Include the "what" and hint at the "why it matters."
+    ## How It Works
+    (Include if the source explains mechanism) Explain the process, steps, or internal logic.
+    ## Key Points
+    Unordered list of 4-6 specific, substantive points from the source. Each point should be a complete thought, not a fragment.
+    ## Connections
+    (Optional) Note relationships to other concepts mentioned in the source (e.g., "Builds on X", "Contrasts with Y", "Enables Z").
+    ## When to Use
+    (Optional) Include ONLY if the source explicitly discusses applications or contexts.
+-   `suggested_tags`: (List[String]) 2-3 specific concept links for the Obsidian graph. These become [[Concept]] links.
+    Rules (Object Tags, not Topic Tags):
+    - Tag the specific concepts this note IS ABOUT, not topics it "relates to"
+    - Use precise terms that would be their own note (e.g., `Chain of Thought`, `Insulin Sensitivity`, `Feedback Loops`)
+    - NOT broad categories (avoid `Machine Learning`, `Health`, `Programming`)
+    - Each tag should pass this test: "Is this note specifically *about* this concept?"
+    - Title Case, no hyphens or slashes
+-   `concept_type`: (String) One of:
+    -   `mechanism`: How something works internally.
+    -   `pattern`: Recurring, generalizable solution to a common problem.
+    -   `mental-model`: Framework for thinking or understanding.
+    -   `heuristic`: Practical rule-of-thumb or guideline.
+    -   `observation`: Noteworthy insight without deep explanatory mechanism.
+    -   `gotcha`: Non-obvious pitfall or counter-intuitive behavior.
+-   `abstraction_level`: (String) One of:
+    -   `concrete-example`: Specific instance illustrating a point.
+    -   `specific-technique`: Direct, actionable method or procedure.
+    -   `general-principle`: Broad rule that applies widely.
+    -   `meta-concept`: Concept about knowledge or learning itself.
+"""

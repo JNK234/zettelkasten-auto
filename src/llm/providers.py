@@ -42,36 +42,53 @@ class OpenAIProvider(BaseLLMProvider):
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": prompt}
             ],
-            response_format={
-                "type": "json_schema",
-                "json_schema": {
-                    "name": "concept_extraction",
-                    "strict": True,
-                    "schema": {
-                        "type": "object",
-                        "properties": {
-                            "concepts": {
-                                "type": "array",
-                                "items": {
-                                    "type": "object",
-                                    "properties": {
-                                        "title": {"type": "string"},
-                                        "content": {"type": "string"},
-                                        "suggested_tags": {
-                                            "type": "array",
-                                            "items": {"type": "string"}
-                                        }
-                                    },
-                                    "required": ["title", "content", "suggested_tags"],
-                                    "additionalProperties": False
-                                }
-                            }
-                        },
-                        "required": ["concepts"],
-                        "additionalProperties": False
-                    }
-                }
-            }
+            response_format = {
+  "type": "json_schema",
+  "json_schema": {
+    "name": "concept_extraction",
+    "strict": True,
+    "schema": {
+      "type": "object",
+      "properties": {
+        "concepts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "title": { "type": "string" },
+              "content": { "type": "string" },
+              "suggested_tags": {
+                "type": "array",
+                "items": { "type": "string" },
+                "minItems": 2,
+                "maxItems": 3
+              },
+              "concept_type": {
+                "type": "string",
+                "enum": ["mechanism", "pattern", "mental-model", "heuristic", "observation", "gotcha"]
+              },
+              "abstraction_level": {
+                "type": "string",
+                "enum": ["concrete-example", "specific-technique", "general-principle", "meta-concept"]
+              }
+            },
+            "required": [
+              "title",
+              "content",
+              "suggested_tags",
+              "concept_type",
+              "abstraction_level"
+            ],
+            "additionalProperties": False
+          }
+        }
+      },
+      "required": ["concepts"],
+      "additionalProperties": False
+    }
+  }
+}
+
         )
         result = json.loads(response.choices[0].message.content)
         return result["concepts"]
