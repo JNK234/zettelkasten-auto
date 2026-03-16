@@ -24,7 +24,7 @@ Only proceed if the source contains **universal, reusable knowledge** - concepts
 2.  **Identify Candidates**: Scan for potential universal concepts.
 3.  **Filter Rigorously**: Apply the `Substantive Concept Rules` below.
 4.  **Format Output**: For each passing concept, format according to the `Output Specification`.
-5.  **Final Output**: Return a JSON array. If no concepts meet the criteria, return `[]`.
+5.  **Final Output**: Return a JSON object in the form `{{"concepts": [...]}}`. If no concepts meet the criteria, return `{{"concepts": []}}`.
 
 # Source Note
 ---

@@ -1,105 +1,197 @@
 # Zettelkasten Automation
 
-Converts source notes into atomic Zettelkasten notes using LLM extraction and embedding-based semantic linking.
+Convert substantive source notes into atomic Zettels, keep the knowledge graph local, and assemble exportable bundles around a source or note.
 
-## Features
+## What The Tool Does
 
-- Extracts atomic concepts from source notes using OpenAI structured outputs
-- Finds semantically similar existing notes using ChromaDB embeddings
-- Creates linked Zettel files with proper formatting
-- Incremental processing (skips already processed files)
+- Processes markdown source notes from a configured source folder.
+- Extracts reusable concepts with a structured LLM response.
+- Writes new Zettels from a template.
+- Stores semantic embeddings in a local ChromaDB collection scoped to the active embedding provider and model.
+- Builds context bundles around a source or note.
+
+The tool is intentionally CLI-first and local-first. Source files are never deleted. Successful processing marks them as processed through a `Status: #processed` marker.
 
 ## Installation
 
-Using uv (recommended):
+Using `uv`:
+
 ```bash
 uv sync
 ```
 
-Or using pip:
+Or with `pip`:
+
 ```bash
 pip install -e .
 ```
 
 ## Configuration
 
-1. Copy `.env.example` to `.env` and add your OpenAI API key:
-   ```
-   OPENAI_API_KEY=your_key_here
-   ```
+1. Copy `.env.example` to `.env`.
+2. Add the API key(s) for the providers you plan to use.
+3. Edit `config/config.yaml`.
 
-2. Edit `config/config.yaml` to set your vault paths:
-   ```yaml
-   vault:
-     root: "/path/to/your/obsidian/vault"
-     sources_dir: "10_SOURCES"
-     zettel_dir: "20_ZETTLEKASTEN"
-   ```
+Portable example:
 
-## Usage
+```yaml
+vault:
+  root: "/path/to/your/obsidian/vault"
+  sources_dir: "10_SOURCES"
+  zettel_dir: "20_ZETTLEKASTEN"
+  bundles_dir: "110_BUNDLES"
+  template_path: "60_TEMPLATES/Note Template.md"
 
-Using the CLI command:
+llm:
+  provider: "openai"
+  model: "gpt-4o-mini"
+
+embeddings:
+  db_path: "chromastores/zettledb"
+  provider: "sentence-transformer"
+  model: "all-MiniLM-L6-v2"
+  top_k: 5
+  max_distance: 0.5
+
+bundle:
+  default_depth: 1
+  default_top_k: 10
+
+processing:
+  min_source_chars: 100
+  duplicate_max_distance: 0.15
+  chunk_target_chars: 4000
+  chunk_max_chars: 6000
+```
+
+`template_path` should point to a markdown template containing these anchors:
+
+- `Tags:`
+- `# {{Title}}`
+- `# References`
+
+Including `# See Also` in the template is recommended but optional. The writer inserts it if it is missing.
+
+## CLI
+
+Show help:
+
 ```bash
-zettel
+zettel --help
 ```
 
-Or run directly:
+Main commands:
+
 ```bash
-uv run python -m src.main
+zettel process [--dry-run] [--limit N]
+zettel rebuild-index [--dry-run]
+zettel bundle --source SOURCE [--depth N] [--top-k N] [--dry-run]
+zettel bundle --note "Note Title" [--depth N] [--dry-run]
 ```
 
-The script will:
-1. Index existing Zettels in the output directory
-2. Scan source files (skipping those marked with both `#processed` and `#adult`)
-3. Extract atomic concepts via LLM
-4. Find similar existing notes for linking
-5. Create new Zettel files
-6. Mark sources as processed
+Legacy maintenance commands:
 
-## Project Structure
-
-```
-zettelkasten-auto/
-├── config/
-│   └── config.yaml    # Vault paths and settings
-├── src/
-│   ├── db.py          # ChromaDB operations
-│   ├── llm.py         # LLM concept extraction
-│   ├── prompts.py     # Extraction prompts
-│   └── main.py        # Orchestration
-├── pyproject.toml     # Package configuration
-└── .env               # API keys (not tracked)
+```bash
+zettel normalize-links [--dry-run]
+zettel rename-files [--dry-run]
+zettel sync-backlinks [--dry-run]
 ```
 
-## How It Works
+## Recommended Workflow
 
-1. Source notes are read from the configured sources directory
-2. Each source is sent to OpenAI to extract atomic concepts (title, content, tags)
-3. For each concept, ChromaDB finds semantically similar existing Zettels
-4. A new Zettel file is created with proper linking to similar notes
-5. The source file is marked with `#processed` to avoid reprocessing
+1. Put substantive, reusable source notes into `sources_dir`.
+2. Preview extraction:
 
-## Output Format
+```bash
+zettel process --dry-run --limit 5
+```
 
-Each generated Zettel follows this format:
+3. Run the real ingestion:
+
+```bash
+zettel process --limit 5
+```
+
+4. Rebuild the active embedding collection whenever notes are renamed, merged, or heavily edited by hand:
+
+```bash
+zettel rebuild-index
+```
+
+5. Generate a context bundle:
+
+```bash
+zettel bundle --source source-file-name
+zettel bundle --note "core-idea"
+```
+
+`bundle --dry-run` is read-only and, for source bundles, requires a fresh index. If the index is stale it exits with a clear error instead of silently using inaccurate semantic results.
+
+## How Processing Works
+
+For each source note, the tool:
+
+1. Skips notes already marked as processed through `Status: #processed` or a legacy terminal `#processed` line.
+2. Skips notes shorter than `processing.min_source_chars`.
+3. Splits long sources by markdown headings and then paragraphs.
+4. Runs extraction per chunk and validates the provider output.
+5. Deduplicates candidate concepts by normalized title and semantic similarity.
+6. Writes new Zettels and indexes them in the active embedding collection.
+7. Marks the source as processed when the note was successfully handled or intentionally skipped as non-extractable.
+
+Per-source outcomes are summarized with categories such as `processed`, `too_short`, `non_extractable`, `provider_error`, `invalid_output`, and `no_valid_concepts`.
+
+## Note Format
+
+Newly generated notes separate semantic relationships from aboutness:
 
 ```markdown
 Created: DD-MM-YYYY HH:MM
 
-Status: #baby
-
-Tags: [[Tag1]] [[Tag2]]
+Tags: [[alpha-tag]] [[topic-label]]
 
 # Concept Title
 
-Content explaining the concept...
+Concept content...
 
 # See Also
 
-- [[Similar Note 1]]
-- [[Similar Note 2]]
+- [[related-idea]]
+- [[another-note]]
 
 # References
 
 1. [[Source File Name]]
+```
+
+- `Tags:` contains only the extracted aboutness links.
+- `# See Also` contains semantically similar notes.
+- Bundle traversal follows `Tags` beyond degree `0`; it does not recursively follow `See Also`.
+
+## Project Structure
+
+```text
+zettelkasten-auto/
+├── config/
+│   └── config.yaml
+├── src/
+│   ├── bundle.py
+│   ├── main.py
+│   ├── prompts.py
+│   ├── db/
+│   │   ├── client.py
+│   │   └── embeddings.py
+│   └── llm/
+│       ├── extraction.py
+│       └── providers.py
+└── tests/
+    └── test_integration.py
+```
+
+## Tests
+
+Run the integration suite with:
+
+```bash
+python -m unittest discover -s tests
 ```

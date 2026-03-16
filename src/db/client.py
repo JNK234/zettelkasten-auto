@@ -2,14 +2,48 @@
 # ABOUTME: Handles indexing and similarity search for zettels.
 
 import hashlib
+import re
 from typing import List
 
 import chromadb
 
-from src.db.embeddings import get_embedding_function, EmbeddingProvider
+from src.db.embeddings import (
+    EmbeddingProvider,
+    get_default_embedding_model,
+    get_embedding_function,
+)
 
 
-COLLECTION_NAME = "zettels"
+COLLECTION_PREFIX = "zettels"
+
+
+def _normalize_collection_component(value: str) -> str:
+    """Normalize a provider/model value for use in collection names."""
+    normalized = re.sub(r"[^a-zA-Z0-9]+", "_", value.strip())
+    normalized = re.sub(r"_+", "_", normalized).strip("_")
+    return normalized.lower() or "default"
+
+
+def get_collection_name(
+    provider: EmbeddingProvider = "openai",
+    model_name: str | None = None,
+) -> str:
+    """Return a collection name scoped to the active embedding backend."""
+    resolved_model = model_name or get_default_embedding_model(provider)
+    return (
+        f"{COLLECTION_PREFIX}__"
+        f"{_normalize_collection_component(provider)}__"
+        f"{_normalize_collection_component(resolved_model)}"
+    )
+
+
+def get_collection_metadata(
+    provider: EmbeddingProvider = "openai",
+    model_name: str | None = None,
+) -> dict[str, str]:
+    """Return metadata describing the active embedding backend."""
+    resolved_model = model_name or get_default_embedding_model(provider)
+    return {"provider": provider, "model": resolved_model}
 
 
 def get_client(db_path: str) -> chromadb.PersistentClient:
@@ -21,13 +55,36 @@ def get_collection(
     client: chromadb.PersistentClient,
     provider: EmbeddingProvider = "openai",
     model_name: str | None = None,
+    create: bool = True,
 ):
     """Gets or creates the zettels collection with configured embeddings."""
     embedding_fn = get_embedding_function(provider, model_name)
-    return client.get_or_create_collection(
-        name=COLLECTION_NAME,
-        embedding_function=embedding_fn,
-    )
+    collection_name = get_collection_name(provider, model_name)
+    if create:
+        collection = client.get_or_create_collection(
+            name=collection_name,
+            embedding_function=embedding_fn,
+            metadata=get_collection_metadata(provider, model_name),
+        )
+    else:
+        try:
+            collection = client.get_collection(
+                name=collection_name,
+                embedding_function=embedding_fn,
+            )
+        except Exception:
+            return None
+    expected_metadata = get_collection_metadata(provider, model_name)
+    existing_metadata = collection.metadata or {}
+    if (
+        existing_metadata.get("provider") != expected_metadata["provider"]
+        or existing_metadata.get("model") != expected_metadata["model"]
+    ):
+        raise ValueError(
+            "Embedding collection metadata mismatch for "
+            f"{collection.name}: expected {expected_metadata}, found {existing_metadata}"
+        )
+    return collection
 
 
 def _content_hash(content: str) -> str:
@@ -96,6 +153,7 @@ def find_similar(
     max_distance: float = 1.0,
     provider: EmbeddingProvider = "openai",
     model_name: str | None = None,
+    create: bool = True,
 ) -> List[str]:
     """Query for similar notes, returning list of titles that meet threshold.
 
@@ -109,7 +167,9 @@ def find_similar(
         provider: Embedding provider to use
         model_name: Specific model name (optional)
     """
-    collection = get_collection(client, provider, model_name)
+    collection = get_collection(client, provider, model_name, create=create)
+    if collection is None:
+        return []
 
     results = collection.query(
         query_texts=[content],
@@ -128,3 +188,52 @@ def find_similar(
         ]
         return filtered
     return []
+
+
+def get_index_drift(
+    client: chromadb.PersistentClient,
+    entries: dict[str, str],
+    provider: EmbeddingProvider = "openai",
+    model_name: str | None = None,
+    create: bool = True,
+) -> dict[str, list[str]]:
+    """Compare expected zettel entries with the active collection state."""
+    collection = get_collection(client, provider, model_name, create=create)
+    if collection is None:
+        return {
+            "missing_or_stale_ids": sorted(entries),
+            "extra_ids": [],
+        }
+    expected_hashes = {entry_id: _content_hash(content) for entry_id, content in entries.items()}
+
+    existing = collection.get(include=["metadatas"])
+    existing_ids = existing["ids"] or []
+    metadata_lookup = {
+        entry_id: metadata or {}
+        for entry_id, metadata in zip(existing_ids, existing.get("metadatas") or [])
+    }
+
+    missing_ids = sorted(
+        entry_id
+        for entry_id, content_hash in expected_hashes.items()
+        if metadata_lookup.get(entry_id, {}).get("content_hash") != content_hash
+    )
+    extra_ids = sorted(set(existing_ids) - set(expected_hashes))
+
+    return {
+        "missing_or_stale_ids": missing_ids,
+        "extra_ids": extra_ids,
+    }
+
+
+def delete_ids(
+    client: chromadb.PersistentClient,
+    ids: list[str],
+    provider: EmbeddingProvider = "openai",
+    model_name: str | None = None,
+) -> None:
+    """Delete IDs from the active collection."""
+    if not ids:
+        return
+    collection = get_collection(client, provider, model_name)
+    collection.delete(ids=ids)

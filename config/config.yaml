@@ -5,6 +5,7 @@ vault:
   root: "/Users/jnk789/Library/Mobile Documents/iCloud~md~obsidian/Documents/Brain/"
   sources_dir: "10_SOURCES"
   zettel_dir: "20_ZETTLEKASTEN"
+  bundles_dir: "110_BUNDLES"
   template_path: "60_TEMPLATES/Note Template.md"
 
 llm:
@@ -16,10 +17,20 @@ llm:
   # Gemini models: gemini-1.5-flash, gemini-1.5-pro
 
 embeddings:
-  db_path: "zettelkasten-auto/chromastores/zettledb_stf"
+  db_path: "/Users/jnk789/Developer/zettelkasten-auto/chromastores/zettledb_stf"
   provider: "sentence-transformer"  # "openai" or "sentence-transformer"
   model: "all-MiniLM-L6-v2"  # Optional: override default model
   # OpenAI default: text-embedding-3-small
   # SentenceTransformer default: all-MiniLM-L6-v2
   top_k: 5
   max_distance: 0.5  # Lower = stricter (0.3 very similar, 0.5 related, 0.8 loosely related)
+
+bundle:
+  default_depth: 1  # Max connection traversal depth (1-3)
+  default_top_k: 10  # Max similar notes from ChromaDB
+
+processing:
+  min_source_chars: 100  # Skip very short source notes
+  duplicate_max_distance: 0.15  # Tighter duplicate threshold for candidate concepts
+  chunk_target_chars: 4000  # Preferred chunk size for long source notes
+  chunk_max_chars: 6000  # Hard cap before paragraph-level splitting
