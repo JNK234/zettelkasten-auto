@@ -22,7 +22,10 @@ Tags:
 
 
 class FakeEmbeddingFunction:
-    def __call__(self, input):
+    def name(self):
+        return "fake"
+
+    def _embed(self, input):
         embeddings = []
         for text in input:
             lowered = text.lower()
@@ -35,6 +38,12 @@ class FakeEmbeddingFunction:
                 ]
             )
         return embeddings
+
+    def __call__(self, input):
+        return self._embed(input)
+
+    def embed_query(self, input):
+        return self._embed(input)
 
 
 class SequenceProvider:

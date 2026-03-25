@@ -1,12 +1,14 @@
 # ABOUTME: LLM provider implementations for concept extraction.
-# ABOUTME: Supports OpenAI, Ollama (local), and Google Gemini.
+# ABOUTME: Supports OpenAI, Ollama (local), Google Gemini, and Anthropic.
 
 import json
 import os
 from abc import ABC, abstractmethod
 from typing import Literal
 
-LLMProvider = Literal["openai", "ollama", "gemini"]
+import pydantic
+
+LLMProvider = Literal["openai", "ollama", "gemini", "anthropic"]
 
 
 class ProviderResponseError(Exception):
@@ -15,6 +17,26 @@ class ProviderResponseError(Exception):
 
 class InvalidLLMOutputError(Exception):
     """Raised when an LLM provider returns invalid JSON output."""
+
+
+class ConceptItem(pydantic.BaseModel):
+    """Schema for a single extracted concept."""
+    title: str
+    content: str
+    suggested_tags: list[str]
+    concept_type: Literal[
+        "mechanism", "pattern", "mental-model",
+        "heuristic", "observation", "gotcha",
+    ]
+    abstraction_level: Literal[
+        "concrete-example", "specific-technique",
+        "general-principle", "meta-concept",
+    ]
+
+
+class ConceptExtraction(pydantic.BaseModel):
+    """Schema for the full extraction response."""
+    concepts: list[ConceptItem]
 
 
 class BaseLLMProvider(ABC):
@@ -200,6 +222,32 @@ class GeminiProvider(BaseLLMProvider):
             raise InvalidLLMOutputError(f"Gemini returned invalid JSON: {exc}") from exc
 
 
+class AnthropicProvider(BaseLLMProvider):
+    """Anthropic API provider (Claude Sonnet, Haiku, Opus)"""
+
+    def __init__(self, model: str = "claude-sonnet-4-5"):
+        from anthropic import Anthropic
+        self.client = Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+        self.model = model
+
+    def extract(self, prompt: str, system_prompt: str):
+        try:
+            response = self.client.messages.parse(
+                model=self.model,
+                max_tokens=4096,
+                system=system_prompt,
+                output_format=ConceptExtraction,
+                messages=[{"role": "user", "content": prompt}],
+            )
+        except Exception as exc:
+            raise ProviderResponseError(f"Anthropic request failed: {exc}") from exc
+
+        if response.parsed_output is None:
+            raise InvalidLLMOutputError("Anthropic returned no parsed output")
+
+        return response.parsed_output.model_dump()
+
+
 def get_llm_provider(
     provider: LLMProvider = "openai",
     model: str | None = None,
@@ -208,7 +256,7 @@ def get_llm_provider(
     """Factory function to create LLM provider instances.
 
     Args:
-        provider: "openai", "ollama", or "gemini"
+        provider: "openai", "ollama", "gemini", or "anthropic"
         model: Model name (optional, uses provider defaults)
         **kwargs: Additional provider-specific options (e.g., base_url for Ollama)
 
@@ -226,6 +274,9 @@ def get_llm_provider(
 
     elif provider == "gemini":
         return GeminiProvider(model=model or "gemini-1.5-flash")
+
+    elif provider == "anthropic":
+        return AnthropicProvider(model=model or "claude-sonnet-4-5")
 
     else:
         raise ValueError(f"Unknown LLM provider: {provider}")
