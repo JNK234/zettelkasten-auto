@@ -43,12 +43,17 @@ vault:
   template_path: "60_TEMPLATES/Note Template.md"
 
 llm:
-  provider: "openai"
-  model: "gpt-4o-mini"
+  provider: "anthropic"  # "openai", "ollama", "gemini", or "anthropic"
+  model: "claude-sonnet-4-5"  # Model name (provider-specific)
+  base_url: "http://localhost:11434"  # Only for Ollama
+  # OpenAI models: gpt-4o, gpt-4o-mini
+  # Ollama models: llama3.1:8b, mistral:7b, qwen2.5:7b
+  # Gemini models: gemini-1.5-flash, gemini-1.5-pro
+  # Anthropic models: claude-sonnet-4-5, claude-haiku-4-5, claude-opus-4-6
 
 embeddings:
   db_path: "chromastores/zettledb"
-  provider: "sentence-transformer"
+  provider: "sentence-transformer"  # "openai" or "sentence-transformer"
   model: "all-MiniLM-L6-v2"
   top_k: 5
   max_distance: 0.5
@@ -59,9 +64,9 @@ bundle:
 
 processing:
   min_source_chars: 100
-  duplicate_max_distance: 0.15
-  chunk_target_chars: 4000
-  chunk_max_chars: 6000
+  duplicate_max_distance: 0.25
+  chunk_target_chars: 12000
+  chunk_max_chars: 16000
 ```
 
 `template_path` should point to a markdown template containing these anchors:
@@ -173,17 +178,17 @@ Concept content...
 ```text
 zettelkasten-auto/
 ├── config/
-│   └── config.yaml
+│   └── config.yaml          # All user configuration
 ├── src/
-│   ├── bundle.py
-│   ├── main.py
-│   ├── prompts.py
+│   ├── main.py              # CLI entry point, orchestration, file operations
+│   ├── prompts.py           # LLM prompt templates
+│   ├── bundle.py            # Context bundle assembly and export
 │   ├── db/
-│   │   ├── client.py
-│   │   └── embeddings.py
+│   │   ├── client.py        # ChromaDB collection management, indexing, search
+│   │   └── embeddings.py    # Embedding function factory (OpenAI, SentenceTransformer)
 │   └── llm/
-│       ├── extraction.py
-│       └── providers.py
+│       ├── extraction.py    # Concept extraction with validation
+│       └── providers.py     # LLM providers (OpenAI, Anthropic, Ollama, Gemini)
 └── tests/
     └── test_integration.py
 ```

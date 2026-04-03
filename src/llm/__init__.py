@@ -1,5 +1,5 @@
 # ABOUTME: LLM module for concept extraction.
-# ABOUTME: Supports OpenAI, Ollama, and Gemini providers.
+# ABOUTME: Supports OpenAI, Anthropic, Ollama, and Gemini providers.
 
 from src.llm.extraction import (
     InvalidLLMOutputError,

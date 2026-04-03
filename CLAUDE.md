@@ -61,15 +61,20 @@ Build a powerful yet simple system for automating Zettelkasten note creation. Th
 ### Current Structure (Keep It)
 ```
 src/
-  db.py       # ChromaDB operations only
-  llm.py      # LLM calls only
-  prompts.py  # Prompt strings only
-  main.py     # Everything else
+  main.py           # CLI entry point, orchestration, file operations
+  prompts.py        # Prompt strings only
+  bundle.py         # Context bundle assembly and export
+  db/
+    client.py       # ChromaDB collection management, indexing, similarity search
+    embeddings.py   # Embedding function factory (OpenAI, SentenceTransformer)
+  llm/
+    providers.py    # LLM provider implementations (OpenAI, Anthropic, Ollama, Gemini)
+    extraction.py   # Concept extraction logic with validation
 ```
 
 ### When to Add a New File
 - Only if it represents a truly distinct concern
-- Only if the current file exceeds 200 lines
+- Only if the current file exceeds ~300 lines
 - Only if multiple other files would import from it
 
 ### When NOT to Add a New File
@@ -77,15 +82,25 @@ src/
 - For a single function
 - For config or constants (keep in existing files or config.yaml)
 
+## Implemented Features
+
+These are already built and working:
+- Multi-provider LLM support (OpenAI, Anthropic, Ollama, Gemini) with structured output
+- SentenceTransformer and OpenAI embedding backends
+- Incremental indexing with content-hash change detection
+- Context bundle generation (from source or from note)
+- Link normalization, file renaming, backlink sync (legacy maintenance)
+- Chunking by headings/paragraphs for long sources
+- Candidate concept deduplication (title + semantic similarity)
+- Non-extractable source detection heuristic
+
 ## Future Enhancements (Do Not Implement Yet)
 
 These features may be added later but should not be built speculatively:
-- Batch processing with progress bars
-- Multiple LLM provider support (Anthropic, local)
 - MOC (Map of Content) generation
-- Bidirectional link updates
 - Web UI or TUI
 - Database migrations
+- Batch processing with progress bars
 
 ## Testing Philosophy
 
