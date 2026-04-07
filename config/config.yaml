@@ -10,7 +10,7 @@ vault:
 
 llm:
   provider: "anthropic"  # "openai", "ollama", "gemini", or "anthropic"
-  model: "claude-sonnet-4-5"  # Model name (provider-specific)
+  model: "claude-haiku-4-5"  # Model name (provider-specific)
   base_url: "http://localhost:11434"  # Only for Ollama (optional)
   # OpenAI models: gpt-4o, gpt-4o-mini
   # Ollama models: llama3.1:8b, mistral:7b, qwen2.5:7b
@@ -33,5 +33,5 @@ bundle:
 processing:
   min_source_chars: 100  # Skip very short source notes
   duplicate_max_distance: 0.25  # Duplicate threshold for candidate concepts (lower = stricter)
-  chunk_target_chars: 12000  # Preferred chunk size for long source notes
-  chunk_max_chars: 16000  # Hard cap before paragraph-level splitting
+  chunk_target_chars: 4000  # Preferred chunk size for long source notes
+  chunk_max_chars: 6000  # Hard cap before paragraph-level splitting

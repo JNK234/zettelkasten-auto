@@ -226,26 +226,41 @@ class AnthropicProvider(BaseLLMProvider):
     """Anthropic API provider (Claude Sonnet, Haiku, Opus)"""
 
     def __init__(self, model: str = "claude-sonnet-4-5"):
+        import httpx
         from anthropic import Anthropic
-        self.client = Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+        self.client = Anthropic(
+            api_key=os.environ.get("ANTHROPIC_API_KEY"),
+            timeout=httpx.Timeout(300.0, connect=10.0, read=120.0),
+        )
         self.model = model
 
     def extract(self, prompt: str, system_prompt: str):
+        json_system = (
+            f"{system_prompt}\n\n"
+            "CRITICAL: You MUST respond with raw JSON only. "
+            "No markdown, no code fences, no explanation. Just the JSON object."
+        )
         try:
-            response = self.client.messages.parse(
+            response = self.client.messages.create(
                 model=self.model,
-                max_tokens=4096,
-                system=system_prompt,
-                output_format=ConceptExtraction,
-                messages=[{"role": "user", "content": prompt}],
+                max_tokens=16384,
+                system=json_system,
+                messages=[
+                    {"role": "user", "content": prompt},
+                    {"role": "assistant", "content": "{"},
+                ],
             )
         except Exception as exc:
             raise ProviderResponseError(f"Anthropic request failed: {exc}") from exc
 
-        if response.parsed_output is None:
-            raise InvalidLLMOutputError("Anthropic returned no parsed output")
-
-        return response.parsed_output.model_dump()
+        try:
+            text = "{" + response.content[0].text
+            # Strip markdown fences if present
+            if "```" in text:
+                text = text.split("```json")[-1].split("```")[0] if "```json" in text else text.split("```")[1]
+            return json.loads(text.strip())
+        except (IndexError, AttributeError, json.JSONDecodeError) as exc:
+            raise InvalidLLMOutputError(f"Anthropic returned invalid JSON: {exc}") from exc
 
 
 def get_llm_provider(

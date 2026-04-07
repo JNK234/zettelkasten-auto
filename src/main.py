@@ -478,9 +478,9 @@ def extract_source_concepts(
                 **llm_kwargs,
             )
         except ProviderResponseError as exc:
-            diagnostics["provider_error"] = str(exc)
+            diagnostics["invalid_chunks"] += 1
             print(f"  Chunk {index}/{len(chunks)} provider error: {exc}")
-            return [], diagnostics
+            continue
         except InvalidLLMOutputError as exc:
             diagnostics["invalid_chunks"] += 1
             print(f"  Chunk {index}/{len(chunks)} invalid output: {exc}")
@@ -877,6 +877,15 @@ def cmd_process(args) -> None:
     started_unprocessed = 0
     total_created = 0
     total_duplicates_skipped = 0
+
+    already_processed = sum(
+        1 for f in source_files if is_source_processed(read_file_with_retry(f))
+    )
+    total_sources = len(source_files)
+    unprocessed = total_sources - already_processed
+    print(f"\nSources: {total_sources} total, {already_processed} processed, {unprocessed} unprocessed")
+    if limit:
+        print(f"Limit: {limit} (of {unprocessed} unprocessed)")
 
     for source_path in source_files:
         content = read_file_with_retry(source_path).strip()
