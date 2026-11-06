@@ -313,7 +313,7 @@ class RealVaultTests(unittest.TestCase):
     def test_every_parsed_link_becomes_an_edge(self):
         parsed = sum(len(n.links) + len(n.embeds) for n in self.vault.notes.values())
         self.assertEqual(len(self.graph.edges), parsed)
-        self.assertEqual(parsed, 1607)
+        self.assertEqual(parsed, 1787)
 
     def test_no_ambiguous_links_or_missing_subpaths(self):
         self.assertEqual(self.graph.ambiguous(), [])
@@ -323,11 +323,11 @@ class RealVaultTests(unittest.TestCase):
         edges = self.graph.outgoing("20_ZETTLEKASTEN/kl-penalty-in-rlhf.md")
         resolved = [e.target_path for e in edges if e.status == "resolved"]
         self.assertIn("20_ZETTLEKASTEN/reinforcement-learning-from-human-feedback-rlhf.md", resolved)  # from the Tags: line
-        self.assertIn("10_SOURCES/PPO and RLHF - Deep Dive.md", resolved)
+        self.assertIn("20_ZETTLEKASTEN/direct-preference-optimization-dpo.md", resolved)
         self.assertIn("policy-gradient-methods", self.graph.unresolved_links["20_ZETTLEKASTEN/kl-penalty-in-rlhf.md"])
         self.assertEqual(
             self.graph.backlink_sources("20_ZETTLEKASTEN/kl-penalty-in-rlhf.md"),
-            ["20_ZETTLEKASTEN/1707.06347 - Proximal Policy Optimization Algorithms.md"],
+            ["20_ZETTLEKASTEN/the-environment-not-flops-bottlenecks-agentic-rl.md"],
         )
 
     def test_explicit_path_to_missing_file_is_unresolved(self):
@@ -335,7 +335,8 @@ class RealVaultTests(unittest.TestCase):
         self.assertEqual([e.status for e in edges], ["unresolved"])
 
     def test_excalidraw_embeds_without_drawing_files_stay_unresolved(self):
-        edges = self.graph.outgoing("10_SOURCES/Databricks Labelling.md")
+        graph = LinkGraph(Vault.load(FIXTURES / "parser_cases"))
+        edges = graph.outgoing("Notes/Board embed.md")
         self.assertEqual([(e.link.is_embed, e.status) for e in edges if e.link.is_embed], [(True, "unresolved")])
 
 

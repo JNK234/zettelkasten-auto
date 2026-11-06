@@ -30,13 +30,13 @@ $PY -m pytest -q
 
 step "CLI on a copy of the sample vault"
 cp -Rp tests/fixtures/vault "$sample"
-expect "$($VAULT index "$sample")" "179 notes, 0 attachments" "parsed     179  (179 added, 0 changed, 0 deleted)" "links      1607 resolved this run"
+expect "$($VAULT index "$sample")" "180 notes, 0 attachments" "parsed     180  (180 added, 0 changed, 0 deleted)" "links      1787 resolved this run"
 expect "$($VAULT index "$sample")" "parsed     0  (index already up to date)"
 echo "Edited." >>"$sample/20_ZETTLEKASTEN/kl-penalty-in-rlhf.md"
 expect "$($VAULT index "$sample")" "parsed     1  (0 added, 1 changed, 0 deleted)" "~ 20_ZETTLEKASTEN/kl-penalty-in-rlhf.md"
-expect "$($VAULT stats "$sample")" "notes             179" "resolved        552   unresolved 1055 (581 distinct targets) · ambiguous 0"
-expect "$($VAULT health "$sample")" "unresolved links                      1055   across 581 missing targets" \
-	"orphans (no backlinks)                   7" "dead ends (no outgoing note links)      22" "empty notes                              0"
+expect "$($VAULT stats "$sample")" "notes             180" "resolved        472   unresolved 1315 (612 distinct targets) · ambiguous 0"
+expect "$($VAULT health "$sample")" "unresolved links                      1315   across 612 missing targets" \
+	"orphans (no backlinks)                  41" "dead ends (no outgoing note links)      21" "empty notes                              0"
 
 step "JSON-RPC 2.0 over stdio (vault serve)"
 rpc=$(printf '%s\n' \

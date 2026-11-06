@@ -370,7 +370,7 @@ class StoredContentTests(IncrementalTestCase):
             for source in graph.vault.notes
             for i, e in enumerate(graph.outgoing(source))
         }
-        self.assertEqual(len(stored), 1607)
+        self.assertEqual(len(stored), 1787)
         self.assertEqual(stored, expected)
 
 

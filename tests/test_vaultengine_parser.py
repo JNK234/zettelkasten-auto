@@ -6,6 +6,7 @@ from pathlib import Path
 from vaultengine import parse_file, parse_note
 
 VAULT = Path(__file__).parent / "fixtures" / "vault"
+CASES = Path(__file__).parent / "fixtures" / "parser_cases"
 REPO_ROOT = Path(__file__).parent.parent
 
 
@@ -293,39 +294,12 @@ class FixtureVaultTests(unittest.TestCase):
         return matches[0]
 
     def test_whole_vault_parses(self):
-        self.assertEqual(len(self.notes), 179)
+        self.assertEqual(len(self.notes), 180)
         self.assertTrue(all(note.frontmatter_error is None for note in self.notes.values()))
-        self.assertEqual(sum(len(n.links) for n in self.notes.values()), 1604)
-        self.assertEqual(sum(len(n.embeds) for n in self.notes.values()), 3)
+        self.assertEqual(sum(len(n.links) for n in self.notes.values()), 1787)
+        self.assertEqual(sum(len(n.embeds) for n in self.notes.values()), 0)
 
-    def test_frontmatter_note(self):
-        note = self.note("NetLogo Demo Ideas")
-        self.assertTrue(note.has_frontmatter)
-        self.assertEqual(note.frontmatter["status"], "complete")
-        self.assertEqual(
-            [t.name for t in note.tags if t.source == "frontmatter"],
-            ["netlogo", "llm-extension", "evaluation", "benchmark", "demo-ideas"],
-        )
-        self.assertEqual(note.body_start_line, 7)
-        self.assertEqual(note.headings[0].text, "2507.21504 — NetLogo Demo Ideas (llm extension)")
-        self.assertEqual(note.headings[0].line, 8)
-        # Later '---' lines are horizontal rules, not a second frontmatter block.
-        self.assertIn("2507.21504 - LLM Agent Evaluation Objectives (COMPREHENSIVE + NETLOGO)", targets(note.links))
-
-    def test_hash_comment_in_fenced_code_is_not_a_tag(self):
-        self.assertNotIn("Unzip", self.note("Agentic Benchmark Checklist").tag_names)
-
-    def test_wikilink_shaped_type_hint_in_inline_code_is_not_a_link(self):
-        note = self.note("PPO vs GRPO")
-        self.assertNotIn("list, list", targets(note.links))
-
-    def test_python_comments_in_fences_are_not_headings(self):
-        texts = [h.text for h in self.note("PPO and RLHF - Deep Dive").headings]
-        self.assertNotIn("configs/training/grpo_recovery.yaml", texts)
-        self.assertIn("6. Implementation Plan for Our Project", texts)
-
-    def test_issue_numbers_are_not_tags(self):
-        self.assertNotIn("329", self.note("tau2 hash scope zeroed").tag_names)
+    def test_no_numeric_tags_anywhere(self):
         for note in self.notes.values():
             self.assertFalse(any(tag.name.isdigit() for tag in note.tags), note.path)
 
@@ -333,16 +307,45 @@ class FixtureVaultTests(unittest.TestCase):
         urls = [link.url for link in self.note("10_SOURCES/RLHF.md").external_links]
         self.assertTrue(any("rlhf-without-rl" in url for url in urls))
 
+
+class ParserCaseTests(unittest.TestCase):
+    """Edge cases on a small synthetic vault (tests/fixtures/parser_cases)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.notes = {path.stem: parse_file(path, CASES) for path in sorted(CASES.rglob("*.md"))}
+
+    def test_frontmatter_note(self):
+        note = self.notes["Frontmatter note"]
+        self.assertTrue(note.has_frontmatter)
+        self.assertEqual(note.frontmatter["status"], "complete")
+        self.assertEqual([t.name for t in note.tags if t.source == "frontmatter"], ["parsing", "fixtures", "frontmatter"])
+        self.assertEqual(note.body_start_line, 6)
+        self.assertEqual((note.headings[0].text, note.headings[0].line), ("Frontmatter note", 7))
+        # The later '---' is a horizontal rule, not a second frontmatter block.
+        self.assertIn("Zettel with tags line", targets(note.links))
+
+    def test_hash_comment_in_fenced_code_is_not_a_tag(self):
+        self.assertNotIn("Unzip", self.notes["Fenced code"].tag_names)
+
+    def test_wikilink_shaped_type_hint_in_inline_code_is_not_a_link(self):
+        self.assertNotIn("list, list", targets(self.notes["Fenced code"].links))
+
+    def test_python_comments_in_fences_are_not_headings(self):
+        texts = [h.text for h in self.notes["Fenced code"].headings]
+        self.assertNotIn("configs/training/run.yaml", texts)
+        self.assertIn("6. Implementation Plan", texts)
+
+    def test_issue_numbers_are_not_tags(self):
+        self.assertEqual(self.notes["Issue numbers"].tag_names, ["baby", "triage"])
+
     def test_excalidraw_embeds(self):
-        self.assertEqual(
-            targets(self.note("Databricks Labelling").embeds),
-            ["Databricks Labelling 2025-07-23 15.45.10.excalidraw"],
-        )
+        self.assertEqual(targets(self.notes["Board embed"].embeds), ["Board 2026-01-01 10.00.00.excalidraw"])
 
     def test_zettel_tags_line_is_wikilinks_and_status_is_a_tag(self):
-        note = self.note("1707.06347 - Proximal Policy Optimization Algorithms")
+        note = self.notes["Zettel with tags line"]
         self.assertEqual(note.tag_names, ["baby"])
-        self.assertIn("reinforcement-learning", targets(note.links))
+        self.assertEqual(targets(note.links)[:2], ["reinforcement-learning", "policy-gradient-methods"])
 
 
 class IsolationTests(unittest.TestCase):

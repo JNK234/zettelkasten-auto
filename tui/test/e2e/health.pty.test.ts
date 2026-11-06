@@ -101,26 +101,26 @@ describe('vault-tui in a real terminal', () => {
 
 		// Start-up: banner, then the server indexes the vault and the status line fills in.
 		await app.waitFor('✻ vault-tui');
-		await app.waitFor('179 notes · 1,607 links  ·  ● index fresh');
+		await app.waitFor('180 notes · 1,787 links  ·  ● index fresh');
 		expect(serverProcesses()).toHaveLength(1);
 
 		await app.type('/health');
 		await app.type('\r');
-		const output = await app.waitFor('Dead ends (showing 5 of 22)');
+		const output = await app.waitFor('Dead ends (showing 5 of 21)');
 
 		const report = output.slice(output.lastIndexOf('⏺ Vault health'));
 		for (const line of [
-			'✗ 1,055 unresolved links (581 missing targets)',
+			'✗ 1,315 unresolved links (612 missing targets)',
 			'✓ 0 ambiguous links',
 			'✓ 0 missing heading/block targets',
-			'! 7 orphans (no backlinks)',
-			'! 22 dead ends (no outgoing note links)',
+			'! 41 orphans (no backlinks)',
+			'! 21 dead ends (no outgoing note links)',
 			'✓ 0 duplicate basenames',
 			'✓ 0 empty notes',
-			'Unresolved targets (showing 5 of 581)',
-			'rl-environment-design  63 links from 63 notes',
-			'discourse-graph  62 links from 62 notes',
-			'Orphans (showing 5 of 7)',
+			'Unresolved targets (showing 5 of 612)',
+			'rl-environment-design  52 links from 52 notes',
+			'discourse-graph  40 links from 40 notes',
+			'Orphans (showing 5 of 41)',
 		]) {
 			expect(report).toContain(line);
 		}

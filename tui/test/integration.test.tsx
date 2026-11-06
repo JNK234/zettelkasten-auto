@@ -46,9 +46,9 @@ afterAll(() => {
 describe('against the real vaultengine server', () => {
 	test('typed API round trips', async () => {
 		const build = await api.build();
-		expect(build.parsed).toHaveLength(179);
+		expect(build.parsed).toHaveLength(180);
 		const status = await api.status();
-		expect(status).toMatchObject({built: true, stale: false, notes: 179, links: 1607});
+		expect(status).toMatchObject({built: true, stale: false, notes: 180, links: 1787});
 		const picked = await api.pick({query: 'klpen', limit: 1});
 		expect(picked.results[0]?.path).toBe('20_ZETTLEKASTEN/kl-penalty-in-rlhf.md');
 		const note = await api.note('20_ZETTLEKASTEN/kl-penalty-in-rlhf.md');
@@ -60,7 +60,7 @@ describe('against the real vaultengine server', () => {
 
 	test('the App: status line, @ picker and /note, end to end', async () => {
 		const app = renderApp({api, vaultPath: join(workdir, 'vault')});
-		await app.waitFor('179 notes · 1,607 links  ·  ● index fresh', 15_000);
+		await app.waitFor('180 notes · 1,787 links  ·  ● index fresh', 15_000);
 		await app.type('/note @klpen');
 		await app.waitFor('❯ kl-penalty-in-rlhf');
 		await app.press(keys.enter);
@@ -68,9 +68,9 @@ describe('against the real vaultengine server', () => {
 		await app.press(keys.enter);
 		const frame = await app.waitFor('Links in (1)', 10_000);
 		expect(frame).toContain('⏺ kl-penalty-in-rlhf  20_ZETTLEKASTEN/kl-penalty-in-rlhf.md');
-		expect(frame).toContain('Links out (10: 6 resolved)');
+		expect(frame).toContain('Links out (10: 4 resolved)');
 		expect(frame).toContain('✗ policy-gradient-methods  not in vault');
-		expect(frame).toContain('← 1707.06347 - Proximal Policy Optimization Algorithms  20_ZETTLEKASTEN');
+		expect(frame).toContain('← the-environment-not-flops-bottlenecks-agentic-rl  20_ZETTLEKASTEN');
 	});
 
 	test('when the server dies, requests fail with its exit reason', async () => {

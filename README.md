@@ -43,8 +43,6 @@ cp -Rp tests/fixtures/vault /tmp/sample-vault
 ```
 
 In the outputs below, timings, timestamps and the index date differ on your machine; everything else should match.
-The sample vault's file names `ΓÇö` and `┬╖` are really `—` and `·`, garbled when the vault was zipped.
-That is why those two notes show up as orphans: links to them use the real characters.
 
 #### 1. Build the index
 
@@ -52,15 +50,15 @@ That is why those two notes show up as orphans: links to them use the real chara
 vault index /tmp/sample-vault
 ```
 ```
-Indexed /tmp/sample-vault in 1.16s
+Indexed /tmp/sample-vault in 0.41s
   index      /tmp/sample-vault/.vaultengine/index.sqlite
-  files      179 notes, 0 attachments
-  parsed     179  (179 added, 0 changed, 0 deleted)
-  read       179 notes hashed, 0 skipped by size/mtime
-  links      1607 resolved this run, 0 changed status in notes that were not re-parsed
-    + 10_SOURCES/2310.11667 - SOTOPIA Interactive Evaluation for Social Intelligence (COMPREHENSIVE + NETLOGO).md
+  files      180 notes, 0 attachments
+  parsed     180  (180 added, 0 changed, 0 deleted)
+  read       180 notes hashed, 0 skipped by size/mtime
+  links      1787 resolved this run, 0 changed status in notes that were not re-parsed
+    + 10_SOURCES/2312.06942 - AI Control - Improving Safety Despite Intentional Subversion.md
     …
-  … 169 more (--limit 0 shows all)
+  … 170 more (--limit 0 shows all)
 ```
 
 Run it again: nothing is read or parsed.
@@ -69,11 +67,11 @@ Run it again: nothing is read or parsed.
 vault index /tmp/sample-vault
 ```
 ```
-Indexed /tmp/sample-vault in 0.02s
+Indexed /tmp/sample-vault in 0.01s
   index      /tmp/sample-vault/.vaultengine/index.sqlite
-  files      179 notes, 0 attachments
+  files      180 notes, 0 attachments
   parsed     0  (index already up to date)
-  read       0 notes hashed, 179 skipped by size/mtime
+  read       0 notes hashed, 180 skipped by size/mtime
   links      0 resolved this run, 0 changed status in notes that were not re-parsed
 ```
 
@@ -85,7 +83,7 @@ vault index /tmp/sample-vault
 ```
 ```
   parsed     1  (0 added, 1 changed, 0 deleted)
-  read       1 note hashed, 178 skipped by size/mtime
+  read       1 note hashed, 179 skipped by size/mtime
   links      11 resolved this run, 0 changed status in notes that were not re-parsed
     ~ 20_ZETTLEKASTEN/kl-penalty-in-rlhf.md
 ```
@@ -97,33 +95,38 @@ vault stats /tmp/sample-vault --top 3
 ```
 ```
 Vault stats: /tmp/sample-vault
-  index 2026-11-06T03:43:23+00:00 (up to date)
+  index 2026-11-06T20:29:16+00:00 (up to date)
 
-  notes             179   (1 with frontmatter, 0 frontmatter errors)
+  notes             180   (0 with frontmatter, 0 frontmatter errors)
   attachments         0
-  links            1607   wikilinks 1607 · markdown 0 · embeds 3
-    resolved        552   unresolved 1055 (581 distinct targets) · ambiguous 0
-  note edges        519   distinct note→note connections
-  tags              221   uses of 29 distinct tags
-  properties          4   distinct keys
+  links            1787   wikilinks 1787 · markdown 0 · embeds 0
+    resolved        472   unresolved 1315 (612 distinct targets) · ambiguous 0
+  note edges        439   distinct note→note connections
+  tags              241   uses of 28 distinct tags
+  properties          0   distinct keys
   aliases             0
-  headings         1499
+  headings         1391
   blocks              0
 
 Notes per top-level folder
-     70  20_ZETTLEKASTEN
-     67  50_MOC
-     42  10_SOURCES
+    109  20_ZETTLEKASTEN
+     43  50_MOC
+     28  10_SOURCES
 
 Top tags (notes)
-    100  #baby
-     48  #evidence
-     11  #supported
-…
+    133  #baby
+     31  #evidence
+     15  #ai-safety
+
+Most linked (linking notes / links)
+   26 / 27  20_ZETTLEKASTEN/reinforcement-learning-in-language-models.md
+   20 / 22  20_ZETTLEKASTEN/reward-hacking-as-specification-gaming.md
+   16 / 16  20_ZETTLEKASTEN/reward.md
+
 Most wanted missing notes (linking notes / links)
-   63 / 63  rl-environment-design
-   62 / 62  discourse-graph
-   11 / 15  2406.12045 - Tau-Bench (Tool-Agent-User Interaction)
+   52 / 52  rl-environment-design
+   40 / 40  discourse-graph
+   31 / 31  evaluation-methodology
 ```
 
 ```bash
@@ -131,24 +134,27 @@ vault health /tmp/sample-vault --limit 3
 ```
 ```
 Vault health: /tmp/sample-vault
-  index 2026-11-06T03:43:23+00:00 (up to date)
+  index 2026-11-06T20:29:16+00:00 (up to date)
 
-  unresolved links                      1055   across 581 missing targets
+  unresolved links                      1315   across 612 missing targets
   ambiguous links                          0
   missing heading/block targets            0
-  orphans (no backlinks)                   7
-  dead ends (no outgoing note links)      22
+  orphans (no backlinks)                  41
+  dead ends (no outgoing note links)      21
   duplicate basenames                      0
   empty notes                              0
 
-Unresolved link targets (581)
-  rl-environment-design  — 63 links from 63 notes, e.g. 50_MOC/discourse/rl-environment-design/CLM - A fixed typed contract should separate environment from trainer.md:3 (+62 more notes)
+Unresolved link targets (612)
+  rl-environment-design  — 52 links from 52 notes, e.g. 20_ZETTLEKASTEN/agentic-tasks-are-artifact-bundles-not-dataset-rows.md:5 (+51 more notes)
+  discourse-graph  — 40 links from 40 notes, e.g. 50_MOC/discourse/rl-environment-design/CLM - A fixed typed contract should separate environment from trainer.md:3 (+39 more notes)
+  evaluation-methodology  — 31 links from 31 notes, e.g. 20_ZETTLEKASTEN/a-bounty-list-is-a-map-of-what-cannot-be-verified.md:3 (+30 more notes)
+  … 609 more (--limit 0 shows all)
   …
 ```
 
 Add `--json` to `index`, `stats` or `health` for machine-readable output, e.g.
 `vault health /tmp/sample-vault --json | python3 -c "import sys, json; print(json.load(sys.stdin)['summary'])"` prints
-`{'unresolved_links': 1055, 'unresolved_targets': 581, 'ambiguous_links': 0, 'missing_subpaths': 0, 'orphans': 7, 'dead_ends': 22, 'duplicate_basenames': 0, 'empty_notes': 0}`.
+`{'unresolved_links': 1315, 'unresolved_targets': 612, 'ambiguous_links': 0, 'missing_subpaths': 0, 'orphans': 41, 'dead_ends': 21, 'duplicate_basenames': 0, 'empty_notes': 0}`.
 
 If files change after indexing, `stats` and `health` still answer from the index and print a warning on stderr:
 ``warning: index is out of date (1 added, 0 changed, 0 deleted); run `vault index` to refresh``.
@@ -168,9 +174,9 @@ print("backlinks:", graph.backlink_sources(note))
 EOF
 ```
 ```
-179 notes, 1607 links, 552 resolved
+180 notes, 1787 links, 472 resolved
 tags: ['baby']
-backlinks: ['20_ZETTLEKASTEN/1707.06347 - Proximal Policy Optimization Algorithms.md']
+backlinks: ['20_ZETTLEKASTEN/the-environment-not-flops-bottlenecks-agentic-rl.md']
 ```
 
 #### 4. The engine as a JSON-RPC 2.0 server
@@ -186,7 +192,7 @@ printf '%s\n' \
   | vault serve /tmp/sample-vault
 ```
 ```
-{"jsonrpc":"2.0","id":1,"result":{"query":"klpen","total":7,"results":[{"path":"20_ZETTLEKASTEN/kl-penalty-in-rlhf.md","title":"kl-penalty-in-rlhf","matched_field":"title","matched_text":"kl-penalty-in-rlhf","score":141,"positions":[0,1,3,4,5]}]}}
+{"jsonrpc":"2.0","id":1,"result":{"query":"klpen","total":3,"results":[{"path":"20_ZETTLEKASTEN/kl-penalty-in-rlhf.md","title":"kl-penalty-in-rlhf","matched_field":"title","matched_text":"kl-penalty-in-rlhf","score":141,"positions":[0,1,3,4,5]}]}}
 {"jsonrpc":"2.0","id":2,"error":{"code":-32601,"message":"Method not found","data":{"method":"notes.delete","available":["health.report","index.build","index.status","note.get","notes.pick","vault.stats"]}}}
 {"jsonrpc":"2.0","id":3,"error":{"code":-32600,"message":"Invalid Request","data":[{"loc":["jsonrpc"],"msg":"Input should be '2.0'","type":"literal_error"}]}}
 ```
@@ -199,13 +205,13 @@ vault-tui --vault /tmp/sample-vault
 ```
 
 A banner appears, the index is brought up to date, and the status line reads
-`◆ sample-vault  ·  179 notes · 1,607 links  ·  ● index fresh`. Then try:
+`◆ sample-vault  ·  180 notes · 1,787 links  ·  ● index fresh`. Then try:
 
 | Type | You should see |
 |---|---|
-| `/health` Enter | `⏺ Vault health` with `✗ 1,055 unresolved links (581 missing targets)`, `! 7 orphans (no backlinks)`, `! 22 dead ends …`, `✓ 0 empty notes` and the top 5 of each list |
-| `/stats` Enter | `⏺ Vault stats` with `179 notes · 0 attachments · 1 with frontmatter` and top tags / most linked / most wanted |
-| `/note @klpen`, then Enter twice | the picker shows `❯ kl-penalty-in-rlhf  20_ZETTLEKASTEN`; the first Enter inserts it, the second shows the note: `Links out (10: 6 resolved)`, `Links in (1)` |
+| `/health` Enter | `⏺ Vault health` with `✗ 1,315 unresolved links (612 missing targets)`, `! 41 orphans (no backlinks)`, `! 21 dead ends …`, `✓ 0 empty notes` and the top 5 of each list |
+| `/stats` Enter | `⏺ Vault stats` with `180 notes · 0 attachments · 0 with frontmatter` and top tags / most linked / most wanted |
+| `/note @klpen`, then Enter twice | the picker shows `❯ kl-penalty-in-rlhf  20_ZETTLEKASTEN`; the first Enter inserts it, the second shows the note: `Links out (10: 4 resolved)`, `Links in (1)` |
 | `/` | the list of commands; Tab completes, Enter runs the highlighted one |
 | ↑ | the previous command |
 | `/help` | all commands and keys |
