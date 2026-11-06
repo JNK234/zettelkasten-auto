@@ -30,3 +30,8 @@ Thumbs.db
 .zettel/
 *.log
 chromastores/
+
+# Node (terminal UI)
+node_modules/
+.pytest_cache/
+coverage/
