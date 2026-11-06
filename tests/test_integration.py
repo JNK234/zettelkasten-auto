@@ -147,13 +147,14 @@ class IntegrationTests(unittest.TestCase):
             self.assertEqual(list(zettel_dir.glob("*.md")), [])
             self.assertNotIn("#processed", source_path.read_text(encoding="utf-8"))
 
-            client = get_client(str(db_path))
-            collection = get_collection(
-                client,
-                config["embeddings"]["provider"],
-                config["embeddings"]["model"],
-                create=False,
-            )
+            with patch("src.db.client.get_embedding_function", return_value=FakeEmbeddingFunction()):
+                client = get_client(str(db_path))
+                collection = get_collection(
+                    client,
+                    config["embeddings"]["provider"],
+                    config["embeddings"]["model"],
+                    create=False,
+                )
             self.assertIsNone(collection)
         finally:
             tempdir.cleanup()

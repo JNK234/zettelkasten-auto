@@ -825,7 +825,14 @@ def cmd_process(args) -> None:
     """Process sources, extract concepts, and create zettels."""
     config = load_config()
     vault_root = Path(config["vault"]["root"]).expanduser()
-    sources_dir = resolve_path(vault_root, config["vault"]["sources_dir"])
+    source_dir_override = getattr(args, "source_dir", None)
+    if source_dir_override:
+        sources_dir = resolve_path(vault_root, source_dir_override)
+        if not sources_dir.is_dir():
+            print(f"Error: source directory not found: {sources_dir}")
+            sys.exit(1)
+    else:
+        sources_dir = resolve_path(vault_root, config["vault"]["sources_dir"])
     zettel_dir = resolve_path(vault_root, config["vault"]["zettel_dir"])
     template_path = resolve_path(vault_root, config["vault"]["template_path"])
 
@@ -1184,6 +1191,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=0,
         help="Limit the number of unprocessed source files to handle",
     )
+    process_parser.add_argument(
+        "--source-dir",
+        dest="source_dir",
+        help="Override source directory (relative to vault root or absolute)",
+    )
 
     sync_parser = subparsers.add_parser(
         "sync-backlinks",
@@ -1253,7 +1265,104 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Preview the bundle without writing files; source mode also requires a fresh index",
     )
+    search_parser = subparsers.add_parser(
+        "search",
+        help="Semantic search across indexed zettels",
+    )
+    search_parser.add_argument(
+        "query",
+        help="Text to search for",
+    )
+    search_parser.add_argument(
+        "--top-k",
+        type=int,
+        dest="top_k",
+        default=10,
+        help="Max results to return (default: 10)",
+    )
+    search_parser.add_argument(
+        "--max-distance",
+        type=float,
+        dest="max_distance",
+        default=0.8,
+        help="Distance threshold (default: 0.8, lower=stricter)",
+    )
+
+    list_tags_parser = subparsers.add_parser(
+        "list-tags",
+        help="List most common tags across zettels",
+    )
+    list_tags_parser.add_argument(
+        "--min-count",
+        type=int,
+        dest="min_count",
+        default=2,
+        help="Minimum occurrence count to include (default: 2)",
+    )
+
     return parser
+
+
+def cmd_search(args) -> None:
+    """Semantic search across indexed zettels, output as JSON."""
+    import json
+
+    if not args.query.strip():
+        print(json.dumps([]))
+        return
+
+    config = load_config()
+    vault_root = Path(config["vault"]["root"]).expanduser()
+    db_path = resolve_path(vault_root, config["embeddings"]["db_path"])
+    embedding_provider = config["embeddings"].get("provider", "openai")
+    embedding_model = config["embeddings"].get("model")
+
+    client = get_client(str(db_path))
+    try:
+        collection = get_collection(client, embedding_provider, embedding_model, create=False)
+    except Exception:
+        print(json.dumps({"error": "No index found. Run 'zettel rebuild-index' first."}))
+        return
+    if collection is None:
+        print(json.dumps({"error": "No index found. Run 'zettel rebuild-index' first."}))
+        return
+
+    results = collection.query(
+        query_texts=[args.query],
+        n_results=args.top_k,
+        include=["distances"],
+    )
+
+    output = []
+    if results["ids"] and results["ids"][0]:
+        for title, distance in zip(results["ids"][0], results["distances"][0]):
+            if distance <= args.max_distance:
+                output.append({"title": title, "distance": round(distance, 4)})
+
+    print(json.dumps(output, indent=2))
+
+
+def cmd_list_tags(args) -> None:
+    """List most common tags across all zettels, output as JSON."""
+    import json
+
+    config = load_config()
+    vault_root = Path(config["vault"]["root"]).expanduser()
+    zettel_dir = resolve_path(vault_root, config["vault"]["zettel_dir"])
+
+    tag_counts: Counter[str] = Counter()
+    for md_file in list_markdown_files(zettel_dir):
+        content = read_file_with_retry(md_file)
+        tags = extract_tags(content)
+        for tag in tags:
+            tag_counts[normalize_link(tag)] += 1
+
+    output = [
+        {"tag": tag, "count": count}
+        for tag, count in tag_counts.most_common()
+        if count >= args.min_count
+    ]
+    print(json.dumps(output, indent=2))
 
 
 def main() -> None:
@@ -1284,6 +1393,10 @@ def main() -> None:
         cmd_rebuild_index(args)
     elif args.command == "bundle":
         cmd_bundle(args)
+    elif args.command == "search":
+        cmd_search(args)
+    elif args.command == "list-tags":
+        cmd_list_tags(args)
 
 
 if __name__ == "__main__":

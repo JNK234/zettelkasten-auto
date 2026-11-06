@@ -28,6 +28,7 @@ Thumbs.db
 # Project specific
 .claude/
 .zettel/
+.vaultengine/
 *.log
 chromastores/
 
@@ -35,3 +36,6 @@ chromastores/
 node_modules/
 .pytest_cache/
 coverage/
+
+# Terminal UI
+tui/dist/

@@ -1,0 +1,2089 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:vaultengine:rpc",
+  "title": "vaultengine JSON-RPC 2.0 API",
+  "description": "JSON-RPC 2.0 over stdio: one UTF-8 JSON message per line, in both directions. Params are by-name objects. The root schema accepts a single message or a batch.",
+  "anyOf": [
+    {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Request"
+        },
+        {
+          "$ref": "#/$defs/Response"
+        }
+      ]
+    },
+    {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/Request"
+          },
+          {
+            "$ref": "#/$defs/Response"
+          }
+        ]
+      }
+    }
+  ],
+  "x-methods": {
+    "index.build": {
+      "summary": "Create or incrementally update the index.",
+      "params": {
+        "$ref": "#/$defs/IndexBuildParams"
+      },
+      "result": {
+        "$ref": "#/$defs/IndexBuildResult"
+      },
+      "request": {
+        "$ref": "#/$defs/IndexBuildRequest"
+      },
+      "response": {
+        "$ref": "#/$defs/IndexBuildResponse"
+      }
+    },
+    "index.status": {
+      "summary": "Whether the index exists and is up to date.",
+      "params": {
+        "$ref": "#/$defs/IndexStatusParams"
+      },
+      "result": {
+        "$ref": "#/$defs/IndexStatusResult"
+      },
+      "request": {
+        "$ref": "#/$defs/IndexStatusRequest"
+      },
+      "response": {
+        "$ref": "#/$defs/IndexStatusResponse"
+      }
+    },
+    "vault.stats": {
+      "summary": "Summary numbers for the indexed vault.",
+      "params": {
+        "$ref": "#/$defs/VaultStatsParams"
+      },
+      "result": {
+        "$ref": "#/$defs/VaultStatsResult"
+      },
+      "request": {
+        "$ref": "#/$defs/VaultStatsRequest"
+      },
+      "response": {
+        "$ref": "#/$defs/VaultStatsResponse"
+      }
+    },
+    "health.report": {
+      "summary": "Link and structure problems.",
+      "params": {
+        "$ref": "#/$defs/HealthReportParams"
+      },
+      "result": {
+        "$ref": "#/$defs/HealthReportResult"
+      },
+      "request": {
+        "$ref": "#/$defs/HealthReportRequest"
+      },
+      "response": {
+        "$ref": "#/$defs/HealthReportResponse"
+      }
+    },
+    "notes.pick": {
+      "summary": "Fuzzy-find notes by title and alias.",
+      "params": {
+        "$ref": "#/$defs/NotesPickParams"
+      },
+      "result": {
+        "$ref": "#/$defs/NotesPickResult"
+      },
+      "request": {
+        "$ref": "#/$defs/NotesPickRequest"
+      },
+      "response": {
+        "$ref": "#/$defs/NotesPickResponse"
+      }
+    },
+    "note.get": {
+      "summary": "Properties, tags, headings, blocks and links in/out of one note.",
+      "params": {
+        "$ref": "#/$defs/NoteGetParams"
+      },
+      "result": {
+        "$ref": "#/$defs/NoteGetResult"
+      },
+      "request": {
+        "$ref": "#/$defs/NoteGetRequest"
+      },
+      "response": {
+        "$ref": "#/$defs/NoteGetResponse"
+      }
+    }
+  },
+  "x-errors": {
+    "-32700": "Parse error",
+    "-32600": "Invalid Request",
+    "-32601": "Method not found",
+    "-32602": "Invalid params",
+    "-32603": "Internal error",
+    "-32001": "Index not built",
+    "-32002": "Note not found"
+  },
+  "$defs": {
+    "AmbiguousLink": {
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "line": {
+          "title": "Line",
+          "type": "integer"
+        },
+        "raw": {
+          "title": "Raw",
+          "type": "string"
+        },
+        "candidates": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Candidates",
+          "type": "array"
+        }
+      },
+      "required": [
+        "source",
+        "line",
+        "raw",
+        "candidates"
+      ],
+      "title": "AmbiguousLink",
+      "type": "object"
+    },
+    "BlockItem": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "line": {
+          "title": "Line",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "line"
+      ],
+      "title": "BlockItem",
+      "type": "object"
+    },
+    "DuplicateName": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "paths": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Paths",
+          "type": "array"
+        }
+      },
+      "required": [
+        "name",
+        "paths"
+      ],
+      "title": "DuplicateName",
+      "type": "object"
+    },
+    "ErrorObject": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "title": "Code",
+          "type": "integer"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "data": {
+          "default": null,
+          "title": "Data"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "title": "ErrorObject",
+      "type": "object"
+    },
+    "ErrorResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Id"
+        },
+        "error": {
+          "$ref": "#/$defs/ErrorObject"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "error"
+      ],
+      "title": "ErrorResponse",
+      "type": "object"
+    },
+    "FolderCount": {
+      "additionalProperties": false,
+      "properties": {
+        "folder": {
+          "title": "Folder",
+          "type": "string"
+        },
+        "notes": {
+          "title": "Notes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "folder",
+        "notes"
+      ],
+      "title": "FolderCount",
+      "type": "object"
+    },
+    "HeadingItem": {
+      "additionalProperties": false,
+      "properties": {
+        "level": {
+          "title": "Level",
+          "type": "integer"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "line": {
+          "title": "Line",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "level",
+        "text",
+        "line"
+      ],
+      "title": "HeadingItem",
+      "type": "object"
+    },
+    "HealthReportParams": {
+      "additionalProperties": false,
+      "properties": {
+        "limit": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Max items per category (null = all). Summary counts are never limited.",
+          "title": "Limit"
+        }
+      },
+      "title": "HealthReportParams",
+      "type": "object"
+    },
+    "HealthReportRequest": {
+      "additionalProperties": false,
+      "description": "Link and structure problems. Omit \"id\" to send a notification (no response).",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "method": {
+          "const": "health.report",
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/HealthReportParams"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "method"
+      ],
+      "title": "HealthReportRequest",
+      "type": "object"
+    },
+    "HealthReportResponse": {
+      "additionalProperties": false,
+      "description": "Successful response to health.report.",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Id"
+        },
+        "result": {
+          "$ref": "#/$defs/HealthReportResult"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "result"
+      ],
+      "title": "HealthReportResponse",
+      "type": "object"
+    },
+    "HealthReportResult": {
+      "additionalProperties": false,
+      "properties": {
+        "summary": {
+          "$ref": "#/$defs/HealthSummary"
+        },
+        "unresolved_links": {
+          "items": {
+            "$ref": "#/$defs/UnresolvedTarget"
+          },
+          "title": "Unresolved Links",
+          "type": "array"
+        },
+        "ambiguous_links": {
+          "items": {
+            "$ref": "#/$defs/AmbiguousLink"
+          },
+          "title": "Ambiguous Links",
+          "type": "array"
+        },
+        "missing_subpaths": {
+          "items": {
+            "$ref": "#/$defs/MissingSubpath"
+          },
+          "title": "Missing Subpaths",
+          "type": "array"
+        },
+        "orphans": {
+          "description": "Notes no other note links to.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Orphans",
+          "type": "array"
+        },
+        "dead_ends": {
+          "description": "Notes with no resolved links to another note.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Dead Ends",
+          "type": "array"
+        },
+        "duplicate_basenames": {
+          "items": {
+            "$ref": "#/$defs/DuplicateName"
+          },
+          "title": "Duplicate Basenames",
+          "type": "array"
+        },
+        "empty_notes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Empty Notes",
+          "type": "array"
+        },
+        "limit": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Limit"
+        }
+      },
+      "required": [
+        "summary",
+        "unresolved_links",
+        "ambiguous_links",
+        "missing_subpaths",
+        "orphans",
+        "dead_ends",
+        "duplicate_basenames",
+        "empty_notes",
+        "limit"
+      ],
+      "title": "HealthReportResult",
+      "type": "object"
+    },
+    "HealthSummary": {
+      "additionalProperties": false,
+      "properties": {
+        "unresolved_links": {
+          "title": "Unresolved Links",
+          "type": "integer"
+        },
+        "unresolved_targets": {
+          "title": "Unresolved Targets",
+          "type": "integer"
+        },
+        "ambiguous_links": {
+          "title": "Ambiguous Links",
+          "type": "integer"
+        },
+        "missing_subpaths": {
+          "title": "Missing Subpaths",
+          "type": "integer"
+        },
+        "orphans": {
+          "title": "Orphans",
+          "type": "integer"
+        },
+        "dead_ends": {
+          "title": "Dead Ends",
+          "type": "integer"
+        },
+        "duplicate_basenames": {
+          "title": "Duplicate Basenames",
+          "type": "integer"
+        },
+        "empty_notes": {
+          "title": "Empty Notes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "unresolved_links",
+        "unresolved_targets",
+        "ambiguous_links",
+        "missing_subpaths",
+        "orphans",
+        "dead_ends",
+        "duplicate_basenames",
+        "empty_notes"
+      ],
+      "title": "HealthSummary",
+      "type": "object"
+    },
+    "IncomingLink": {
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "line": {
+          "title": "Line",
+          "type": "integer"
+        },
+        "raw": {
+          "title": "Raw",
+          "type": "string"
+        },
+        "is_embed": {
+          "title": "Is Embed",
+          "type": "boolean"
+        },
+        "heading_path": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Heading Path",
+          "type": "array"
+        },
+        "block_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Block Id"
+        },
+        "subpath_status": {
+          "anyOf": [
+            {
+              "enum": [
+                "found",
+                "missing",
+                "not_checked"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Subpath Status"
+        }
+      },
+      "required": [
+        "source",
+        "line",
+        "raw",
+        "is_embed",
+        "heading_path",
+        "block_id",
+        "subpath_status"
+      ],
+      "title": "IncomingLink",
+      "type": "object"
+    },
+    "IndexBuildParams": {
+      "additionalProperties": false,
+      "properties": {
+        "full": {
+          "default": false,
+          "description": "Re-parse every note and re-resolve every link.",
+          "title": "Full",
+          "type": "boolean"
+        }
+      },
+      "title": "IndexBuildParams",
+      "type": "object"
+    },
+    "IndexBuildRequest": {
+      "additionalProperties": false,
+      "description": "Create or incrementally update the index. Omit \"id\" to send a notification (no response).",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "method": {
+          "const": "index.build",
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/IndexBuildParams"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "method"
+      ],
+      "title": "IndexBuildRequest",
+      "type": "object"
+    },
+    "IndexBuildResponse": {
+      "additionalProperties": false,
+      "description": "Successful response to index.build.",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Id"
+        },
+        "result": {
+          "$ref": "#/$defs/IndexBuildResult"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "result"
+      ],
+      "title": "IndexBuildResponse",
+      "type": "object"
+    },
+    "IndexBuildResult": {
+      "additionalProperties": false,
+      "properties": {
+        "vault": {
+          "title": "Vault",
+          "type": "string"
+        },
+        "db": {
+          "title": "Db",
+          "type": "string"
+        },
+        "notes": {
+          "title": "Notes",
+          "type": "integer"
+        },
+        "attachments": {
+          "title": "Attachments",
+          "type": "integer"
+        },
+        "added": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Added",
+          "type": "array"
+        },
+        "changed": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Changed",
+          "type": "array"
+        },
+        "forced": {
+          "description": "Unchanged notes re-parsed because of a full run.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Forced",
+          "type": "array"
+        },
+        "deleted": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Deleted",
+          "type": "array"
+        },
+        "attachments_added": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Attachments Added",
+          "type": "array"
+        },
+        "attachments_deleted": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Attachments Deleted",
+          "type": "array"
+        },
+        "hashed": {
+          "description": "Note files read and hashed.",
+          "title": "Hashed",
+          "type": "integer"
+        },
+        "parsed": {
+          "description": "added + changed + forced, sorted.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Parsed",
+          "type": "array"
+        },
+        "full_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Full Reason"
+        },
+        "links_checked": {
+          "description": "Links re-resolved this run.",
+          "title": "Links Checked",
+          "type": "integer"
+        },
+        "links_changed_elsewhere": {
+          "description": "Of those, links in notes not re-parsed whose result changed.",
+          "title": "Links Changed Elsewhere",
+          "type": "integer"
+        },
+        "seconds": {
+          "title": "Seconds",
+          "type": "number"
+        }
+      },
+      "required": [
+        "vault",
+        "db",
+        "notes",
+        "attachments",
+        "added",
+        "changed",
+        "forced",
+        "deleted",
+        "attachments_added",
+        "attachments_deleted",
+        "hashed",
+        "parsed",
+        "full_reason",
+        "links_checked",
+        "links_changed_elsewhere",
+        "seconds"
+      ],
+      "title": "IndexBuildResult",
+      "type": "object"
+    },
+    "IndexStatusParams": {
+      "additionalProperties": false,
+      "properties": {},
+      "title": "IndexStatusParams",
+      "type": "object"
+    },
+    "IndexStatusRequest": {
+      "additionalProperties": false,
+      "description": "Whether the index exists and is up to date. Omit \"id\" to send a notification (no response).",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "method": {
+          "const": "index.status",
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/IndexStatusParams"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "method"
+      ],
+      "title": "IndexStatusRequest",
+      "type": "object"
+    },
+    "IndexStatusResponse": {
+      "additionalProperties": false,
+      "description": "Successful response to index.status.",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Id"
+        },
+        "result": {
+          "$ref": "#/$defs/IndexStatusResult"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "result"
+      ],
+      "title": "IndexStatusResponse",
+      "type": "object"
+    },
+    "IndexStatusResult": {
+      "additionalProperties": false,
+      "properties": {
+        "vault": {
+          "title": "Vault",
+          "type": "string"
+        },
+        "db": {
+          "title": "Db",
+          "type": "string"
+        },
+        "built": {
+          "title": "Built",
+          "type": "boolean"
+        },
+        "last_indexed_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Last Indexed At"
+        },
+        "schema_version": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Schema Version"
+        },
+        "parser_version": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Parser Version"
+        },
+        "resolver_version": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Resolver Version"
+        },
+        "stale": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "True if index.build would change anything; null if not built.",
+          "title": "Stale"
+        },
+        "pending": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PendingChanges"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "notes": {
+          "title": "Notes",
+          "type": "integer"
+        },
+        "attachments": {
+          "title": "Attachments",
+          "type": "integer"
+        },
+        "links": {
+          "title": "Links",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "vault",
+        "db",
+        "built",
+        "last_indexed_at",
+        "schema_version",
+        "parser_version",
+        "resolver_version",
+        "stale",
+        "pending",
+        "notes",
+        "attachments",
+        "links"
+      ],
+      "title": "IndexStatusResult",
+      "type": "object"
+    },
+    "LinkCounts": {
+      "additionalProperties": false,
+      "properties": {
+        "total": {
+          "title": "Total",
+          "type": "integer"
+        },
+        "wikilink": {
+          "title": "Wikilink",
+          "type": "integer"
+        },
+        "markdown": {
+          "title": "Markdown",
+          "type": "integer"
+        },
+        "embeds": {
+          "title": "Embeds",
+          "type": "integer"
+        },
+        "resolved": {
+          "title": "Resolved",
+          "type": "integer"
+        },
+        "unresolved": {
+          "title": "Unresolved",
+          "type": "integer"
+        },
+        "ambiguous": {
+          "title": "Ambiguous",
+          "type": "integer"
+        },
+        "unresolved_targets": {
+          "title": "Unresolved Targets",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "total",
+        "wikilink",
+        "markdown",
+        "embeds",
+        "resolved",
+        "unresolved",
+        "ambiguous",
+        "unresolved_targets"
+      ],
+      "title": "LinkCounts",
+      "type": "object"
+    },
+    "LinkRef": {
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "line": {
+          "title": "Line",
+          "type": "integer"
+        },
+        "raw": {
+          "title": "Raw",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "line",
+        "raw"
+      ],
+      "title": "LinkRef",
+      "type": "object"
+    },
+    "LinkedNote": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "backlinks": {
+          "title": "Backlinks",
+          "type": "integer"
+        },
+        "linking_notes": {
+          "title": "Linking Notes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "path",
+        "backlinks",
+        "linking_notes"
+      ],
+      "title": "LinkedNote",
+      "type": "object"
+    },
+    "MissingSubpath": {
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "line": {
+          "title": "Line",
+          "type": "integer"
+        },
+        "raw": {
+          "title": "Raw",
+          "type": "string"
+        },
+        "target_path": {
+          "title": "Target Path",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "heading",
+            "block"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "subpath": {
+          "title": "Subpath",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "line",
+        "raw",
+        "target_path",
+        "kind",
+        "subpath"
+      ],
+      "title": "MissingSubpath",
+      "type": "object"
+    },
+    "NoteGetParams": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "description": "Vault-relative path, e.g. from notes.pick.",
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "NoteGetParams",
+      "type": "object"
+    },
+    "NoteGetRequest": {
+      "additionalProperties": false,
+      "description": "Properties, tags, headings, blocks and links in/out of one note. Omit \"id\" to send a notification (no response).",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "method": {
+          "const": "note.get",
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/NoteGetParams"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "method",
+        "params"
+      ],
+      "title": "NoteGetRequest",
+      "type": "object"
+    },
+    "NoteGetResponse": {
+      "additionalProperties": false,
+      "description": "Successful response to note.get.",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Id"
+        },
+        "result": {
+          "$ref": "#/$defs/NoteGetResult"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "result"
+      ],
+      "title": "NoteGetResponse",
+      "type": "object"
+    },
+    "NoteGetResult": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "aliases": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Aliases",
+          "type": "array"
+        },
+        "has_frontmatter": {
+          "title": "Has Frontmatter",
+          "type": "boolean"
+        },
+        "frontmatter_error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Frontmatter Error"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": true,
+          "title": "Properties"
+        },
+        "tags": {
+          "items": {
+            "$ref": "#/$defs/TagItem"
+          },
+          "title": "Tags",
+          "type": "array"
+        },
+        "headings": {
+          "items": {
+            "$ref": "#/$defs/HeadingItem"
+          },
+          "title": "Headings",
+          "type": "array"
+        },
+        "blocks": {
+          "items": {
+            "$ref": "#/$defs/BlockItem"
+          },
+          "title": "Blocks",
+          "type": "array"
+        },
+        "body_chars": {
+          "title": "Body Chars",
+          "type": "integer"
+        },
+        "line_count": {
+          "title": "Line Count",
+          "type": "integer"
+        },
+        "links_out": {
+          "items": {
+            "$ref": "#/$defs/OutgoingLink"
+          },
+          "title": "Links Out",
+          "type": "array"
+        },
+        "links_in": {
+          "description": "Resolved links from other notes (self-links excluded).",
+          "items": {
+            "$ref": "#/$defs/IncomingLink"
+          },
+          "title": "Links In",
+          "type": "array"
+        }
+      },
+      "required": [
+        "path",
+        "title",
+        "aliases",
+        "has_frontmatter",
+        "frontmatter_error",
+        "properties",
+        "tags",
+        "headings",
+        "blocks",
+        "body_chars",
+        "line_count",
+        "links_out",
+        "links_in"
+      ],
+      "title": "NoteGetResult",
+      "type": "object"
+    },
+    "NotesPickParams": {
+      "additionalProperties": false,
+      "properties": {
+        "query": {
+          "description": "Space-separated tokens, each matched as a subsequence.",
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Query",
+          "type": "string"
+        },
+        "limit": {
+          "default": 20,
+          "maximum": 200,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "title": "NotesPickParams",
+      "type": "object"
+    },
+    "NotesPickRequest": {
+      "additionalProperties": false,
+      "description": "Fuzzy-find notes by title and alias. Omit \"id\" to send a notification (no response).",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "method": {
+          "const": "notes.pick",
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/NotesPickParams"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "method",
+        "params"
+      ],
+      "title": "NotesPickRequest",
+      "type": "object"
+    },
+    "NotesPickResponse": {
+      "additionalProperties": false,
+      "description": "Successful response to notes.pick.",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Id"
+        },
+        "result": {
+          "$ref": "#/$defs/NotesPickResult"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "result"
+      ],
+      "title": "NotesPickResponse",
+      "type": "object"
+    },
+    "NotesPickResult": {
+      "additionalProperties": false,
+      "properties": {
+        "query": {
+          "title": "Query",
+          "type": "string"
+        },
+        "total": {
+          "description": "Matching notes before the limit was applied.",
+          "title": "Total",
+          "type": "integer"
+        },
+        "results": {
+          "items": {
+            "$ref": "#/$defs/PickedNote"
+          },
+          "title": "Results",
+          "type": "array"
+        }
+      },
+      "required": [
+        "query",
+        "total",
+        "results"
+      ],
+      "title": "NotesPickResult",
+      "type": "object"
+    },
+    "OutgoingLink": {
+      "additionalProperties": false,
+      "properties": {
+        "line": {
+          "title": "Line",
+          "type": "integer"
+        },
+        "raw": {
+          "title": "Raw",
+          "type": "string"
+        },
+        "syntax": {
+          "enum": [
+            "wikilink",
+            "markdown"
+          ],
+          "title": "Syntax",
+          "type": "string"
+        },
+        "is_embed": {
+          "title": "Is Embed",
+          "type": "boolean"
+        },
+        "target": {
+          "description": "As written; empty for same-note links.",
+          "title": "Target",
+          "type": "string"
+        },
+        "heading_path": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Heading Path",
+          "type": "array"
+        },
+        "block_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Block Id"
+        },
+        "display": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Display"
+        },
+        "status": {
+          "enum": [
+            "resolved",
+            "ambiguous",
+            "unresolved"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "target_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Target Path"
+        },
+        "matched_by": {
+          "anyOf": [
+            {
+              "enum": [
+                "self",
+                "path",
+                "name",
+                "alias"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Matched By"
+        },
+        "candidates": {
+          "description": "Matching files when ambiguous.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Candidates",
+          "type": "array"
+        },
+        "subpath_status": {
+          "anyOf": [
+            {
+              "enum": [
+                "found",
+                "missing",
+                "not_checked"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Subpath Status"
+        }
+      },
+      "required": [
+        "line",
+        "raw",
+        "syntax",
+        "is_embed",
+        "target",
+        "heading_path",
+        "block_id",
+        "display",
+        "status",
+        "target_path",
+        "matched_by",
+        "candidates",
+        "subpath_status"
+      ],
+      "title": "OutgoingLink",
+      "type": "object"
+    },
+    "PendingChanges": {
+      "additionalProperties": false,
+      "properties": {
+        "added": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Added",
+          "type": "array"
+        },
+        "changed": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Changed",
+          "type": "array"
+        },
+        "deleted": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Deleted",
+          "type": "array"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set when a version or setting change forces a rebuild.",
+          "title": "Reason"
+        }
+      },
+      "required": [
+        "added",
+        "changed",
+        "deleted",
+        "reason"
+      ],
+      "title": "PendingChanges",
+      "type": "object"
+    },
+    "PickedNote": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "matched_field": {
+          "enum": [
+            "title",
+            "alias"
+          ],
+          "title": "Matched Field",
+          "type": "string"
+        },
+        "matched_text": {
+          "title": "Matched Text",
+          "type": "string"
+        },
+        "score": {
+          "title": "Score",
+          "type": "integer"
+        },
+        "positions": {
+          "description": "Indexes of matched characters in matched_text.",
+          "items": {
+            "type": "integer"
+          },
+          "title": "Positions",
+          "type": "array"
+        }
+      },
+      "required": [
+        "path",
+        "title",
+        "matched_field",
+        "matched_text",
+        "score",
+        "positions"
+      ],
+      "title": "PickedNote",
+      "type": "object"
+    },
+    "PropertyCount": {
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "title": "Key",
+          "type": "string"
+        },
+        "notes": {
+          "title": "Notes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "key",
+        "notes"
+      ],
+      "title": "PropertyCount",
+      "type": "object"
+    },
+    "PropertyStats": {
+      "additionalProperties": false,
+      "properties": {
+        "distinct_keys": {
+          "title": "Distinct Keys",
+          "type": "integer"
+        },
+        "top": {
+          "items": {
+            "$ref": "#/$defs/PropertyCount"
+          },
+          "title": "Top",
+          "type": "array"
+        }
+      },
+      "required": [
+        "distinct_keys",
+        "top"
+      ],
+      "title": "PropertyStats",
+      "type": "object"
+    },
+    "Request": {
+      "description": "Any request this server accepts.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/IndexBuildRequest"
+        },
+        {
+          "$ref": "#/$defs/IndexStatusRequest"
+        },
+        {
+          "$ref": "#/$defs/VaultStatsRequest"
+        },
+        {
+          "$ref": "#/$defs/HealthReportRequest"
+        },
+        {
+          "$ref": "#/$defs/NotesPickRequest"
+        },
+        {
+          "$ref": "#/$defs/NoteGetRequest"
+        }
+      ]
+    },
+    "Response": {
+      "description": "Any response this server sends: a method result or an error.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/IndexBuildResponse"
+        },
+        {
+          "$ref": "#/$defs/IndexStatusResponse"
+        },
+        {
+          "$ref": "#/$defs/VaultStatsResponse"
+        },
+        {
+          "$ref": "#/$defs/HealthReportResponse"
+        },
+        {
+          "$ref": "#/$defs/NotesPickResponse"
+        },
+        {
+          "$ref": "#/$defs/NoteGetResponse"
+        },
+        {
+          "$ref": "#/$defs/ErrorResponse"
+        }
+      ]
+    },
+    "TagCount": {
+      "additionalProperties": false,
+      "properties": {
+        "tag": {
+          "title": "Tag",
+          "type": "string"
+        },
+        "notes": {
+          "title": "Notes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "tag",
+        "notes"
+      ],
+      "title": "TagCount",
+      "type": "object"
+    },
+    "TagItem": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "source": {
+          "enum": [
+            "frontmatter",
+            "inline"
+          ],
+          "title": "Source",
+          "type": "string"
+        },
+        "line": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Line"
+        }
+      },
+      "required": [
+        "name",
+        "source",
+        "line"
+      ],
+      "title": "TagItem",
+      "type": "object"
+    },
+    "TagStats": {
+      "additionalProperties": false,
+      "properties": {
+        "uses": {
+          "title": "Uses",
+          "type": "integer"
+        },
+        "distinct": {
+          "title": "Distinct",
+          "type": "integer"
+        },
+        "top": {
+          "items": {
+            "$ref": "#/$defs/TagCount"
+          },
+          "title": "Top",
+          "type": "array"
+        }
+      },
+      "required": [
+        "uses",
+        "distinct",
+        "top"
+      ],
+      "title": "TagStats",
+      "type": "object"
+    },
+    "UnresolvedTarget": {
+      "additionalProperties": false,
+      "properties": {
+        "target": {
+          "title": "Target",
+          "type": "string"
+        },
+        "links": {
+          "items": {
+            "$ref": "#/$defs/LinkRef"
+          },
+          "title": "Links",
+          "type": "array"
+        }
+      },
+      "required": [
+        "target",
+        "links"
+      ],
+      "title": "UnresolvedTarget",
+      "type": "object"
+    },
+    "VaultStatsParams": {
+      "additionalProperties": false,
+      "properties": {
+        "top": {
+          "default": 10,
+          "description": "Rows in each top-N list.",
+          "maximum": 1000,
+          "minimum": 1,
+          "title": "Top",
+          "type": "integer"
+        }
+      },
+      "title": "VaultStatsParams",
+      "type": "object"
+    },
+    "VaultStatsRequest": {
+      "additionalProperties": false,
+      "description": "Summary numbers for the indexed vault. Omit \"id\" to send a notification (no response).",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "method": {
+          "const": "vault.stats",
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/VaultStatsParams"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "method"
+      ],
+      "title": "VaultStatsRequest",
+      "type": "object"
+    },
+    "VaultStatsResponse": {
+      "additionalProperties": false,
+      "description": "Successful response to vault.stats.",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Id"
+        },
+        "result": {
+          "$ref": "#/$defs/VaultStatsResult"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "result"
+      ],
+      "title": "VaultStatsResponse",
+      "type": "object"
+    },
+    "VaultStatsResult": {
+      "additionalProperties": false,
+      "properties": {
+        "notes": {
+          "title": "Notes",
+          "type": "integer"
+        },
+        "attachments": {
+          "title": "Attachments",
+          "type": "integer"
+        },
+        "notes_with_frontmatter": {
+          "title": "Notes With Frontmatter",
+          "type": "integer"
+        },
+        "frontmatter_errors": {
+          "title": "Frontmatter Errors",
+          "type": "integer"
+        },
+        "links": {
+          "$ref": "#/$defs/LinkCounts"
+        },
+        "note_edges": {
+          "description": "Distinct resolved note-to-note connections.",
+          "title": "Note Edges",
+          "type": "integer"
+        },
+        "tags": {
+          "$ref": "#/$defs/TagStats"
+        },
+        "properties": {
+          "$ref": "#/$defs/PropertyStats"
+        },
+        "aliases": {
+          "title": "Aliases",
+          "type": "integer"
+        },
+        "headings": {
+          "title": "Headings",
+          "type": "integer"
+        },
+        "blocks": {
+          "title": "Blocks",
+          "type": "integer"
+        },
+        "folders": {
+          "items": {
+            "$ref": "#/$defs/FolderCount"
+          },
+          "title": "Folders",
+          "type": "array"
+        },
+        "most_linked": {
+          "items": {
+            "$ref": "#/$defs/LinkedNote"
+          },
+          "title": "Most Linked",
+          "type": "array"
+        },
+        "most_wanted": {
+          "description": "Unresolved targets by number of linking notes.",
+          "items": {
+            "$ref": "#/$defs/WantedNote"
+          },
+          "title": "Most Wanted",
+          "type": "array"
+        }
+      },
+      "required": [
+        "notes",
+        "attachments",
+        "notes_with_frontmatter",
+        "frontmatter_errors",
+        "links",
+        "note_edges",
+        "tags",
+        "properties",
+        "aliases",
+        "headings",
+        "blocks",
+        "folders",
+        "most_linked",
+        "most_wanted"
+      ],
+      "title": "VaultStatsResult",
+      "type": "object"
+    },
+    "WantedNote": {
+      "additionalProperties": false,
+      "properties": {
+        "target": {
+          "title": "Target",
+          "type": "string"
+        },
+        "links": {
+          "title": "Links",
+          "type": "integer"
+        },
+        "linking_notes": {
+          "title": "Linking Notes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "target",
+        "links",
+        "linking_notes"
+      ],
+      "title": "WantedNote",
+      "type": "object"
+    }
+  }
+}
