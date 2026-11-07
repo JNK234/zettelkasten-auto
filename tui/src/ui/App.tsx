@@ -3,16 +3,21 @@
  *   transcript   - <Static>: each finished command is printed once and then
  *                  scrolls with the terminal, never re-rendered
  *   activity     - spinner while a command runs
- *   prompt       - input box, with the "/" or "@" list under it
+ *   interactive  - a command's InteractiveView (e.g. /search results), which
+ *                  has the keyboard until it is closed; its summary then goes
+ *                  to the transcript
+ *   prompt       - input box, with the "/" or "@" list under it (hidden, but
+ *                  kept, while an interactive view is open)
  *   status line  - vault, counts, index freshness
  */
 import {basename, resolve} from 'node:path';
 import {Box, Static, Text, useAnimation, useApp} from 'ink';
 import {type ReactNode, useCallback, useEffect, useMemo, useRef, useState} from 'react';
-import type {CommandRegistry} from '../commands/registry.js';
+import {type CommandRegistry, type InteractiveView, isInteractive} from '../commands/registry.js';
 import {ConnectionClosedError, RpcError} from '../rpc/client.js';
 import type {VaultApi} from '../rpc/api.js';
 import {PromptHistory} from '../state/history.js';
+import {obsidianUrl, openUrl as systemOpenUrl, type UrlOpener} from '../system/open.js';
 import {Prompt} from './Prompt.js';
 import {type IndexState, StatusLine} from './StatusLine.js';
 import {theme} from './theme.js';
@@ -28,6 +33,8 @@ export type AppProps = {
 	autoIndex?: boolean;
 	/** Subscribe to connection loss; returns an unsubscribe function. */
 	onDisconnect?: (listener: (error: Error) => void) => () => void;
+	/** Opens obsidian:// URLs (default: the system opener, see system/open.ts). */
+	openUrl?: UrlOpener;
 };
 
 export function describeError(error: unknown): string {
@@ -97,7 +104,8 @@ function Activity({line}: {line: string}) {
 	);
 }
 
-export function App({api, registry, vaultPath, autoIndex = true, onDisconnect}: AppProps) {
+export function App({api, registry, vaultPath, autoIndex = true, onDisconnect, openUrl = systemOpenUrl}: AppProps) {
+	const vaultName = basename(resolve(vaultPath));
 	const {exit} = useApp();
 	const history = useMemo(() => new PromptHistory(), []);
 	const nextId = useRef(1);
@@ -105,6 +113,7 @@ export function App({api, registry, vaultPath, autoIndex = true, onDisconnect}: 
 	const [running, setRunning] = useState<string | undefined>();
 	const [index, setIndex] = useState<IndexState>({phase: autoIndex ? 'indexing' : 'starting'});
 	const [disconnected, setDisconnected] = useState<string | undefined>();
+	const [active, setActive] = useState<{line: string; view: InteractiveView} | undefined>();
 
 	const refreshStatus = useCallback(async () => {
 		try {
@@ -163,8 +172,18 @@ export function App({api, registry, vaultPath, autoIndex = true, onDisconnect}: 
 				case 'command': {
 					setRunning(line);
 					try {
-						const output = await parsed.command.run(parsed.input, {api, registry});
-						push({kind: 'output', line, output});
+						const openNote = async (path: string) => {
+							const url = obsidianUrl(vaultName, path);
+							await openUrl(url);
+							return url;
+						};
+
+						const output = await parsed.command.run(parsed.input, {api, registry, vaultName, openNote});
+						if (isInteractive(output)) {
+							setActive({line, view: output});
+						} else {
+							push({kind: 'output', line, output});
+						}
 					} catch (error) {
 						push({kind: 'error', line, message: describeError(error)});
 					} finally {
@@ -175,7 +194,17 @@ export function App({api, registry, vaultPath, autoIndex = true, onDisconnect}: 
 				}
 			}
 		},
-		[api, registry, push, refreshStatus],
+		[api, registry, push, refreshStatus, vaultName, openUrl],
+	);
+
+	const closeActive = useCallback(
+		(summary: ReactNode) => {
+			if (active) {
+				push({kind: 'output', line: active.line, output: summary});
+				setActive(undefined);
+			}
+		},
+		[active, push],
 	);
 
 	return (
@@ -184,6 +213,12 @@ export function App({api, registry, vaultPath, autoIndex = true, onDisconnect}: 
 				{(entry) => (entry.kind === 'banner' ? <Banner key={entry.id} vaultPath={vaultPath} /> : <TranscriptEntry key={entry.id} entry={entry} />)}
 			</Static>
 			{running ? <Activity line={running} /> : null}
+			{active ? (
+				<Box flexDirection="column">
+					<Echo line={active.line} />
+					{active.view.render(closeActive)}
+				</Box>
+			) : null}
 			{disconnected ? (
 				<Text color={theme.error}>⏺ {disconnected}. Restart vault-tui to reconnect.</Text>
 			) : null}
@@ -192,12 +227,13 @@ export function App({api, registry, vaultPath, autoIndex = true, onDisconnect}: 
 				registry={registry}
 				history={history}
 				busy={running !== undefined}
+				inactive={active !== undefined}
 				onSubmit={(line) => {
 					void run(line);
 				}}
 				onExit={exit}
 			/>
-			<StatusLine vaultName={basename(resolve(vaultPath))} index={index} disconnected={disconnected} />
+			<StatusLine vaultName={vaultName} index={index} disconnected={disconnected} />
 		</Box>
 	);
 }

@@ -19,8 +19,13 @@ deleted or changed. Those links are re-resolved from stored rows, with no
 other files read or parsed. The invariant "incremental == full rebuild" is
 tested with randomised edit sequences.
 
-Stored versions (schema, parser, resolver, alias setting, vault root) force a
-rebuild, full re-parse or full re-resolution when they change.
+Full-text search rows (``postings``, ``field_lengths``; see ``search.py``) are
+per-note like headings and tags: written when a note is parsed, deleted with it.
+The ``terms`` vocabulary keeps a document frequency per term, adjusted by the
+notes that are re-parsed or deleted (never recounted over the whole vault).
+
+Stored versions (schema, parser, search, resolver, alias setting, vault root)
+force a rebuild, full re-parse or full re-resolution when they change.
 """
 
 from __future__ import annotations
@@ -30,16 +35,19 @@ import json
 import posixpath
 import sqlite3
 import time
+from collections import Counter
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
 from vaultengine.model import BlockId, Heading, Link, ParsedNote
-from vaultengine.parser import PARSER_VERSION, normalize_text, parse_note
+from vaultengine.parser import PARSER_VERSION, NoteLayout, normalize_text, parse_note_with_layout
 from vaultengine.resolver import RESOLVER_VERSION, Resolver
+from vaultengine.properties import body_fields
+from vaultengine.search import SEARCH_VERSION, note_fields, postings
 from vaultengine.vault import Vault, is_markdown, iter_vault_files, link_name, lookup_key
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 4
 DEFAULT_DB_RELATIVE = Path(".vaultengine") / "index.sqlite"
 RACY_WINDOW_NS = 2_000_000_000
 RACY_MTIME = -1
@@ -55,6 +63,7 @@ CREATE TABLE files (
     kind         TEXT NOT NULL CHECK (kind IN ('note', 'attachment')),
     size         INTEGER NOT NULL,
     mtime_ns     INTEGER NOT NULL,          -- -1: re-hash on next run
+    modified_ns  INTEGER NOT NULL,          -- the file's real mtime (for modified: queries)
     content_hash TEXT                       -- SHA-256 of the bytes (notes only)
 );
 CREATE INDEX files_name_key ON files (name_key);
@@ -71,7 +80,8 @@ CREATE TABLE notes (
 CREATE TABLE properties (
     file_id    INTEGER NOT NULL REFERENCES files (id) ON DELETE CASCADE,
     key        TEXT NOT NULL,
-    value_json TEXT NOT NULL
+    value_json TEXT NOT NULL,
+    source     TEXT NOT NULL DEFAULT 'frontmatter' CHECK (source IN ('frontmatter', 'inline', 'header'))
 );
 CREATE INDEX properties_file ON properties (file_id);
 CREATE INDEX properties_key ON properties (key);
@@ -139,6 +149,32 @@ CREATE INDEX links_target ON links (target_id);
 CREATE INDEX links_target_key ON links (target_key);
 CREATE INDEX links_target_name_key ON links (target_name_key);
 
+-- Full-text search (search.py). One row per (term, note, field) that occurs;
+-- positions are token positions within the field, as a JSON array.
+CREATE TABLE postings (
+    term      TEXT NOT NULL,
+    file_id   INTEGER NOT NULL REFERENCES files (id) ON DELETE CASCADE,
+    field     TEXT NOT NULL CHECK (field IN ('title', 'aliases', 'headings', 'tags', 'body')),
+    tf        INTEGER NOT NULL,
+    positions TEXT NOT NULL,
+    PRIMARY KEY (term, file_id, field)
+) WITHOUT ROWID;
+CREATE INDEX postings_file ON postings (file_id);
+
+-- Token count of each non-empty field of each note (BM25F length normalisation).
+CREATE TABLE field_lengths (
+    file_id INTEGER NOT NULL REFERENCES files (id) ON DELETE CASCADE,
+    field   TEXT NOT NULL,
+    length  INTEGER NOT NULL,
+    PRIMARY KEY (file_id, field)
+) WITHOUT ROWID;
+
+-- Every indexed term with the number of notes containing it (spelling variants, idf).
+CREATE TABLE terms (
+    term TEXT PRIMARY KEY,
+    df   INTEGER NOT NULL
+) WITHOUT ROWID;
+
 -- Resolved note-to-note edges with multiplicity (self-links excluded):
 -- the input for graph algorithms.
 CREATE VIEW note_edges AS
@@ -150,7 +186,7 @@ WHERE l.status = 'resolved' AND t.kind = 'note' AND l.target_id != l.source_id
 GROUP BY l.source_id, l.target_id;
 """
 
-_NOTE_CHILD_TABLES = ("notes", "properties", "aliases", "tags", "headings", "blocks")
+_NOTE_CHILD_TABLES = ("notes", "properties", "aliases", "tags", "headings", "blocks", "postings", "field_lengths")
 
 
 def default_db_path(vault_root: str | Path) -> Path:
@@ -225,6 +261,10 @@ class VaultIndex:
         # The index is a rebuildable cache: in WAL mode NORMAL can lose the last
         # commit on power loss but cannot corrupt the database.
         self.conn.execute("PRAGMA synchronous = NORMAL")
+        # The search postings make a full build write several MB in one transaction;
+        # with the default 2 MB page cache SQLite spills pages mid-transaction.
+        self.conn.execute("PRAGMA cache_size = -16000")  # KiB, allocated only as needed
+        self._term_delta: Counter[str] = Counter()  # df changes of the running update, applied at its end
         self._ensure_schema()
 
     @classmethod
@@ -274,6 +314,8 @@ class VaultIndex:
         reparse = None
         if meta["parser_version"] != str(PARSER_VERSION):
             reparse = f"parser version {meta['parser_version']} -> {PARSER_VERSION}"
+        elif meta.get("search_version") != SEARCH_VERSION:
+            reparse = f"search index version {meta.get('search_version')} -> {SEARCH_VERSION}"
         elif meta.get("vault_root") != str(root):
             reparse = f"vault root changed from {meta.get('vault_root')}"
         reresolve = reparse
@@ -305,6 +347,7 @@ class VaultIndex:
 
         conn = self.conn
         conn.execute("BEGIN IMMEDIATE")
+        self._term_delta.clear()
         try:
             rows = {row["path"]: row for row in conn.execute("SELECT id, path, kind, size, mtime_ns, content_hash FROM files")}
             affected_keys: set[str] = set()
@@ -313,6 +356,7 @@ class VaultIndex:
             for path in sorted(rows.keys() - disk.keys()):
                 row = rows[path]
                 affected_keys |= _name_keys(path) | self._alias_keys(row["id"])
+                self._forget_terms(row["id"])
                 conn.execute("DELETE FROM files WHERE id = ?", (row["id"],))
                 (report.deleted if row["kind"] == "note" else report.attachments_deleted).append(path)
 
@@ -323,13 +367,16 @@ class VaultIndex:
                     report.attachments += 1
                     if row is None:
                         conn.execute(
-                            "INSERT INTO files (path, name_key, kind, size, mtime_ns) VALUES (?, ?, 'attachment', ?, ?)",
-                            (path, lookup_key(link_name(path)), size, kept_mtime(mtime_ns)),
+                            "INSERT INTO files (path, name_key, kind, size, mtime_ns, modified_ns) VALUES (?, ?, 'attachment', ?, ?, ?)",
+                            (path, lookup_key(link_name(path)), size, kept_mtime(mtime_ns), mtime_ns),
                         )
                         affected_keys |= _name_keys(path)
                         report.attachments_added.append(path)
                     elif (row["size"], row["mtime_ns"]) != (size, mtime_ns):
-                        conn.execute("UPDATE files SET size = ?, mtime_ns = ? WHERE id = ?", (size, kept_mtime(mtime_ns), row["id"]))
+                        conn.execute(
+                            "UPDATE files SET size = ?, mtime_ns = ?, modified_ns = ? WHERE id = ?",
+                            (size, kept_mtime(mtime_ns), mtime_ns, row["id"]),
+                        )
                     continue
 
                 report.notes += 1
@@ -340,15 +387,18 @@ class VaultIndex:
                 digest = hashlib.sha256(data).hexdigest()
                 unchanged = row is not None and row["content_hash"] == digest
                 if unchanged and reparse_reason is None:
-                    conn.execute("UPDATE files SET size = ?, mtime_ns = ? WHERE id = ?", (size, kept_mtime(mtime_ns), row["id"]))
+                    conn.execute(
+                            "UPDATE files SET size = ?, mtime_ns = ?, modified_ns = ? WHERE id = ?",
+                            (size, kept_mtime(mtime_ns), mtime_ns, row["id"]),
+                        )
                     continue
 
                 text = normalize_text(data.decode("utf-8", errors="replace"))
-                note = parse_note(text, path=path)
+                note, layout = parse_note_with_layout(text, path=path)
                 if row is None:
                     file_id = conn.execute(
-                        "INSERT INTO files (path, name_key, kind, size, mtime_ns, content_hash) VALUES (?, ?, 'note', ?, ?, ?)",
-                        (path, lookup_key(link_name(path)), size, kept_mtime(mtime_ns), digest),
+                        "INSERT INTO files (path, name_key, kind, size, mtime_ns, modified_ns, content_hash) VALUES (?, ?, 'note', ?, ?, ?, ?)",
+                        (path, lookup_key(link_name(path)), size, kept_mtime(mtime_ns), mtime_ns, digest),
                     ).lastrowid
                     report.added.append(path)
                 else:
@@ -356,14 +406,16 @@ class VaultIndex:
                     affected_keys |= self._alias_keys(file_id)
                     self._delete_note_rows(file_id)
                     conn.execute(
-                        "UPDATE files SET size = ?, mtime_ns = ?, content_hash = ? WHERE id = ?",
-                        (size, kept_mtime(mtime_ns), digest, file_id),
+                        "UPDATE files SET size = ?, mtime_ns = ?, modified_ns = ?, content_hash = ? WHERE id = ?",
+                        (size, kept_mtime(mtime_ns), mtime_ns, digest, file_id),
                     )
                     (report.forced if unchanged else report.changed).append(path)
                 self._write_note(file_id, note, text)
+                self._write_postings(file_id, path, note, layout)
                 affected_keys |= _name_keys(path) | {lookup_key(alias) for alias in note.aliases}
                 reparsed_ids.append(file_id)
 
+            self._apply_term_delta()
             if reresolve_reason or affected_keys or reparsed_ids:
                 report.links_checked, report.links_changed_elsewhere = self._resolve(
                     everything=reresolve_reason is not None,
@@ -379,6 +431,7 @@ class VaultIndex:
                 generation=generation,  # bumped only when the index content changed; a cache key for readers
                 schema_version=SCHEMA_VERSION,
                 parser_version=PARSER_VERSION,
+                search_version=SEARCH_VERSION,
                 resolver_version=RESOLVER_VERSION,
                 resolve_aliases=resolve_aliases,
                 vault_root=root,
@@ -397,7 +450,22 @@ class VaultIndex:
     def _alias_keys(self, file_id: int) -> set[str]:
         return {row[0] for row in self.conn.execute("SELECT alias_key FROM aliases WHERE file_id = ?", (file_id,))}
 
+    def _forget_terms(self, file_id: int) -> None:
+        """Count a note's terms out of the vocabulary (call before its postings go)."""
+        for (term,) in self.conn.execute("SELECT DISTINCT term FROM postings WHERE file_id = ?", (file_id,)):
+            self._term_delta[term] -= 1
+
+    def _apply_term_delta(self) -> None:
+        """Apply the df changes collected while notes were written and deleted, one row per term."""
+        changes = [(term, delta) for term, delta in self._term_delta.items() if delta]
+        self.conn.executemany(
+            "INSERT INTO terms (term, df) VALUES (?, ?) ON CONFLICT (term) DO UPDATE SET df = df + excluded.df", changes
+        )
+        self.conn.executemany("DELETE FROM terms WHERE term = ? AND df <= 0", [(term,) for term, delta in changes if delta < 0])
+        self._term_delta.clear()
+
     def _delete_note_rows(self, file_id: int) -> None:
+        self._forget_terms(file_id)
         for table in _NOTE_CHILD_TABLES:
             self.conn.execute(f"DELETE FROM {table} WHERE file_id = ?", (file_id,))
         self.conn.execute("DELETE FROM links WHERE source_id = ?", (file_id,))
@@ -442,6 +510,23 @@ class VaultIndex:
                 for index, link in enumerate(links)
             ],
         )
+
+    def _write_postings(self, file_id: int, path: str, note: ParsedNote, layout: NoteLayout) -> None:
+        self.conn.executemany(
+            "INSERT INTO properties (file_id, key, value_json, source) VALUES (?, ?, ?, ?)",
+            [(file_id, f.key, json.dumps(f.value, ensure_ascii=False), f.source) for f in body_fields(layout.text, layout.masked)],
+        )
+        positions, lengths = postings(note_fields(path, note, layout))
+        self.conn.executemany(
+            "INSERT INTO postings (term, file_id, field, tf, positions) VALUES (?, ?, ?, ?, ?)",
+            [(term, file_id, name, len(where), "[" + ",".join(map(str, where)) + "]")  # a JSON array
+             for (term, name), where in positions.items()],
+        )
+        self.conn.executemany(
+            "INSERT INTO field_lengths (file_id, field, length) VALUES (?, ?, ?)",
+            [(file_id, name, length) for name, length in lengths.items()],
+        )
+        self._term_delta.update({term for term, _ in positions})
 
     # ----- resolution ---------------------------------------------------
 

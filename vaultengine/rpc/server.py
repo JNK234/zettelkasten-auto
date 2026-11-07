@@ -10,7 +10,8 @@ Error handling follows the spec: -32700 for unparseable JSON, -32600 for
 anything that is not a valid Request object (including an empty batch),
 -32601 for an unknown method, -32602 when params fail validation, and -32603
 for unexpected failures (including a result that does not match its own model).
-Server errors: -32001 index not built, -32002 note not found. A request's "id"
+Server errors: -32001 index not built, -32002 note not found, -32003 invalid
+query (data: query, start, end, hint). A request's "id"
 is echoed in its error response when it is a valid id, otherwise null.
 """
 
@@ -27,6 +28,7 @@ from vaultengine.rpc.models import (
     ERROR_MESSAGES,
     INDEX_NOT_BUILT,
     INTERNAL_ERROR,
+    INVALID_QUERY,
     INVALID_PARAMS,
     INVALID_REQUEST,
     JSONRPC_VERSION,
@@ -36,9 +38,13 @@ from vaultengine.rpc.models import (
     PARSE_ERROR,
     Request,
 )
-from vaultengine.service import IndexNotBuilt, NoteNotFound, ServiceError, VaultService
+from vaultengine.service import IndexNotBuilt, InvalidQuery, NoteNotFound, ServiceError, VaultService
 
-_SERVICE_ERROR_CODES: dict[type[ServiceError], int] = {IndexNotBuilt: INDEX_NOT_BUILT, NoteNotFound: NOTE_NOT_FOUND}
+_SERVICE_ERROR_CODES: dict[type[ServiceError], int] = {
+    IndexNotBuilt: INDEX_NOT_BUILT,
+    NoteNotFound: NOTE_NOT_FOUND,
+    InvalidQuery: INVALID_QUERY,
+}
 
 
 def _reject_constant(name: str) -> None:
@@ -78,6 +84,14 @@ class RpcServer:
             "health.report": lambda p: service.health(limit=p.limit),
             "notes.pick": lambda p: service.pick(p.query, limit=p.limit),
             "note.get": lambda p: service.note(p.path),
+            "search.query": lambda p: service.search(
+                p.query, limit=p.limit, fuzzy=p.fuzzy, facets=p.facets or None, snippet_width=p.snippet_width
+            ),
+            "note.preview": lambda p: service.preview(p.path, query=p.query),
+            "note.related": lambda p: service.related(p.note, limit=p.limit, unlinked=p.unlinked),
+            "links.suggest": lambda p: service.suggest_links(limit=p.limit, note=p.note, path=p.path),
+            "notes.suggest": lambda p: service.suggest_notes(limit=p.limit, min_links=p.min_links),
+            "mentions.unlinked": lambda p: service.unlinked(note=p.note, min_words=p.min_words, limit=p.limit, per_note=p.per_note),
         }
         if set(self._handlers) != set(METHODS):
             raise RuntimeError(f"handlers and METHODS disagree: {set(self._handlers) ^ set(METHODS)}")

@@ -16,6 +16,7 @@ from __future__ import annotations
 import bisect
 import re
 import unicodedata
+from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import unquote
 
@@ -121,7 +122,9 @@ def _extract_wikilinks(masked: str, lines: _LineIndex) -> list[Link]:
     return found
 
 
-def _extract_markdown_links(masked: str, lines: _LineIndex) -> tuple[list[Link], list[ExternalLink], list[tuple[int, int]]]:
+def _extract_markdown_links(
+    masked: str, lines: _LineIndex, spans: list[tuple[int, int]]
+) -> tuple[list[Link], list[ExternalLink], list[tuple[int, int]]]:
     internal: list[Link] = []
     external: list[ExternalLink] = []
     destinations: list[tuple[int, int]] = []
@@ -129,6 +132,7 @@ def _extract_markdown_links(masked: str, lines: _LineIndex) -> tuple[list[Link],
         group = "angle" if match["angle"] is not None else "bare"
         destination = match[group].strip()
         destinations.append((match.start(group), match.end(group)))
+        spans.append((match.start(), match.end()))
         if not destination:
             continue
         is_embed = bool(match["bang"])
@@ -157,7 +161,7 @@ def _extract_markdown_links(masked: str, lines: _LineIndex) -> tuple[list[Link],
     return internal, external, destinations
 
 
-def _extract_tags(masked: str, lines: _LineIndex) -> list[Tag]:
+def _extract_tags(masked: str, lines: _LineIndex, spans: list[tuple[int, int]]) -> list[Tag]:
     tags = []
     for match in _TAG_START.finditer(masked):
         end = match.end()
@@ -166,10 +170,11 @@ def _extract_tags(masked: str, lines: _LineIndex) -> list[Tag]:
         name = masked[match.end() : end]
         if is_valid_tag(name):
             tags.append(Tag(name=name, source="inline", line=lines.line_of(match.start())))
+            spans.append((match.start(), end))
     return tags
 
 
-def _extract_headings(original: str, masked: str, lines: _LineIndex) -> list[Heading]:
+def _extract_headings(original: str, masked: str, lines: _LineIndex, spans: list["HeadingSpan"]) -> list[Heading]:
     headings = []
     for match in _HEADING.finditer(masked):
         # Detect on masked text (skips code); read the text from the original
@@ -178,14 +183,47 @@ def _extract_headings(original: str, masked: str, lines: _LineIndex) -> list[Hea
         text = _CLOSING_HASHES.sub("", rest).strip()
         if text:
             headings.append(Heading(len(match["hashes"]), text, lines.line_of(match.start())))
+            spans.append(HeadingSpan(match.start(), match.end(), match.start("rest"), match.end("rest")))
     return headings
 
 
-def _extract_block_ids(masked: str, lines: _LineIndex) -> list[BlockId]:
-    return [BlockId(m["id"], lines.line_of(m.start("id"))) for m in _BLOCK_ID.finditer(masked)]
+def _extract_block_ids(masked: str, lines: _LineIndex, spans: list[tuple[int, int]]) -> list[BlockId]:
+    found = []
+    for match in _BLOCK_ID.finditer(masked):
+        found.append(BlockId(match["id"], lines.line_of(match.start("id"))))
+        spans.append((match.start("id") - 1, match.end("id")))  # including the '^'
+    return found
+
+
+@dataclass(frozen=True)
+class HeadingSpan:
+    start: int  # the whole heading line, '#' markers included
+    end: int
+    text_start: int  # the heading text (before closing '#'s are stripped)
+    text_end: int
+
+
+@dataclass
+class NoteLayout:
+    """Where things are in the note text, for consumers that need more than ``ParsedNote``.
+
+    Offsets index ``text`` (the normalised note text). ``masked`` has the same
+    length, with frontmatter, fenced/inline code and %% comments blanked.
+    """
+
+    text: str
+    masked: str
+    headings: list[HeadingSpan] = field(default_factory=list)  # same order as ParsedNote.headings
+    inline_tags: list[tuple[int, int]] = field(default_factory=list)  # '#name', in ParsedNote inline-tag order
+    block_ids: list[tuple[int, int]] = field(default_factory=list)  # '^id'
+    links: list[tuple[int, int]] = field(default_factory=list)  # every [[link]], ![[embed]], [text](url) and ![img](url)
 
 
 def parse_note(text: str, path: str | None = None) -> ParsedNote:
+    return parse_note_with_layout(text, path)[0]
+
+
+def parse_note_with_layout(text: str, path: str | None = None) -> tuple[ParsedNote, NoteLayout]:
     text = normalize_text(text)
     lines = _LineIndex(text)
     block = split_frontmatter(text)
@@ -203,14 +241,17 @@ def parse_note(text: str, path: str | None = None) -> ParsedNote:
     )
 
     masked = mask_code(mask_region(text, 0, block.end_offset))
-    note.headings = _extract_headings(text, masked, lines)
-    note.block_ids = _extract_block_ids(masked, lines)
+    layout = NoteLayout(text=text, masked=masked)
+    note.headings = _extract_headings(text, masked, lines, layout.headings)
+    note.block_ids = _extract_block_ids(masked, lines, layout.block_ids)
 
     wikilinks = _extract_wikilinks(masked, lines)
     without_wikilinks = masked
     for link in wikilinks:
         without_wikilinks = mask_region(without_wikilinks, link.start, link.end)
-    markdown_links, note.external_links, destinations = _extract_markdown_links(without_wikilinks, lines)
+    markdown_spans: list[tuple[int, int]] = []
+    markdown_links, note.external_links, destinations = _extract_markdown_links(without_wikilinks, lines, markdown_spans)
+    layout.links = sorted([(link.start, link.end) for link in wikilinks] + markdown_spans)
 
     all_links = sorted(wikilinks + markdown_links, key=lambda link: link.start)
     note.links = [link for link in all_links if not link.is_embed]
@@ -220,8 +261,8 @@ def parse_note(text: str, path: str | None = None) -> ParsedNote:
     tag_scan = without_wikilinks
     for start, end in destinations:
         tag_scan = mask_region(tag_scan, start, end)
-    note.tags.extend(_extract_tags(tag_scan, lines))
-    return note
+    note.tags.extend(_extract_tags(tag_scan, lines, layout.inline_tags))
+    return note, layout
 
 
 def parse_file(path: str | Path, vault_root: str | Path | None = None) -> ParsedNote:

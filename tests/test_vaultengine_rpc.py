@@ -160,7 +160,7 @@ class RecordedSessionContentTests(unittest.TestCase):
         for _, exchange in self.exchanges():
             responses = exchange["response"] if isinstance(exchange["response"], list) else [exchange["response"]]
             codes.update(r["error"]["code"] for r in filter(None, responses) if "error" in r)
-        self.assertEqual(codes, {-32700, -32600, -32601, -32602, -32001, -32002})
+        self.assertEqual(codes, {-32700, -32600, -32601, -32602, -32001, -32002, -32003})
 
 
 class ProtocolErrorTests(unittest.TestCase):
@@ -255,6 +255,77 @@ class ProtocolErrorTests(unittest.TestCase):
     def test_result_that_violates_its_model_is_an_internal_error(self):
         with patch("vaultengine.queries.stats", return_value={"unexpected": 1}), patch("sys.stderr", io.StringIO()):
             self.assertError({"jsonrpc": "2.0", "id": 1, "method": "vault.stats"}, -32603, 1)
+
+
+class SearchAndConnectApiTests(unittest.TestCase):
+    """search.query, note.preview, note.related, links.suggest, notes.suggest, mentions.unlinked on the sample vault."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.vault = TempVaultCopy(SESSIONS["sample_vault"])
+        cls.server = RpcServer(VaultService(cls.vault.root))
+        cls.server.handle_text('{"jsonrpc":"2.0","id":0,"method":"index.build"}')
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.service.close()
+        cls.vault.cleanup()
+
+    def call(self, method, **params):
+        reply = json.loads(self.server.handle_text(json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params})))
+        schema_validator("Response").validate(reply)
+        return reply
+
+    def test_query_syntax_error_points_at_the_problem(self):
+        query = "reward (tag:ai-safety OR path:50_MOC"
+        error = self.call("search.query", query=query)["error"]
+        self.assertEqual((error["code"], error["message"]), (-32003, "this ( is never closed"))
+        self.assertEqual(error["data"], {"query": query, "start": 7, "end": 8, "hint": "add ) after the group"})
+        self.assertEqual(query[error["data"]["start"] : error["data"]["end"]], "(")
+        unknown = self.call("search.query", query="tga:x")["error"]
+        self.assertEqual((unknown["code"], unknown["data"]["start"], unknown["data"]["end"]), (-32003, 0, 4))
+        self.assertIn("did you mean tag:?", unknown["data"]["hint"])
+
+    def test_search_hits_snippets_and_facets(self):
+        result = self.call("search.query", query="reward hacking", limit=3, facets=2)["result"]
+        self.assertEqual((result["total"], result["order"], len(result["hits"])), (106, "exact_then_score", 3))
+        top = result["hits"][0]
+        self.assertEqual(top["path"], "50_MOC/topics/emergent-misalignment-from-reward-hacking.md")
+        title = top["title"]
+        self.assertEqual([title[m["start"] : m["end"]] for m in top["title_marks"]], ["reward", "hacking"])
+        text = top["snippet"]["text"]
+        self.assertTrue(all(text[m["start"] : m["end"]].lower() in ("reward", "hacking") for m in top["snippet"]["marks"]))
+        self.assertEqual(len(result["facets"]["tags"]), 2)
+
+    def test_preview_marks_every_match_as_search_counts_it(self):
+        result = self.call("note.preview", path="20_ZETTLEKASTEN/monitorability-tax.md", query='"monitorability tax"')["result"]
+        marked = [line["text"][m["start"] : m["end"]] for line in result["lines"] for m in line["marks"]]
+        self.assertTrue(marked and all(word.lower() == "monitorability tax" for word in marked), marked)
+        self.assertEqual(result["marks"], len(marked))
+        self.assertEqual(result["first_match_line"], next(l["number"] for l in result["lines"] if l["marks"]))
+        plain = self.call("note.preview", path="20_ZETTLEKASTEN/monitorability-tax.md")["result"]
+        self.assertEqual((plain["marks"], plain["matched"]), (0, False))
+        self.assertEqual(len(plain["lines"]), len(result["lines"]))
+        self.assertEqual(self.call("note.preview", path="nope.md")["error"]["code"], -32002)
+
+    def test_related_suggest_and_unlinked(self):
+        related = self.call("note.related", note="kl-penalty-in-rlhf", limit=2)["result"]
+        self.assertEqual(related["seed"]["path"], "20_ZETTLEKASTEN/kl-penalty-in-rlhf.md")
+        self.assertEqual(related["hits"][1]["title"], "RLHF")
+        self.assertFalse(related["hits"][1]["linked"])
+        missing = self.call("note.related", note="rl-environment-design", limit=1)["result"]
+        self.assertEqual((missing["seed"]["path"], len(missing["seed"]["linkers"])), (None, 52))
+        self.assertEqual(self.call("note.related", note="nope")["error"]["code"], -32002)
+        links = self.call("links.suggest", limit=2, path="20_ZETTLEKASTEN")["result"]["links"]
+        self.assertTrue(all(p["a"].startswith("20_ZETTLEKASTEN/") and p["b"].startswith("20_ZETTLEKASTEN/") for p in links))
+        self.assertEqual(self.call("links.suggest", note="nope")["error"]["code"], -32002)
+        notes = self.call("notes.suggest", limit=1)["result"]
+        self.assertEqual((notes["total_missing"], notes["notes"][0]["name"]), (612, "rl-environment-design"))
+        unlinked = self.call("mentions.unlinked", limit=2, per_note=1)["result"]
+        self.assertEqual((unlinked["total"], unlinked["notes"], len(unlinked["targets"])), (595, 79, 2))
+        self.assertEqual([len(t["mentions"]) for t in unlinked["targets"]], [1, 1])
+        one = self.call("mentions.unlinked", note="monitorability-tax")["result"]
+        self.assertEqual((one["note"], one["total"]), ("20_ZETTLEKASTEN/monitorability-tax.md", 4))
 
 
 class StdioTransportTests(unittest.TestCase):

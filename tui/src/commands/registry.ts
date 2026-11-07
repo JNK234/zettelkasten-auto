@@ -18,7 +18,30 @@ export type CommandInput = {
 export type CommandContext = {
 	api: VaultApi;
 	registry: CommandRegistry;
+	/** The vault folder's name (what Obsidian calls the vault). */
+	vaultName: string;
+	/** Open a note in Obsidian; resolves to the obsidian:// URL that was opened. */
+	openNote(path: string): Promise<string>;
 };
+
+/**
+ * Output that takes the keyboard until it is closed, such as a list to move
+ * through. While it is open the App shows it below the transcript and the
+ * prompt does not read keys. `done(summary)` closes it; the summary is written
+ * to the transcript like any other command output.
+ */
+export type InteractiveView = {
+	kind: 'interactive';
+	render(done: (summary: ReactNode) => void): ReactNode;
+};
+
+export function interactive(render: InteractiveView['render']): InteractiveView {
+	return {kind: 'interactive', render};
+}
+
+export function isInteractive(output: unknown): output is InteractiveView {
+	return typeof output === 'object' && output !== null && (output as {kind?: unknown}).kind === 'interactive';
+}
 
 export type Command = {
 	/** Lower-case, no leading slash: "note" is invoked as /note. */
@@ -27,8 +50,11 @@ export type Command = {
 	/** Shown in /help, e.g. "/note @note | /note <search>". */
 	usage?: string;
 	aliases?: readonly string[];
-	/** Returns what to show in the transcript. Throwing shows an error entry. */
-	run(input: CommandInput, context: CommandContext): Promise<ReactNode>;
+	/**
+	 * Returns what to show in the transcript, or an InteractiveView that takes
+	 * the keyboard until closed. Throwing shows an error entry.
+	 */
+	run(input: CommandInput, context: CommandContext): Promise<ReactNode | InteractiveView>;
 };
 
 export type ParsedLine =

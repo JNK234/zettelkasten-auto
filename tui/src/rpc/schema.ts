@@ -6,18 +6,22 @@
 /**
  * Any request this server accepts.
  */
-export type Request = (IndexBuildRequest | IndexStatusRequest | VaultStatsRequest | HealthReportRequest | NotesPickRequest | NoteGetRequest)
+export type Request = (IndexBuildRequest | IndexStatusRequest | VaultStatsRequest | HealthReportRequest | NotesPickRequest | NoteGetRequest | SearchQueryRequest | NotePreviewRequest | NoteRelatedRequest | LinksSuggestRequest | NotesSuggestRequest | MentionsUnlinkedRequest)
 /**
  * Any response this server sends: a method result or an error.
  */
-export type Response = (IndexBuildResponse | IndexStatusResponse | VaultStatsResponse | HealthReportResponse | NotesPickResponse | NoteGetResponse | ErrorResponse)
+export type Response = (IndexBuildResponse | IndexStatusResponse | VaultStatsResponse | HealthReportResponse | NotesPickResponse | NoteGetResponse | SearchQueryResponse | NotePreviewResponse | NoteRelatedResponse | LinksSuggestResponse | NotesSuggestResponse | MentionsUnlinkedResponse | ErrorResponse)
 
 export interface VaultRpcSchema {
 AmbiguousLink?: AmbiguousLink
 BlockItem?: BlockItem
+ClauseMatch?: ClauseMatch
+Count?: Count
 DuplicateName?: DuplicateName
 ErrorObject?: ErrorObject
 ErrorResponse?: ErrorResponse
+Facets?: Facets
+FieldCount?: FieldCount
 FolderCount?: FolderCount
 HeadingItem?: HeadingItem
 HealthReportParams?: HealthReportParams
@@ -36,27 +40,65 @@ IndexStatusResponse?: IndexStatusResponse
 IndexStatusResult?: IndexStatusResult
 LinkCounts?: LinkCounts
 LinkRef?: LinkRef
+LinkSuggestion?: LinkSuggestion
 LinkedNote?: LinkedNote
+LinksSuggestParams?: LinksSuggestParams
+LinksSuggestRequest?: LinksSuggestRequest
+LinksSuggestResponse?: LinksSuggestResponse
+LinksSuggestResult?: LinksSuggestResult
+Mark?: Mark
+MentionedNote?: MentionedNote
+MentionsUnlinkedParams?: MentionsUnlinkedParams
+MentionsUnlinkedRequest?: MentionsUnlinkedRequest
+MentionsUnlinkedResponse?: MentionsUnlinkedResponse
+MentionsUnlinkedResult?: MentionsUnlinkedResult
+MissingNote?: MissingNote
 MissingSubpath?: MissingSubpath
+NameCount?: NameCount
 NoteGetParams?: NoteGetParams
 NoteGetRequest?: NoteGetRequest
 NoteGetResponse?: NoteGetResponse
 NoteGetResult?: NoteGetResult
+NotePreviewParams?: NotePreviewParams
+NotePreviewRequest?: NotePreviewRequest
+NotePreviewResponse?: NotePreviewResponse
+NotePreviewResult?: NotePreviewResult
+NoteRelatedParams?: NoteRelatedParams
+NoteRelatedRequest?: NoteRelatedRequest
+NoteRelatedResponse?: NoteRelatedResponse
+NoteRelatedResult?: NoteRelatedResult
 NotesPickParams?: NotesPickParams
 NotesPickRequest?: NotesPickRequest
 NotesPickResponse?: NotesPickResponse
 NotesPickResult?: NotesPickResult
+NotesSuggestParams?: NotesSuggestParams
+NotesSuggestRequest?: NotesSuggestRequest
+NotesSuggestResponse?: NotesSuggestResponse
+NotesSuggestResult?: NotesSuggestResult
 OutgoingLink?: OutgoingLink
 PendingChanges?: PendingChanges
 PickedNote?: PickedNote
+PreviewLine?: PreviewLine
+ProbablyExisting?: ProbablyExisting
 PropertyCount?: PropertyCount
 PropertyStats?: PropertyStats
+RelatedHit?: RelatedHit
+RelatedSeed?: RelatedSeed
 Request?: Request
 Response?: Response
+SearchClause?: SearchClause
+SearchHit?: SearchHit
+SearchQueryParams?: SearchQueryParams
+SearchQueryRequest?: SearchQueryRequest
+SearchQueryResponse?: SearchQueryResponse
+SearchQueryResult?: SearchQueryResult
+Snippet?: Snippet
 TagCount?: TagCount
 TagItem?: TagItem
 TagStats?: TagStats
+UnlinkedMention?: UnlinkedMention
 UnresolvedTarget?: UnresolvedTarget
+Variant?: Variant
 VaultStatsParams?: VaultStatsParams
 VaultStatsRequest?: VaultStatsRequest
 VaultStatsResponse?: VaultStatsResponse
@@ -73,6 +115,30 @@ export interface BlockItem {
 id: string
 line: number
 }
+export interface ClauseMatch {
+/**
+ * The clause as written in the query, e.g. reward, "reward hacking", a NEAR/3 b.
+ */
+clause: string
+exact: boolean
+/**
+ * For a word: the indexed word that matched (a close spelling when not exact).
+ */
+term: (string | null)
+edits: number
+fields: FieldCount[]
+}
+export interface FieldCount {
+field: ("title" | "aliases" | "headings" | "tags" | "body")
+/**
+ * Occurrences (for a phrase or NEAR pair: its matches).
+ */
+count: number
+}
+export interface Count {
+name: string
+notes: number
+}
 export interface DuplicateName {
 name: string
 paths: string[]
@@ -88,6 +154,16 @@ export interface ErrorResponse {
 jsonrpc: "2.0"
 id: (number | string | null)
 error: ErrorObject
+}
+export interface Facets {
+/**
+ * Tags of all matching notes; a nested tag also counts for its parents.
+ */
+tags: Count[]
+/**
+ * Folders of all matching notes, every ancestor; "" is the vault root.
+ */
+folders: Count[]
 }
 export interface FolderCount {
 folder: string
@@ -286,9 +362,159 @@ unresolved: number
 ambiguous: number
 unresolved_targets: number
 }
+export interface LinkSuggestion {
+a: string
+b: string
+/**
+ * 0.4 shared + 0.3 cited + 0.3 text.
+ */
+score: number
+shared: number
+cited: number
+text: number
+shared_with: string[]
+cited_by: string[]
+terms: string[]
+reason: string
+}
 export interface LinkedNote {
 path: string
 backlinks: number
+linking_notes: number
+}
+export interface LinksSuggestParams {
+limit?: number
+/**
+ * Only pairs with this note.
+ */
+note?: (string | null)
+/**
+ * Only pairs whose paths both contain this text.
+ */
+path?: (string | null)
+}
+/**
+ * Pairs of notes that probably belong linked, with the evidence. Omit "id" to send a notification (no response).
+ */
+export interface LinksSuggestRequest {
+jsonrpc: "2.0"
+method: "links.suggest"
+params?: LinksSuggestParams
+id?: (number | string | null)
+}
+/**
+ * Successful response to links.suggest.
+ */
+export interface LinksSuggestResponse {
+jsonrpc: "2.0"
+id: (number | string | null)
+result: LinksSuggestResult
+}
+export interface LinksSuggestResult {
+note: (string | null)
+path: (string | null)
+/**
+ * Never a pair that is already linked, or a note with itself.
+ */
+links: LinkSuggestion[]
+}
+export interface Mark {
+/**
+ * Offset of the first marked character in the text it belongs to.
+ */
+start: number
+end: number
+/**
+ * fuzzy: a close spelling of a query word.
+ */
+kind: ("exact" | "fuzzy")
+}
+export interface MentionedNote {
+path: string
+title: string
+/**
+ * Titles and aliases that matched.
+ */
+names: string[]
+total: number
+notes: number
+mentions: UnlinkedMention[]
+}
+export interface UnlinkedMention {
+/**
+ * The note with the mention; it does not link to the target.
+ */
+source: string
+line: number
+/**
+ * Offset in the source note's text.
+ */
+start: number
+end: number
+before: string
+text: string
+after: string
+}
+export interface MentionsUnlinkedParams {
+/**
+ * Only mentions of this note; omit for every note.
+ */
+note?: (string | null)
+/**
+ * Ignore titles and aliases shorter than this many words.
+ */
+min_words?: number
+/**
+ * Mentioned notes returned (null = all); totals are never limited.
+ */
+limit?: (number | null)
+/**
+ * Mentions returned per mentioned note.
+ */
+per_note?: number
+}
+/**
+ * Plain-text mentions of note titles and aliases that are not links yet. Omit "id" to send a notification (no response).
+ */
+export interface MentionsUnlinkedRequest {
+jsonrpc: "2.0"
+method: "mentions.unlinked"
+params?: MentionsUnlinkedParams
+id?: (number | string | null)
+}
+/**
+ * Successful response to mentions.unlinked.
+ */
+export interface MentionsUnlinkedResponse {
+jsonrpc: "2.0"
+id: (number | string | null)
+result: MentionsUnlinkedResult
+}
+export interface MentionsUnlinkedResult {
+note: (string | null)
+total: number
+/**
+ * Notes with at least one unlinked mention.
+ */
+notes: number
+/**
+ * By number of mentioning notes.
+ */
+targets: MentionedNote[]
+}
+export interface MissingNote {
+name: string
+linking_notes: number
+links: number
+/**
+ * Other notes that contain the name without linking it.
+ */
+mentions: number
+folders: Count[]
+about: string[]
+}
+export interface NameCount {
+name: string
 linking_notes: number
 }
 export interface NoteGetParams {
@@ -360,6 +586,120 @@ matched_by: (("self" | "path" | "name" | "alias") | null)
 candidates: string[]
 subpath_status: (("found" | "missing" | "not_checked") | null)
 }
+export interface NotePreviewParams {
+/**
+ * Vault-relative path, e.g. from search.query.
+ */
+path: string
+/**
+ * Mark this query's matches, as search.query counts them.
+ */
+query?: (string | null)
+}
+/**
+ * A note's lines with a query's matches marked. Omit "id" to send a notification (no response).
+ */
+export interface NotePreviewRequest {
+jsonrpc: "2.0"
+method: "note.preview"
+params: NotePreviewParams
+id?: (number | string | null)
+}
+/**
+ * Successful response to note.preview.
+ */
+export interface NotePreviewResponse {
+jsonrpc: "2.0"
+id: (number | string | null)
+result: NotePreviewResult
+}
+export interface NotePreviewResult {
+path: string
+title: string
+query: (string | null)
+/**
+ * Whether the note matches the query at all.
+ */
+matched: boolean
+/**
+ * Marked spans in the whole note.
+ */
+marks: number
+first_match_line: (number | null)
+/**
+ * Every line of the file; matches marked in the body and headings.
+ */
+lines: PreviewLine[]
+}
+export interface PreviewLine {
+/**
+ * 1-based line number in the file.
+ */
+number: number
+text: string
+marks: Mark[]
+}
+export interface NoteRelatedParams {
+/**
+ * Note name, path or alias as in a link, or the target of links to a missing note.
+ */
+note: string
+limit?: number
+/**
+ * Only notes with no link to or from the note.
+ */
+unlinked?: boolean
+}
+/**
+ * Notes related to a note by links, text and tags, each with a reason. Omit "id" to send a notification (no response).
+ */
+export interface NoteRelatedRequest {
+jsonrpc: "2.0"
+method: "note.related"
+params: NoteRelatedParams
+id?: (number | string | null)
+}
+/**
+ * Successful response to note.related.
+ */
+export interface NoteRelatedResponse {
+jsonrpc: "2.0"
+id: (number | string | null)
+result: NoteRelatedResult
+}
+export interface NoteRelatedResult {
+seed: RelatedSeed
+compared: number
+hits: RelatedHit[]
+}
+export interface RelatedSeed {
+label: string
+/**
+ * null for a missing note (a link target without a note).
+ */
+path: (string | null)
+/**
+ * For a missing note: the notes that link to it.
+ */
+linkers: string[]
+}
+export interface RelatedHit {
+path: string
+title: string
+/**
+ * 0.5 graph + 0.3 text + 0.2 tags.
+ */
+score: number
+graph: number
+text: number
+tags: number
+linked: boolean
+hops: (number | null)
+/**
+ * E.g. "2 hops via kl-penalty-in-rlhf · shares #rl · similar text (kl, ppo)".
+ */
+reason: string
+}
 export interface NotesPickParams {
 /**
  * Space-separated tokens, each matched as a subsequence.
@@ -403,6 +743,44 @@ score: number
  */
 positions: number[]
 }
+export interface NotesSuggestParams {
+limit?: number
+/**
+ * Only missing notes linked from at least this many notes.
+ */
+min_links?: number
+}
+/**
+ * Missing notes worth writing, overlapping names, links meant for existing notes. Omit "id" to send a notification (no response).
+ */
+export interface NotesSuggestRequest {
+jsonrpc: "2.0"
+method: "notes.suggest"
+params?: NotesSuggestParams
+id?: (number | string | null)
+}
+/**
+ * Successful response to notes.suggest.
+ */
+export interface NotesSuggestResponse {
+jsonrpc: "2.0"
+id: (number | string | null)
+result: NotesSuggestResult
+}
+export interface NotesSuggestResult {
+total_missing: number
+notes: MissingNote[]
+/**
+ * Overlapping names: the same idea twice, or a topic and a narrower one.
+ */
+same_idea: NameCount[][]
+existing: ProbablyExisting[]
+}
+export interface ProbablyExisting {
+name: string
+linking_notes: number
+path: string
+}
 export interface PropertyCount {
 key: string
 notes: number
@@ -425,6 +803,37 @@ export interface VaultStatsParams {
  * Rows in each top-N list.
  */
 top?: number
+}
+/**
+ * Search with text and structure; ranked hits with snippets, tag and folder counts. Omit "id" to send a notification (no response).
+ */
+export interface SearchQueryRequest {
+jsonrpc: "2.0"
+method: "search.query"
+params: SearchQueryParams
+id?: (number | string | null)
+}
+export interface SearchQueryParams {
+/**
+ * The query language of `vault search` (README: "Search and queries"). A syntax error is error -32003, with data.start/data.end (offsets in the query) and data.hint.
+ */
+query: string
+/**
+ * Hits returned; total counts all matches.
+ */
+limit?: number
+/**
+ * Let words match close spellings.
+ */
+fuzzy?: boolean
+/**
+ * Rows of tag and folder counts (0 = all).
+ */
+facets?: number
+/**
+ * Longest snippet, in characters.
+ */
+snippet_width?: number
 }
 /**
  * Successful response to vault.stats.
@@ -470,5 +879,76 @@ target: string
 links: number
 linking_notes: number
 }
+/**
+ * Successful response to search.query.
+ */
+export interface SearchQueryResponse {
+jsonrpc: "2.0"
+id: (number | string | null)
+result: SearchQueryResult
+}
+export interface SearchQueryResult {
+query: string
+/**
+ * The parsed query as an s-expression.
+ */
+tree: string
+/**
+ * Notes in the vault.
+ */
+notes: number
+/**
+ * Matching notes before the limit.
+ */
+total: number
+order: ("exact_then_score" | "score" | "path")
+warnings: string[]
+/**
+ * Words, phrases and NEAR pairs that rank (not negated).
+ */
+clauses: SearchClause[]
+hits: SearchHit[]
+facets: Facets
+}
+export interface SearchClause {
+label: string
+kind: ("word" | "phrase" | "near")
+required: boolean
+/**
+ * Notes that match it exactly.
+ */
+notes: number
+/**
+ * Close spellings found in the index.
+ */
+variants: Variant[]
+}
+export interface Variant {
+term: string
+edits: number
+notes: number
+}
+export interface SearchHit {
+path: string
+title: string
+score: number
+/**
+ * Words, phrases and NEAR pairs matched exactly; the first sort key.
+ */
+exact: number
+/**
+ * Empty when the note matched only the filters.
+ */
+matches: ClauseMatch[]
+title_marks: Mark[]
+snippet: (Snippet | null)
+}
+export interface Snippet {
+field: ("body" | "headings" | "aliases" | "tags")
+text: string
+marks: Mark[]
+truncated_start: boolean
+truncated_end: boolean
+}
 
-export type VaultMethod = 'index.build' | 'index.status' | 'vault.stats' | 'health.report' | 'notes.pick' | 'note.get';
+export type VaultMethod = 'index.build' | 'index.status' | 'vault.stats' | 'health.report' | 'notes.pick' | 'note.get' | 'search.query' | 'note.preview' | 'note.related' | 'links.suggest' | 'notes.suggest' | 'mentions.unlinked';

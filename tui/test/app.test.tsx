@@ -307,6 +307,22 @@ describe('prompt: suggestions and history (R3, R8)', () => {
 		await app.waitFor((f) => promptLine(f) === '> ts');
 	});
 
+	test('text and Enter in one read (fast typing, a busy machine) runs the command', async () => {
+		const app = renderApp();
+		await app.waitFor('index fresh');
+		await app.type('/hel');
+		app.stdin.write('p\r');
+		await app.waitFor('Keys');
+		expect(promptLine(app.frame())).toContain('Try /help');
+	});
+
+	test('a pasted multi-line text becomes one line and is not run', async () => {
+		const app = renderApp();
+		await app.waitFor('index fresh');
+		app.stdin.write('/note one\ntwo\rthree');
+		await app.waitFor((f) => promptLine(f) === '> /note one two three');
+	});
+
 	test('Enter is ignored while a command runs; a spinner shows', async () => {
 		let finish: () => void = () => {};
 		const api = fakeApi({

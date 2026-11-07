@@ -172,11 +172,13 @@ export type PromptProps = {
 	registry: CommandRegistry;
 	history: PromptHistory;
 	busy: boolean;
+	/** An interactive view has the keyboard: hide the prompt, keep its state. */
+	inactive?: boolean;
 	onSubmit: (line: string) => void;
 	onExit: () => void;
 };
 
-export function Prompt({api, registry, history, busy, onSubmit, onExit}: PromptProps) {
+export function Prompt({api, registry, history, busy, inactive = false, onSubmit, onExit}: PromptProps) {
 	const [state, setState] = useState<EditorState>({value: '', cursor: 0, selected: 0, dismissed: undefined, recalled: false});
 	const ref = useRef(state);
 	const update = (next: Partial<EditorState>) => {
@@ -201,7 +203,14 @@ export function Prompt({api, registry, history, busy, onSubmit, onExit}: PromptP
 		onSubmit(line);
 	};
 
+	// Always subscribed: while an interactive view has the keys the prompt ignores them, and
+	// it takes them back the moment the view closes (unsubscribing would leave a gap in which
+	// keys are lost, and a stale subscription could still catch the view's first keys).
 	useInput((input, key) => {
+		if (inactive) {
+			return;
+		}
+
 		const {value, cursor, selected} = ref.current;
 		const {mention, mentionKey, pickerOpen, suggestions, suggestionsOpen} = overlays(ref.current, registry);
 
@@ -294,7 +303,16 @@ export function Prompt({api, registry, history, busy, onSubmit, onExit}: PromptP
 		} else if (key.delete) {
 			update({value: value.slice(0, cursor) + value.slice(cursor + 1), selected: 0, dismissed: undefined, recalled: false});
 		} else if (input && !key.ctrl && !key.meta && !key.escape && !key.tab) {
-			const text = input.replaceAll(/\r?\n/g, ' ');
+			// Text and Enter can arrive in one read ("p\r") when typing fast or when the machine is
+			// busy: insert the text, then submit. Newlines inside a chunk (a pasted multi-line text)
+			// become spaces, so a paste is never run line by line.
+			const enter = input.length > 1 && /[\r\n]$/.test(input);
+			const text = (enter ? input.replace(/[\r\n]+$/, '') : input).replaceAll(/\r\n|\r|\n/g, ' ');
+			if (enter) {
+				submit(value.slice(0, cursor) + text + value.slice(cursor));
+				return;
+			}
+
 			update({
 				value: value.slice(0, cursor) + text + value.slice(cursor),
 				cursor: cursor + text.length,
@@ -306,10 +324,10 @@ export function Prompt({api, registry, history, busy, onSubmit, onExit}: PromptP
 	});
 
 	return (
-		<Box flexDirection="column">
+		<Box flexDirection="column" display={inactive ? 'none' : 'flex'}>
 			<Box borderStyle="round" borderColor="gray" paddingX={1}>
 				<Text color={busy ? 'gray' : theme.accent}>{'> '}</Text>
-				<InputLine value={state.value} cursor={state.cursor} active={!busy} placeholder='Try /help, /stats, /health or /note @…' />
+				<InputLine value={state.value} cursor={state.cursor} active={!busy} placeholder='Try /help, /search, /related @…, /stats or /note @…' />
 			</Box>
 			{view.pickerOpen ? <NotePicker picker={picker} selected={Math.min(state.selected, Math.max(0, picker.results.length - 1))} /> : null}
 			{view.suggestionsOpen ? (

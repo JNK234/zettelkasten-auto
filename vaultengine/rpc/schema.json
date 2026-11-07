@@ -119,6 +119,96 @@
       "response": {
         "$ref": "#/$defs/NoteGetResponse"
       }
+    },
+    "search.query": {
+      "summary": "Search with text and structure; ranked hits with snippets, tag and folder counts.",
+      "params": {
+        "$ref": "#/$defs/SearchQueryParams"
+      },
+      "result": {
+        "$ref": "#/$defs/SearchQueryResult"
+      },
+      "request": {
+        "$ref": "#/$defs/SearchQueryRequest"
+      },
+      "response": {
+        "$ref": "#/$defs/SearchQueryResponse"
+      }
+    },
+    "note.preview": {
+      "summary": "A note's lines with a query's matches marked.",
+      "params": {
+        "$ref": "#/$defs/NotePreviewParams"
+      },
+      "result": {
+        "$ref": "#/$defs/NotePreviewResult"
+      },
+      "request": {
+        "$ref": "#/$defs/NotePreviewRequest"
+      },
+      "response": {
+        "$ref": "#/$defs/NotePreviewResponse"
+      }
+    },
+    "note.related": {
+      "summary": "Notes related to a note by links, text and tags, each with a reason.",
+      "params": {
+        "$ref": "#/$defs/NoteRelatedParams"
+      },
+      "result": {
+        "$ref": "#/$defs/NoteRelatedResult"
+      },
+      "request": {
+        "$ref": "#/$defs/NoteRelatedRequest"
+      },
+      "response": {
+        "$ref": "#/$defs/NoteRelatedResponse"
+      }
+    },
+    "links.suggest": {
+      "summary": "Pairs of notes that probably belong linked, with the evidence.",
+      "params": {
+        "$ref": "#/$defs/LinksSuggestParams"
+      },
+      "result": {
+        "$ref": "#/$defs/LinksSuggestResult"
+      },
+      "request": {
+        "$ref": "#/$defs/LinksSuggestRequest"
+      },
+      "response": {
+        "$ref": "#/$defs/LinksSuggestResponse"
+      }
+    },
+    "notes.suggest": {
+      "summary": "Missing notes worth writing, overlapping names, links meant for existing notes.",
+      "params": {
+        "$ref": "#/$defs/NotesSuggestParams"
+      },
+      "result": {
+        "$ref": "#/$defs/NotesSuggestResult"
+      },
+      "request": {
+        "$ref": "#/$defs/NotesSuggestRequest"
+      },
+      "response": {
+        "$ref": "#/$defs/NotesSuggestResponse"
+      }
+    },
+    "mentions.unlinked": {
+      "summary": "Plain-text mentions of note titles and aliases that are not links yet.",
+      "params": {
+        "$ref": "#/$defs/MentionsUnlinkedParams"
+      },
+      "result": {
+        "$ref": "#/$defs/MentionsUnlinkedResult"
+      },
+      "request": {
+        "$ref": "#/$defs/MentionsUnlinkedRequest"
+      },
+      "response": {
+        "$ref": "#/$defs/MentionsUnlinkedResponse"
+      }
     }
   },
   "x-errors": {
@@ -128,7 +218,8 @@
     "-32602": "Invalid params",
     "-32603": "Internal error",
     "-32001": "Index not built",
-    "-32002": "Note not found"
+    "-32002": "Note not found",
+    "-32003": "Invalid query"
   },
   "$defs": {
     "AmbiguousLink": {
@@ -180,6 +271,71 @@
         "line"
       ],
       "title": "BlockItem",
+      "type": "object"
+    },
+    "ClauseMatch": {
+      "additionalProperties": false,
+      "properties": {
+        "clause": {
+          "description": "The clause as written in the query, e.g. reward, \"reward hacking\", a NEAR/3 b.",
+          "title": "Clause",
+          "type": "string"
+        },
+        "exact": {
+          "title": "Exact",
+          "type": "boolean"
+        },
+        "term": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "For a word: the indexed word that matched (a close spelling when not exact).",
+          "title": "Term"
+        },
+        "edits": {
+          "title": "Edits",
+          "type": "integer"
+        },
+        "fields": {
+          "items": {
+            "$ref": "#/$defs/FieldCount"
+          },
+          "title": "Fields",
+          "type": "array"
+        }
+      },
+      "required": [
+        "clause",
+        "exact",
+        "term",
+        "edits",
+        "fields"
+      ],
+      "title": "ClauseMatch",
+      "type": "object"
+    },
+    "Count": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "notes": {
+          "title": "Notes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "name",
+        "notes"
+      ],
+      "title": "Count",
       "type": "object"
     },
     "DuplicateName": {
@@ -259,6 +415,60 @@
         "error"
       ],
       "title": "ErrorResponse",
+      "type": "object"
+    },
+    "Facets": {
+      "additionalProperties": false,
+      "properties": {
+        "tags": {
+          "description": "Tags of all matching notes; a nested tag also counts for its parents.",
+          "items": {
+            "$ref": "#/$defs/Count"
+          },
+          "title": "Tags",
+          "type": "array"
+        },
+        "folders": {
+          "description": "Folders of all matching notes, every ancestor; \"\" is the vault root.",
+          "items": {
+            "$ref": "#/$defs/Count"
+          },
+          "title": "Folders",
+          "type": "array"
+        }
+      },
+      "required": [
+        "tags",
+        "folders"
+      ],
+      "title": "Facets",
+      "type": "object"
+    },
+    "FieldCount": {
+      "additionalProperties": false,
+      "properties": {
+        "field": {
+          "enum": [
+            "title",
+            "aliases",
+            "headings",
+            "tags",
+            "body"
+          ],
+          "title": "Field",
+          "type": "string"
+        },
+        "count": {
+          "description": "Occurrences (for a phrase or NEAR pair: its matches).",
+          "title": "Count",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "field",
+        "count"
+      ],
+      "title": "FieldCount",
       "type": "object"
     },
     "FolderCount": {
@@ -1073,6 +1283,75 @@
       "title": "LinkRef",
       "type": "object"
     },
+    "LinkSuggestion": {
+      "additionalProperties": false,
+      "properties": {
+        "a": {
+          "title": "A",
+          "type": "string"
+        },
+        "b": {
+          "title": "B",
+          "type": "string"
+        },
+        "score": {
+          "description": "0.4 shared + 0.3 cited + 0.3 text.",
+          "title": "Score",
+          "type": "number"
+        },
+        "shared": {
+          "title": "Shared",
+          "type": "number"
+        },
+        "cited": {
+          "title": "Cited",
+          "type": "number"
+        },
+        "text": {
+          "title": "Text",
+          "type": "number"
+        },
+        "shared_with": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Shared With",
+          "type": "array"
+        },
+        "cited_by": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Cited By",
+          "type": "array"
+        },
+        "terms": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Terms",
+          "type": "array"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "a",
+        "b",
+        "score",
+        "shared",
+        "cited",
+        "text",
+        "shared_with",
+        "cited_by",
+        "terms",
+        "reason"
+      ],
+      "title": "LinkSuggestion",
+      "type": "object"
+    },
     "LinkedNote": {
       "additionalProperties": false,
       "properties": {
@@ -1095,6 +1374,453 @@
         "linking_notes"
       ],
       "title": "LinkedNote",
+      "type": "object"
+    },
+    "LinksSuggestParams": {
+      "additionalProperties": false,
+      "properties": {
+        "limit": {
+          "default": 10,
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Only pairs with this note.",
+          "title": "Note"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Only pairs whose paths both contain this text.",
+          "title": "Path"
+        }
+      },
+      "title": "LinksSuggestParams",
+      "type": "object"
+    },
+    "LinksSuggestRequest": {
+      "additionalProperties": false,
+      "description": "Pairs of notes that probably belong linked, with the evidence. Omit \"id\" to send a notification (no response).",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "method": {
+          "const": "links.suggest",
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/LinksSuggestParams"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "method"
+      ],
+      "title": "LinksSuggestRequest",
+      "type": "object"
+    },
+    "LinksSuggestResponse": {
+      "additionalProperties": false,
+      "description": "Successful response to links.suggest.",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Id"
+        },
+        "result": {
+          "$ref": "#/$defs/LinksSuggestResult"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "result"
+      ],
+      "title": "LinksSuggestResponse",
+      "type": "object"
+    },
+    "LinksSuggestResult": {
+      "additionalProperties": false,
+      "properties": {
+        "note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Note"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Path"
+        },
+        "links": {
+          "description": "Never a pair that is already linked, or a note with itself.",
+          "items": {
+            "$ref": "#/$defs/LinkSuggestion"
+          },
+          "title": "Links",
+          "type": "array"
+        }
+      },
+      "required": [
+        "note",
+        "path",
+        "links"
+      ],
+      "title": "LinksSuggestResult",
+      "type": "object"
+    },
+    "Mark": {
+      "additionalProperties": false,
+      "properties": {
+        "start": {
+          "description": "Offset of the first marked character in the text it belongs to.",
+          "title": "Start",
+          "type": "integer"
+        },
+        "end": {
+          "title": "End",
+          "type": "integer"
+        },
+        "kind": {
+          "description": "fuzzy: a close spelling of a query word.",
+          "enum": [
+            "exact",
+            "fuzzy"
+          ],
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "start",
+        "end",
+        "kind"
+      ],
+      "title": "Mark",
+      "type": "object"
+    },
+    "MentionedNote": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "names": {
+          "description": "Titles and aliases that matched.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Names",
+          "type": "array"
+        },
+        "total": {
+          "title": "Total",
+          "type": "integer"
+        },
+        "notes": {
+          "title": "Notes",
+          "type": "integer"
+        },
+        "mentions": {
+          "items": {
+            "$ref": "#/$defs/UnlinkedMention"
+          },
+          "title": "Mentions",
+          "type": "array"
+        }
+      },
+      "required": [
+        "path",
+        "title",
+        "names",
+        "total",
+        "notes",
+        "mentions"
+      ],
+      "title": "MentionedNote",
+      "type": "object"
+    },
+    "MentionsUnlinkedParams": {
+      "additionalProperties": false,
+      "properties": {
+        "note": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Only mentions of this note; omit for every note.",
+          "title": "Note"
+        },
+        "min_words": {
+          "default": 1,
+          "description": "Ignore titles and aliases shorter than this many words.",
+          "minimum": 1,
+          "title": "Min Words",
+          "type": "integer"
+        },
+        "limit": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": 20,
+          "description": "Mentioned notes returned (null = all); totals are never limited.",
+          "title": "Limit"
+        },
+        "per_note": {
+          "default": 20,
+          "description": "Mentions returned per mentioned note.",
+          "maximum": 10000,
+          "minimum": 1,
+          "title": "Per Note",
+          "type": "integer"
+        }
+      },
+      "title": "MentionsUnlinkedParams",
+      "type": "object"
+    },
+    "MentionsUnlinkedRequest": {
+      "additionalProperties": false,
+      "description": "Plain-text mentions of note titles and aliases that are not links yet. Omit \"id\" to send a notification (no response).",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "method": {
+          "const": "mentions.unlinked",
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/MentionsUnlinkedParams"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "method"
+      ],
+      "title": "MentionsUnlinkedRequest",
+      "type": "object"
+    },
+    "MentionsUnlinkedResponse": {
+      "additionalProperties": false,
+      "description": "Successful response to mentions.unlinked.",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Id"
+        },
+        "result": {
+          "$ref": "#/$defs/MentionsUnlinkedResult"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "result"
+      ],
+      "title": "MentionsUnlinkedResponse",
+      "type": "object"
+    },
+    "MentionsUnlinkedResult": {
+      "additionalProperties": false,
+      "properties": {
+        "note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Note"
+        },
+        "total": {
+          "title": "Total",
+          "type": "integer"
+        },
+        "notes": {
+          "description": "Notes with at least one unlinked mention.",
+          "title": "Notes",
+          "type": "integer"
+        },
+        "targets": {
+          "description": "By number of mentioning notes.",
+          "items": {
+            "$ref": "#/$defs/MentionedNote"
+          },
+          "title": "Targets",
+          "type": "array"
+        }
+      },
+      "required": [
+        "note",
+        "total",
+        "notes",
+        "targets"
+      ],
+      "title": "MentionsUnlinkedResult",
+      "type": "object"
+    },
+    "MissingNote": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "linking_notes": {
+          "title": "Linking Notes",
+          "type": "integer"
+        },
+        "links": {
+          "title": "Links",
+          "type": "integer"
+        },
+        "mentions": {
+          "description": "Other notes that contain the name without linking it.",
+          "title": "Mentions",
+          "type": "integer"
+        },
+        "folders": {
+          "items": {
+            "$ref": "#/$defs/Count"
+          },
+          "title": "Folders",
+          "type": "array"
+        },
+        "about": {
+          "items": {
+            "type": "string"
+          },
+          "title": "About",
+          "type": "array"
+        }
+      },
+      "required": [
+        "name",
+        "linking_notes",
+        "links",
+        "mentions",
+        "folders",
+        "about"
+      ],
+      "title": "MissingNote",
       "type": "object"
     },
     "MissingSubpath": {
@@ -1138,6 +1864,25 @@
         "subpath"
       ],
       "title": "MissingSubpath",
+      "type": "object"
+    },
+    "NameCount": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "linking_notes": {
+          "title": "Linking Notes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "name",
+        "linking_notes"
+      ],
+      "title": "NameCount",
       "type": "object"
     },
     "NoteGetParams": {
@@ -1333,6 +2078,307 @@
       "title": "NoteGetResult",
       "type": "object"
     },
+    "NotePreviewParams": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "description": "Vault-relative path, e.g. from search.query.",
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        },
+        "query": {
+          "anyOf": [
+            {
+              "maxLength": 2000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Mark this query's matches, as search.query counts them.",
+          "title": "Query"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "NotePreviewParams",
+      "type": "object"
+    },
+    "NotePreviewRequest": {
+      "additionalProperties": false,
+      "description": "A note's lines with a query's matches marked. Omit \"id\" to send a notification (no response).",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "method": {
+          "const": "note.preview",
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/NotePreviewParams"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "method",
+        "params"
+      ],
+      "title": "NotePreviewRequest",
+      "type": "object"
+    },
+    "NotePreviewResponse": {
+      "additionalProperties": false,
+      "description": "Successful response to note.preview.",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Id"
+        },
+        "result": {
+          "$ref": "#/$defs/NotePreviewResult"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "result"
+      ],
+      "title": "NotePreviewResponse",
+      "type": "object"
+    },
+    "NotePreviewResult": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "query": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Query"
+        },
+        "matched": {
+          "description": "Whether the note matches the query at all.",
+          "title": "Matched",
+          "type": "boolean"
+        },
+        "marks": {
+          "description": "Marked spans in the whole note.",
+          "title": "Marks",
+          "type": "integer"
+        },
+        "first_match_line": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "First Match Line"
+        },
+        "lines": {
+          "description": "Every line of the file; matches marked in the body and headings.",
+          "items": {
+            "$ref": "#/$defs/PreviewLine"
+          },
+          "title": "Lines",
+          "type": "array"
+        }
+      },
+      "required": [
+        "path",
+        "title",
+        "query",
+        "matched",
+        "marks",
+        "first_match_line",
+        "lines"
+      ],
+      "title": "NotePreviewResult",
+      "type": "object"
+    },
+    "NoteRelatedParams": {
+      "additionalProperties": false,
+      "properties": {
+        "note": {
+          "description": "Note name, path or alias as in a link, or the target of links to a missing note.",
+          "minLength": 1,
+          "title": "Note",
+          "type": "string"
+        },
+        "limit": {
+          "default": 10,
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        },
+        "unlinked": {
+          "default": false,
+          "description": "Only notes with no link to or from the note.",
+          "title": "Unlinked",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "note"
+      ],
+      "title": "NoteRelatedParams",
+      "type": "object"
+    },
+    "NoteRelatedRequest": {
+      "additionalProperties": false,
+      "description": "Notes related to a note by links, text and tags, each with a reason. Omit \"id\" to send a notification (no response).",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "method": {
+          "const": "note.related",
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/NoteRelatedParams"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "method",
+        "params"
+      ],
+      "title": "NoteRelatedRequest",
+      "type": "object"
+    },
+    "NoteRelatedResponse": {
+      "additionalProperties": false,
+      "description": "Successful response to note.related.",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Id"
+        },
+        "result": {
+          "$ref": "#/$defs/NoteRelatedResult"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "result"
+      ],
+      "title": "NoteRelatedResponse",
+      "type": "object"
+    },
+    "NoteRelatedResult": {
+      "additionalProperties": false,
+      "properties": {
+        "seed": {
+          "$ref": "#/$defs/RelatedSeed"
+        },
+        "compared": {
+          "title": "Compared",
+          "type": "integer"
+        },
+        "hits": {
+          "items": {
+            "$ref": "#/$defs/RelatedHit"
+          },
+          "title": "Hits",
+          "type": "array"
+        }
+      },
+      "required": [
+        "seed",
+        "compared",
+        "hits"
+      ],
+      "title": "NoteRelatedResult",
+      "type": "object"
+    },
     "NotesPickParams": {
       "additionalProperties": false,
       "properties": {
@@ -1459,6 +2505,144 @@
         "results"
       ],
       "title": "NotesPickResult",
+      "type": "object"
+    },
+    "NotesSuggestParams": {
+      "additionalProperties": false,
+      "properties": {
+        "limit": {
+          "default": 10,
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        },
+        "min_links": {
+          "default": 2,
+          "description": "Only missing notes linked from at least this many notes.",
+          "minimum": 1,
+          "title": "Min Links",
+          "type": "integer"
+        }
+      },
+      "title": "NotesSuggestParams",
+      "type": "object"
+    },
+    "NotesSuggestRequest": {
+      "additionalProperties": false,
+      "description": "Missing notes worth writing, overlapping names, links meant for existing notes. Omit \"id\" to send a notification (no response).",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "method": {
+          "const": "notes.suggest",
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/NotesSuggestParams"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "method"
+      ],
+      "title": "NotesSuggestRequest",
+      "type": "object"
+    },
+    "NotesSuggestResponse": {
+      "additionalProperties": false,
+      "description": "Successful response to notes.suggest.",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Id"
+        },
+        "result": {
+          "$ref": "#/$defs/NotesSuggestResult"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "result"
+      ],
+      "title": "NotesSuggestResponse",
+      "type": "object"
+    },
+    "NotesSuggestResult": {
+      "additionalProperties": false,
+      "properties": {
+        "total_missing": {
+          "title": "Total Missing",
+          "type": "integer"
+        },
+        "notes": {
+          "items": {
+            "$ref": "#/$defs/MissingNote"
+          },
+          "title": "Notes",
+          "type": "array"
+        },
+        "same_idea": {
+          "description": "Overlapping names: the same idea twice, or a topic and a narrower one.",
+          "items": {
+            "items": {
+              "$ref": "#/$defs/NameCount"
+            },
+            "type": "array"
+          },
+          "title": "Same Idea",
+          "type": "array"
+        },
+        "existing": {
+          "items": {
+            "$ref": "#/$defs/ProbablyExisting"
+          },
+          "title": "Existing",
+          "type": "array"
+        }
+      },
+      "required": [
+        "total_missing",
+        "notes",
+        "same_idea",
+        "existing"
+      ],
+      "title": "NotesSuggestResult",
       "type": "object"
     },
     "OutgoingLink": {
@@ -1691,6 +2875,58 @@
       "title": "PickedNote",
       "type": "object"
     },
+    "PreviewLine": {
+      "additionalProperties": false,
+      "properties": {
+        "number": {
+          "description": "1-based line number in the file.",
+          "title": "Number",
+          "type": "integer"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "marks": {
+          "items": {
+            "$ref": "#/$defs/Mark"
+          },
+          "title": "Marks",
+          "type": "array"
+        }
+      },
+      "required": [
+        "number",
+        "text",
+        "marks"
+      ],
+      "title": "PreviewLine",
+      "type": "object"
+    },
+    "ProbablyExisting": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "linking_notes": {
+          "title": "Linking Notes",
+          "type": "integer"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "linking_notes",
+        "path"
+      ],
+      "title": "ProbablyExisting",
+      "type": "object"
+    },
     "PropertyCount": {
       "additionalProperties": false,
       "properties": {
@@ -1732,6 +2968,105 @@
       "title": "PropertyStats",
       "type": "object"
     },
+    "RelatedHit": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "score": {
+          "description": "0.5 graph + 0.3 text + 0.2 tags.",
+          "title": "Score",
+          "type": "number"
+        },
+        "graph": {
+          "title": "Graph",
+          "type": "number"
+        },
+        "text": {
+          "title": "Text",
+          "type": "number"
+        },
+        "tags": {
+          "title": "Tags",
+          "type": "number"
+        },
+        "linked": {
+          "title": "Linked",
+          "type": "boolean"
+        },
+        "hops": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Hops"
+        },
+        "reason": {
+          "description": "E.g. \"2 hops via kl-penalty-in-rlhf · shares #rl · similar text (kl, ppo)\".",
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "title",
+        "score",
+        "graph",
+        "text",
+        "tags",
+        "linked",
+        "hops",
+        "reason"
+      ],
+      "title": "RelatedHit",
+      "type": "object"
+    },
+    "RelatedSeed": {
+      "additionalProperties": false,
+      "properties": {
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "null for a missing note (a link target without a note).",
+          "title": "Path"
+        },
+        "linkers": {
+          "description": "For a missing note: the notes that link to it.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Linkers",
+          "type": "array"
+        }
+      },
+      "required": [
+        "label",
+        "path",
+        "linkers"
+      ],
+      "title": "RelatedSeed",
+      "type": "object"
+    },
     "Request": {
       "description": "Any request this server accepts.",
       "anyOf": [
@@ -1752,6 +3087,24 @@
         },
         {
           "$ref": "#/$defs/NoteGetRequest"
+        },
+        {
+          "$ref": "#/$defs/SearchQueryRequest"
+        },
+        {
+          "$ref": "#/$defs/NotePreviewRequest"
+        },
+        {
+          "$ref": "#/$defs/NoteRelatedRequest"
+        },
+        {
+          "$ref": "#/$defs/LinksSuggestRequest"
+        },
+        {
+          "$ref": "#/$defs/NotesSuggestRequest"
+        },
+        {
+          "$ref": "#/$defs/MentionsUnlinkedRequest"
         }
       ]
     },
@@ -1777,9 +3130,366 @@
           "$ref": "#/$defs/NoteGetResponse"
         },
         {
+          "$ref": "#/$defs/SearchQueryResponse"
+        },
+        {
+          "$ref": "#/$defs/NotePreviewResponse"
+        },
+        {
+          "$ref": "#/$defs/NoteRelatedResponse"
+        },
+        {
+          "$ref": "#/$defs/LinksSuggestResponse"
+        },
+        {
+          "$ref": "#/$defs/NotesSuggestResponse"
+        },
+        {
+          "$ref": "#/$defs/MentionsUnlinkedResponse"
+        },
+        {
           "$ref": "#/$defs/ErrorResponse"
         }
       ]
+    },
+    "SearchClause": {
+      "additionalProperties": false,
+      "properties": {
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "word",
+            "phrase",
+            "near"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "required": {
+          "title": "Required",
+          "type": "boolean"
+        },
+        "notes": {
+          "description": "Notes that match it exactly.",
+          "title": "Notes",
+          "type": "integer"
+        },
+        "variants": {
+          "description": "Close spellings found in the index.",
+          "items": {
+            "$ref": "#/$defs/Variant"
+          },
+          "title": "Variants",
+          "type": "array"
+        }
+      },
+      "required": [
+        "label",
+        "kind",
+        "required",
+        "notes",
+        "variants"
+      ],
+      "title": "SearchClause",
+      "type": "object"
+    },
+    "SearchHit": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "score": {
+          "title": "Score",
+          "type": "number"
+        },
+        "exact": {
+          "description": "Words, phrases and NEAR pairs matched exactly; the first sort key.",
+          "title": "Exact",
+          "type": "integer"
+        },
+        "matches": {
+          "description": "Empty when the note matched only the filters.",
+          "items": {
+            "$ref": "#/$defs/ClauseMatch"
+          },
+          "title": "Matches",
+          "type": "array"
+        },
+        "title_marks": {
+          "items": {
+            "$ref": "#/$defs/Mark"
+          },
+          "title": "Title Marks",
+          "type": "array"
+        },
+        "snippet": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Snippet"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "path",
+        "title",
+        "score",
+        "exact",
+        "matches",
+        "title_marks",
+        "snippet"
+      ],
+      "title": "SearchHit",
+      "type": "object"
+    },
+    "SearchQueryParams": {
+      "additionalProperties": false,
+      "properties": {
+        "query": {
+          "description": "The query language of `vault search` (README: \"Search and queries\"). A syntax error is error -32003, with data.start/data.end (offsets in the query) and data.hint.",
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Query",
+          "type": "string"
+        },
+        "limit": {
+          "default": 10,
+          "description": "Hits returned; total counts all matches.",
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        },
+        "fuzzy": {
+          "default": true,
+          "description": "Let words match close spellings.",
+          "title": "Fuzzy",
+          "type": "boolean"
+        },
+        "facets": {
+          "default": 8,
+          "description": "Rows of tag and folder counts (0 = all).",
+          "maximum": 200,
+          "minimum": 0,
+          "title": "Facets",
+          "type": "integer"
+        },
+        "snippet_width": {
+          "default": 100,
+          "description": "Longest snippet, in characters.",
+          "maximum": 400,
+          "minimum": 20,
+          "title": "Snippet Width",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "title": "SearchQueryParams",
+      "type": "object"
+    },
+    "SearchQueryRequest": {
+      "additionalProperties": false,
+      "description": "Search with text and structure; ranked hits with snippets, tag and folder counts. Omit \"id\" to send a notification (no response).",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "method": {
+          "const": "search.query",
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/SearchQueryParams"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "method",
+        "params"
+      ],
+      "title": "SearchQueryRequest",
+      "type": "object"
+    },
+    "SearchQueryResponse": {
+      "additionalProperties": false,
+      "description": "Successful response to search.query.",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Id"
+        },
+        "result": {
+          "$ref": "#/$defs/SearchQueryResult"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "result"
+      ],
+      "title": "SearchQueryResponse",
+      "type": "object"
+    },
+    "SearchQueryResult": {
+      "additionalProperties": false,
+      "properties": {
+        "query": {
+          "title": "Query",
+          "type": "string"
+        },
+        "tree": {
+          "description": "The parsed query as an s-expression.",
+          "title": "Tree",
+          "type": "string"
+        },
+        "notes": {
+          "description": "Notes in the vault.",
+          "title": "Notes",
+          "type": "integer"
+        },
+        "total": {
+          "description": "Matching notes before the limit.",
+          "title": "Total",
+          "type": "integer"
+        },
+        "order": {
+          "enum": [
+            "exact_then_score",
+            "score",
+            "path"
+          ],
+          "title": "Order",
+          "type": "string"
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Warnings",
+          "type": "array"
+        },
+        "clauses": {
+          "description": "Words, phrases and NEAR pairs that rank (not negated).",
+          "items": {
+            "$ref": "#/$defs/SearchClause"
+          },
+          "title": "Clauses",
+          "type": "array"
+        },
+        "hits": {
+          "items": {
+            "$ref": "#/$defs/SearchHit"
+          },
+          "title": "Hits",
+          "type": "array"
+        },
+        "facets": {
+          "$ref": "#/$defs/Facets"
+        }
+      },
+      "required": [
+        "query",
+        "tree",
+        "notes",
+        "total",
+        "order",
+        "warnings",
+        "clauses",
+        "hits",
+        "facets"
+      ],
+      "title": "SearchQueryResult",
+      "type": "object"
+    },
+    "Snippet": {
+      "additionalProperties": false,
+      "properties": {
+        "field": {
+          "enum": [
+            "body",
+            "headings",
+            "aliases",
+            "tags"
+          ],
+          "title": "Field",
+          "type": "string"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "marks": {
+          "items": {
+            "$ref": "#/$defs/Mark"
+          },
+          "title": "Marks",
+          "type": "array"
+        },
+        "truncated_start": {
+          "title": "Truncated Start",
+          "type": "boolean"
+        },
+        "truncated_end": {
+          "title": "Truncated End",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "field",
+        "text",
+        "marks",
+        "truncated_start",
+        "truncated_end"
+      ],
+      "title": "Snippet",
+      "type": "object"
     },
     "TagCount": {
       "additionalProperties": false,
@@ -1862,6 +3572,52 @@
       "title": "TagStats",
       "type": "object"
     },
+    "UnlinkedMention": {
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "description": "The note with the mention; it does not link to the target.",
+          "title": "Source",
+          "type": "string"
+        },
+        "line": {
+          "title": "Line",
+          "type": "integer"
+        },
+        "start": {
+          "description": "Offset in the source note's text.",
+          "title": "Start",
+          "type": "integer"
+        },
+        "end": {
+          "title": "End",
+          "type": "integer"
+        },
+        "before": {
+          "title": "Before",
+          "type": "string"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "after": {
+          "title": "After",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "line",
+        "start",
+        "end",
+        "before",
+        "text",
+        "after"
+      ],
+      "title": "UnlinkedMention",
+      "type": "object"
+    },
     "UnresolvedTarget": {
       "additionalProperties": false,
       "properties": {
@@ -1882,6 +3638,30 @@
         "links"
       ],
       "title": "UnresolvedTarget",
+      "type": "object"
+    },
+    "Variant": {
+      "additionalProperties": false,
+      "properties": {
+        "term": {
+          "title": "Term",
+          "type": "string"
+        },
+        "edits": {
+          "title": "Edits",
+          "type": "integer"
+        },
+        "notes": {
+          "title": "Notes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "term",
+        "edits",
+        "notes"
+      ],
+      "title": "Variant",
       "type": "object"
     },
     "VaultStatsParams": {

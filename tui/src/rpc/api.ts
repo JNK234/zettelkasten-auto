@@ -10,9 +10,21 @@ import type {
 	IndexBuildParams,
 	IndexBuildResult,
 	IndexStatusResult,
+	LinksSuggestParams,
+	LinksSuggestResult,
+	MentionsUnlinkedParams,
+	MentionsUnlinkedResult,
 	NoteGetResult,
+	NotePreviewParams,
+	NotePreviewResult,
+	NoteRelatedParams,
+	NoteRelatedResult,
 	NotesPickParams,
 	NotesPickResult,
+	NotesSuggestParams,
+	NotesSuggestResult,
+	SearchQueryParams,
+	SearchQueryResult,
 	VaultMethod,
 	VaultStatsParams,
 	VaultStatsResult,
@@ -25,6 +37,12 @@ export type VaultApi = {
 	health(params?: HealthReportParams): Promise<HealthReportResult>;
 	pick(params: NotesPickParams): Promise<NotesPickResult>;
 	note(path: string): Promise<NoteGetResult>;
+	search(params: SearchQueryParams): Promise<SearchQueryResult>;
+	preview(params: NotePreviewParams): Promise<NotePreviewResult>;
+	related(params: NoteRelatedParams): Promise<NoteRelatedResult>;
+	suggestLinks(params?: LinksSuggestParams): Promise<LinksSuggestResult>;
+	suggestNotes(params?: NotesSuggestParams): Promise<NotesSuggestResult>;
+	unlinked(params?: MentionsUnlinkedParams): Promise<MentionsUnlinkedResult>;
 };
 
 export type RpcRequester = {
@@ -39,5 +57,11 @@ export function createVaultApi(client: RpcRequester): VaultApi {
 		health: async (params) => client.request('health.report', params),
 		pick: async (params) => client.request('notes.pick', params),
 		note: async (path) => client.request('note.get', {path}),
+		search: async (params) => client.request('search.query', params),
+		preview: async (params) => client.request('note.preview', params),
+		related: async (params) => client.request('note.related', params),
+		suggestLinks: async (params) => client.request('links.suggest', params),
+		suggestNotes: async (params) => client.request('notes.suggest', params),
+		unlinked: async (params) => client.request('mentions.unlinked', params),
 	};
 }

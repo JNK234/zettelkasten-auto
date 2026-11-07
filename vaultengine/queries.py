@@ -76,11 +76,11 @@ def stats(conn: sqlite3.Connection, top: int = 10) -> dict[str, Any]:
             ],
         },
         "properties": {
-            "distinct_keys": _scalar(conn, "SELECT COUNT(DISTINCT key) FROM properties"),
+            "distinct_keys": _scalar(conn, "SELECT COUNT(DISTINCT key) FROM properties WHERE source = 'frontmatter'"),
             "top": [
                 {"key": row["key"], "notes": row["notes"]}
                 for row in conn.execute(
-                    "SELECT key, COUNT(DISTINCT file_id) AS notes FROM properties GROUP BY key ORDER BY notes DESC, key LIMIT ?",
+                    "SELECT key, COUNT(DISTINCT file_id) AS notes FROM properties WHERE source = 'frontmatter' GROUP BY key ORDER BY notes DESC, key LIMIT ?",
                     (top,),
                 )
             ],
@@ -219,7 +219,7 @@ def note_detail(conn: sqlite3.Connection, path: str) -> dict[str, Any] | None:
         "frontmatter_error": note["frontmatter_error"],
         "properties": {
             row["key"]: json.loads(row["value_json"])
-            for row in rows("SELECT key, value_json FROM properties WHERE file_id = ? ORDER BY rowid")
+            for row in rows("SELECT key, value_json FROM properties WHERE file_id = ? AND source = 'frontmatter' ORDER BY rowid")
         },
         "tags": [
             {"name": row["name"], "source": row["source"], "line": row["line"]}
