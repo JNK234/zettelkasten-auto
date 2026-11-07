@@ -13,6 +13,8 @@ export type ServerOptions = {
 	python?: string;
 	/** Index file; default: <vault>/.vaultengine/index.sqlite (decided by the server). */
 	db?: string;
+	/** Format (name in formats/ or a file) for /check, /fix, /new, /link, /ingest, /coverage. */
+	format?: string;
 };
 
 export type VaultServer = {
@@ -45,6 +47,11 @@ export function startVaultServer(options: ServerOptions): VaultServer {
 	const args = ['-m', 'vaultengine', 'serve', resolve(options.vault)];
 	if (options.db) {
 		args.push('--db', resolve(options.db));
+	}
+
+	if (options.format) {
+		// A bare name ("brain") is looked up by the server; a path is made absolute here.
+		args.push('--format', /[\\/]|\.ya?ml$/i.test(options.format) ? resolve(options.format) : options.format);
 	}
 
 	// cwd = repo root, so `-m vaultengine` works even if the package is not installed.

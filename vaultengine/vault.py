@@ -10,6 +10,7 @@ file names in NFD, while typed link text is usually NFC).
 
 from __future__ import annotations
 
+import hashlib
 import os
 import posixpath
 import unicodedata
@@ -75,16 +76,33 @@ class Vault:
     # ----- construction -------------------------------------------------
 
     @classmethod
-    def load(cls, root: str | Path) -> "Vault":
-        """Scan and parse ``root`` (see ``iter_vault_files`` for what is included)."""
+    def load(cls, root: str | Path, cache: dict[str, tuple[str, ParsedNote]] | None = None) -> "Vault":
+        """Scan and parse ``root`` (see ``iter_vault_files`` for what is included).
+
+        ``cache`` ({path: (sha256 of the bytes, ParsedNote)}, kept by the caller) lets a
+        long-running process re-parse only notes whose content changed. Every file is
+        still read, so the result never depends on file times. Cached notes are shared:
+        treat ParsedNote objects as read-only.
+        """
         root = Path(root)
         files: list[str] = []
         notes: dict[str, ParsedNote] = {}
         for rel, full in iter_vault_files(root):
             files.append(rel)
             if is_markdown(rel):
-                text = full.read_text(encoding="utf-8", errors="replace")
-                notes[rel] = parse_note(text, path=rel)
+                data = full.read_bytes()
+                if cache is None:
+                    notes[rel] = parse_note(data.decode("utf-8", errors="replace"), path=rel)
+                    continue
+                digest = hashlib.sha256(data).hexdigest()
+                hit = cache.get(rel)
+                if hit is None or hit[0] != digest:
+                    hit = (digest, parse_note(data.decode("utf-8", errors="replace"), path=rel))
+                    cache[rel] = hit
+                notes[rel] = hit[1]
+        if cache is not None:
+            for gone in set(cache) - set(notes):
+                del cache[gone]
         return cls(files, notes, root)
 
     @classmethod

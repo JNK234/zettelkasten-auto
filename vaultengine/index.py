@@ -30,9 +30,11 @@ import json
 import posixpath
 import sqlite3
 import time
+import unicodedata
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Iterable
 
 from vaultengine.model import BlockId, Heading, Link, ParsedNote
 from vaultengine.parser import PARSER_VERSION, normalize_text, parse_note
@@ -149,6 +151,10 @@ JOIN files t ON t.id = l.target_id
 WHERE l.status = 'resolved' AND t.kind = 'note' AND l.target_id != l.source_id
 GROUP BY l.source_id, l.target_id;
 """
+
+class IndexNeedsRebuild(RuntimeError):
+    """A partial update was asked for, but the index must first be rebuilt with `vault index`."""
+
 
 _NOTE_CHILD_TABLES = ("notes", "properties", "aliases", "tags", "headings", "blocks")
 
@@ -285,7 +291,16 @@ class VaultIndex:
 
     # ----- update -------------------------------------------------------
 
-    def update(self, vault_root: str | Path, *, full: bool = False, resolve_aliases: bool = True) -> IndexReport:
+    def update(
+        self, vault_root: str | Path, *, full: bool = False, resolve_aliases: bool = True, only: Iterable[str] | None = None,
+    ) -> IndexReport:
+        """Bring the index up to date with the vault.
+
+        ``only``: vault-relative paths to update, and nothing else (used by the write
+        commands, so that other pending edits stay "changed since the last index").
+        A path that no longer exists is removed. Refused with ``IndexNeedsRebuild`` when
+        the index needs a full re-parse or re-resolution, which a partial update cannot do.
+        """
         started = time.perf_counter()
         scan_started_ns = time.time_ns()
         root = Path(vault_root).resolve()
@@ -293,15 +308,25 @@ class VaultIndex:
         reparse_reason, reresolve_reason = self._invalidation(root, resolve_aliases)
         if full:
             reparse_reason = reresolve_reason = "full re-index requested"
+        selected = None if only is None else {unicodedata.normalize("NFC", path) for path in only}
+        if selected is not None and ("parser_version" not in self.meta() or reparse_reason or reresolve_reason):
+            raise IndexNeedsRebuild(reparse_reason or reresolve_reason or "index has never been built")
         report.full_reason = reresolve_reason
 
         def kept_mtime(mtime_ns: int) -> int:
             return RACY_MTIME if mtime_ns >= scan_started_ns - RACY_WINDOW_NS else mtime_ns
 
         disk = {}
-        for rel, full_path in iter_vault_files(root):
-            stat = full_path.stat()
-            disk[rel] = (full_path, stat.st_size, stat.st_mtime_ns)
+        if selected is None:
+            for rel, full_path in iter_vault_files(root):
+                stat = full_path.stat()
+                disk[rel] = (full_path, stat.st_size, stat.st_mtime_ns)
+        else:
+            for rel in selected:
+                full_path = root / rel
+                if full_path.is_file():
+                    stat = full_path.stat()
+                    disk[rel] = (full_path, stat.st_size, stat.st_mtime_ns)
 
         conn = self.conn
         conn.execute("BEGIN IMMEDIATE")
@@ -310,7 +335,8 @@ class VaultIndex:
             affected_keys: set[str] = set()
             reparsed_ids: list[int] = []
 
-            for path in sorted(rows.keys() - disk.keys()):
+            gone = rows.keys() - disk.keys() if selected is None else (rows.keys() & selected) - disk.keys()
+            for path in sorted(gone):
                 row = rows[path]
                 affected_keys |= _name_keys(path) | self._alias_keys(row["id"])
                 conn.execute("DELETE FROM files WHERE id = ?", (row["id"],))
@@ -371,6 +397,11 @@ class VaultIndex:
                     source_ids=reparsed_ids,
                     resolve_aliases=resolve_aliases,
                 )
+            if selected is not None:  # totals of the whole index, not of the selection
+                report.notes, report.attachments = conn.execute(
+                    "SELECT SUM(kind = 'note'), SUM(kind = 'attachment') FROM files"
+                ).fetchone()
+                report.notes, report.attachments = report.notes or 0, report.attachments or 0
             changed = bool(
                 reparsed_ids or report.deleted or report.attachments_added or report.attachments_deleted or reresolve_reason
             )

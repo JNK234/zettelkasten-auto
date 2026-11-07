@@ -6,19 +6,29 @@
 /**
  * Any request this server accepts.
  */
-export type Request = (IndexBuildRequest | IndexStatusRequest | VaultStatsRequest | HealthReportRequest | NotesPickRequest | NoteGetRequest)
+export type Request = (IndexBuildRequest | IndexStatusRequest | VaultStatsRequest | HealthReportRequest | NotesPickRequest | NoteGetRequest | VaultCheckRequest | VaultFixRequest | VaultCoverageRequest | NoteNewRequest | NoteLinkRequest | NoteSetRequest | NoteIngestRequest)
 /**
  * Any response this server sends: a method result or an error.
  */
-export type Response = (IndexBuildResponse | IndexStatusResponse | VaultStatsResponse | HealthReportResponse | NotesPickResponse | NoteGetResponse | ErrorResponse)
+export type Response = (IndexBuildResponse | IndexStatusResponse | VaultStatsResponse | HealthReportResponse | NotesPickResponse | NoteGetResponse | VaultCheckResponse | VaultFixResponse | VaultCoverageResponse | NoteNewResponse | NoteLinkResponse | NoteSetResponse | NoteIngestResponse | ErrorResponse)
 
 export interface VaultRpcSchema {
 AmbiguousLink?: AmbiguousLink
 BlockItem?: BlockItem
+CheckScope?: CheckScope
+CheckSummary?: CheckSummary
+CheckedNote?: CheckedNote
+CodeCount?: CodeCount
+CoverageCitation?: CoverageCitation
+CoverageCiting?: CoverageCiting
+CoverageReasons?: CoverageReasons
+CoverageSources?: CoverageSources
+DuplicateCandidate?: DuplicateCandidate
 DuplicateName?: DuplicateName
 ErrorObject?: ErrorObject
 ErrorResponse?: ErrorResponse
 FolderCount?: FolderCount
+FormatRef?: FormatRef
 HeadingItem?: HeadingItem
 HealthReportParams?: HealthReportParams
 HealthReportRequest?: HealthReportRequest
@@ -34,14 +44,30 @@ IndexStatusParams?: IndexStatusParams
 IndexStatusRequest?: IndexStatusRequest
 IndexStatusResponse?: IndexStatusResponse
 IndexStatusResult?: IndexStatusResult
+IndexSync?: IndexSync
+IngestDocument?: IngestDocument
 LinkCounts?: LinkCounts
 LinkRef?: LinkRef
 LinkedNote?: LinkedNote
 MissingSubpath?: MissingSubpath
+MostCited?: MostCited
 NoteGetParams?: NoteGetParams
 NoteGetRequest?: NoteGetRequest
 NoteGetResponse?: NoteGetResponse
 NoteGetResult?: NoteGetResult
+NoteIngestParams?: NoteIngestParams
+NoteIngestRequest?: NoteIngestRequest
+NoteIngestResponse?: NoteIngestResponse
+NoteIngestResult?: NoteIngestResult
+NoteLinkParams?: NoteLinkParams
+NoteLinkRequest?: NoteLinkRequest
+NoteLinkResponse?: NoteLinkResponse
+NoteNewParams?: NoteNewParams
+NoteNewRequest?: NoteNewRequest
+NoteNewResponse?: NoteNewResponse
+NoteSetParams?: NoteSetParams
+NoteSetRequest?: NoteSetRequest
+NoteSetResponse?: NoteSetResponse
 NotesPickParams?: NotesPickParams
 NotesPickRequest?: NotesPickRequest
 NotesPickResponse?: NotesPickResponse
@@ -51,17 +77,35 @@ PendingChanges?: PendingChanges
 PickedNote?: PickedNote
 PropertyCount?: PropertyCount
 PropertyStats?: PropertyStats
+RelationRef?: RelationRef
 Request?: Request
 Response?: Response
+SkippedFix?: SkippedFix
 TagCount?: TagCount
 TagItem?: TagItem
 TagStats?: TagStats
+UncitedNote?: UncitedNote
 UnresolvedTarget?: UnresolvedTarget
+VaultCheckParams?: VaultCheckParams
+VaultCheckRequest?: VaultCheckRequest
+VaultCheckResponse?: VaultCheckResponse
+VaultCheckResult?: VaultCheckResult
+VaultCoverageParams?: VaultCoverageParams
+VaultCoverageRequest?: VaultCoverageRequest
+VaultCoverageResponse?: VaultCoverageResponse
+VaultCoverageResult?: VaultCoverageResult
+VaultFixParams?: VaultFixParams
+VaultFixRequest?: VaultFixRequest
+VaultFixResponse?: VaultFixResponse
+VaultFixResult?: VaultFixResult
 VaultStatsParams?: VaultStatsParams
 VaultStatsRequest?: VaultStatsRequest
 VaultStatsResponse?: VaultStatsResponse
 VaultStatsResult?: VaultStatsResult
+Violation?: Violation
 WantedNote?: WantedNote
+WriteResult?: WriteResult
+WrittenFile?: WrittenFile
 }
 export interface AmbiguousLink {
 source: string
@@ -72,6 +116,107 @@ candidates: string[]
 export interface BlockItem {
 id: string
 line: number
+}
+export interface CheckScope {
+mode: ("all" | "changed")
+/**
+ * Notes checked.
+ */
+checked: number
+/**
+ * The notes checked, for mode 'changed'.
+ */
+notes: (string[] | null)
+added: string[]
+changed: string[]
+deleted: string[]
+last_indexed_at: (string | null)
+/**
+ * Why a 'changed' check looked at every note (the index needs a rebuild).
+ */
+reason: (string | null)
+}
+export interface CheckSummary {
+violations: number
+notes: number
+by_code: CodeCount[]
+}
+export interface CodeCount {
+code: string
+count: number
+}
+export interface CheckedNote {
+path: string
+type: (string | null)
+/**
+ * False: not changed itself, but affected by a changed or deleted note.
+ */
+checked: boolean
+violations: Violation[]
+}
+export interface Violation {
+path: string
+/**
+ * Where it is, or for something missing, where it belongs.
+ */
+line: number
+code: ("missing-heading" | "heading-order" | "missing-key" | "missing-value" | "bad-value" | "missing-relation" | "unexpected-relation" | "unknown-field" | "bad-relation" | "unresolved-target" | "ambiguous-target" | "relation-target-type" | "missing-mirror")
+message: string
+/**
+ * Another note involved: for missing-mirror, the note whose field implies it.
+ */
+related: (string | null)
+}
+export interface CoverageCitation {
+line: number
+raw: string
+role: (string | null)
+status: ("resolved" | "ambiguous" | "unresolved")
+target_path: (string | null)
+target_type: (string | null)
+}
+export interface CoverageCiting {
+total: number
+cite_a_source: number
+without_source: number
+by_reason: CoverageReasons
+notes: UncitedNote[]
+}
+export interface CoverageReasons {
+missing: number
+not_a_source: number
+none: number
+}
+export interface UncitedNote {
+path: string
+type: (string | null)
+reason: ("missing" | "not-a-source" | "none")
+citations: CoverageCitation[]
+}
+export interface CoverageSources {
+total: number
+linked: number
+/**
+ * Sources no other note links to.
+ */
+unlinked: string[]
+}
+export interface DuplicateCandidate {
+path: string
+duplicate: boolean
+reasons: string[]
+title_similarity: number
+/**
+ * [the document's title, the note's closest title]
+ */
+titles_compared: string[]
+/**
+ * Null when a text is too short to compare.
+ */
+content_overlap: (number | null)
+shared_shingles: number
+shingles_compared: number
+same_hash: boolean
 }
 export interface DuplicateName {
 name: string
@@ -92,6 +237,10 @@ error: ErrorObject
 export interface FolderCount {
 folder: string
 notes: number
+}
+export interface FormatRef {
+name: string
+path: string
 }
 export interface HeadingItem {
 level: number
@@ -276,6 +425,26 @@ deleted: string[]
  */
 reason: (string | null)
 }
+export interface IndexSync {
+status: ("updated" | "no-index" | "needs-rebuild")
+/**
+ * Written notes now up to date in the index.
+ */
+synced: string[]
+/**
+ * Written notes left 'changed' for vault.check changed=true.
+ */
+pending: string[]
+reason?: (string | null)
+}
+export interface IngestDocument {
+file: string
+kind: ("markdown" | "text" | "html")
+title: string
+sha256: string
+url: (string | null)
+warnings: string[]
+}
 export interface LinkCounts {
 total: number
 wikilink: number
@@ -290,6 +459,10 @@ export interface LinkedNote {
 path: string
 backlinks: number
 linking_notes: number
+}
+export interface MostCited {
+path: string
+citing_notes: number
 }
 export interface NoteGetParams {
 /**
@@ -360,6 +533,258 @@ matched_by: (("self" | "path" | "name" | "alias") | null)
 candidates: string[]
 subpath_status: (("found" | "missing" | "not_checked") | null)
 }
+export interface NoteIngestParams {
+/**
+ * Check and return the diff; write nothing.
+ */
+dry_run?: boolean
+/**
+ * A .md, .txt or .html file the server can read.
+ */
+path?: (string | null)
+/**
+ * The document itself, instead of path; needs filename.
+ */
+content?: (string | null)
+/**
+ * Original file name (decides the kind); with content.
+ */
+filename?: (string | null)
+/**
+ * Note type with an ingest: block.
+ */
+type?: string
+title?: (string | null)
+folder?: (string | null)
+values?: {
+[k: string]: string
+}
+}
+/**
+ * Turn a document into a note; nothing is written if it duplicates one. Omit "id" to send a notification (no response).
+ */
+export interface NoteIngestRequest {
+jsonrpc: "2.0"
+method: "note.ingest"
+params?: NoteIngestParams
+id?: (number | string | null)
+}
+/**
+ * Successful response to note.ingest.
+ */
+export interface NoteIngestResponse {
+jsonrpc: "2.0"
+id: (number | string | null)
+result: NoteIngestResult
+}
+export interface NoteIngestResult {
+operation: ("new" | "link" | "set" | "fix" | "ingest")
+/**
+ * duplicate: an existing note matches; nothing written (see duplicates).
+ */
+status: ("written" | "refused" | "dry-run" | "unchanged" | "duplicate")
+dry_run: boolean
+written: boolean
+files: WrittenFile[]
+/**
+ * Parts of the request that were already so, e.g. an existing mirror.
+ */
+already: string[]
+/**
+ * Why a write was refused: violations it would add.
+ */
+new_violations: Violation[]
+/**
+ * Violations already in the notes written; they do not block a write.
+ */
+tolerated: Violation[]
+/**
+ * Null unless written.
+ */
+index: (IndexSync | null)
+/**
+ * Files restored from an interrupted earlier write.
+ */
+recovered: string[]
+document: IngestDocument
+duplicates: DuplicateCandidate[]
+/**
+ * The closest existing notes, duplicates first (up to 5).
+ */
+candidates: DuplicateCandidate[]
+}
+export interface WrittenFile {
+path: string
+action: ("create" | "modify")
+/**
+ * What was done, for people: 'line 11: added [[X]] to `supported-by::`'.
+ */
+changes: string[]
+/**
+ * Unified diff of the file (against /dev/null for a new file).
+ */
+diff: string
+/**
+ * The whole new file, for action 'create'; null otherwise.
+ */
+content: (string | null)
+}
+export interface NoteLinkParams {
+/**
+ * Check and return the diff; write nothing.
+ */
+dry_run?: boolean
+/**
+ * Note A (path or name): gets `relation:: [[B]]`.
+ */
+source: string
+/**
+ * Note B: gets the mirror if the relation has an inverse.
+ */
+target: string
+relation: string
+}
+/**
+ * Relate note A to note B and write the mirror in B. Omit "id" to send a notification (no response).
+ */
+export interface NoteLinkRequest {
+jsonrpc: "2.0"
+method: "note.link"
+params: NoteLinkParams
+id?: (number | string | null)
+}
+/**
+ * Successful response to note.link.
+ */
+export interface NoteLinkResponse {
+jsonrpc: "2.0"
+id: (number | string | null)
+result: WriteResult
+}
+export interface WriteResult {
+operation: ("new" | "link" | "set" | "fix" | "ingest")
+/**
+ * written; refused (would add violations, nothing written); dry-run; unchanged.
+ */
+status: ("written" | "refused" | "dry-run" | "unchanged")
+dry_run: boolean
+written: boolean
+files: WrittenFile[]
+/**
+ * Parts of the request that were already so, e.g. an existing mirror.
+ */
+already: string[]
+/**
+ * Why a write was refused: violations it would add.
+ */
+new_violations: Violation[]
+/**
+ * Violations already in the notes written; they do not block a write.
+ */
+tolerated: Violation[]
+/**
+ * Null unless written.
+ */
+index: (IndexSync | null)
+/**
+ * Files restored from an interrupted earlier write.
+ */
+recovered: string[]
+}
+export interface NoteNewParams {
+/**
+ * Check and return the diff; write nothing.
+ */
+dry_run?: boolean
+/**
+ * A note type of the format, e.g. zettel.
+ */
+type: string
+title: string
+/**
+ * Default: the type's match folder.
+ */
+folder?: (string | null)
+/**
+ * File name without .md; default: from the title per the type's new.name.
+ */
+name?: (string | null)
+/**
+ * Metadata values; {now} works for date keys.
+ */
+values?: {
+[k: string]: string
+}
+/**
+ * Relations to existing notes; their mirrors are written there.
+ */
+relations?: RelationRef[]
+/**
+ * Text under required headings.
+ */
+sections?: {
+[k: string]: string
+}
+}
+export interface RelationRef {
+/**
+ * A relation of the format, e.g. supports.
+ */
+relation: string
+/**
+ * Vault path or note name.
+ */
+note: string
+}
+/**
+ * Create a note of a type; refused if it would add a violation. Omit "id" to send a notification (no response).
+ */
+export interface NoteNewRequest {
+jsonrpc: "2.0"
+method: "note.new"
+params: NoteNewParams
+id?: (number | string | null)
+}
+/**
+ * Successful response to note.new.
+ */
+export interface NoteNewResponse {
+jsonrpc: "2.0"
+id: (number | string | null)
+result: WriteResult
+}
+export interface NoteSetParams {
+/**
+ * Check and return the diff; write nothing.
+ */
+dry_run?: boolean
+note: string
+/**
+ * A metadata key of the note's type.
+ */
+key: string
+/**
+ * As written in the note, e.g. '#supported'; {now} works for date keys.
+ */
+value: string
+}
+/**
+ * Set a metadata value of a note. Omit "id" to send a notification (no response).
+ */
+export interface NoteSetRequest {
+jsonrpc: "2.0"
+method: "note.set"
+params: NoteSetParams
+id?: (number | string | null)
+}
+/**
+ * Successful response to note.set.
+ */
+export interface NoteSetResponse {
+jsonrpc: "2.0"
+id: (number | string | null)
+result: WriteResult
+}
 export interface NotesPickParams {
 /**
  * Space-separated tokens, each matched as a subsequence.
@@ -427,6 +852,59 @@ export interface VaultStatsParams {
 top?: number
 }
 /**
+ * Every violation of the format, per note, with line numbers. Omit "id" to send a notification (no response).
+ */
+export interface VaultCheckRequest {
+jsonrpc: "2.0"
+method: "vault.check"
+params?: VaultCheckParams
+id?: (number | string | null)
+}
+export interface VaultCheckParams {
+/**
+ * Only notes added or changed since the last index.build, plus violations they cause elsewhere.
+ */
+changed?: boolean
+/**
+ * Max notes listed (null = all). The summary is never limited.
+ */
+limit?: (number | null)
+}
+/**
+ * Repair missing mirrors and missing required headings (safe write path). Omit "id" to send a notification (no response).
+ */
+export interface VaultFixRequest {
+jsonrpc: "2.0"
+method: "vault.fix"
+params?: VaultFixParams
+id?: (number | string | null)
+}
+export interface VaultFixParams {
+/**
+ * Check and return the diff; write nothing.
+ */
+dry_run?: boolean
+/**
+ * Repair only these kinds (default: both).
+ */
+only?: ([("missing-mirror" | "missing-heading"), ...(("missing-mirror" | "missing-heading"))[]] | null)
+}
+/**
+ * Sources nothing links to, and notes that cite no source. Omit "id" to send a notification (no response).
+ */
+export interface VaultCoverageRequest {
+jsonrpc: "2.0"
+method: "vault.coverage"
+params?: VaultCoverageParams
+id?: (number | string | null)
+}
+export interface VaultCoverageParams {
+/**
+ * Max items per list (null = all). Counts are never limited.
+ */
+limit?: (number | null)
+}
+/**
  * Successful response to vault.stats.
  */
 export interface VaultStatsResponse {
@@ -470,5 +948,96 @@ target: string
 links: number
 linking_notes: number
 }
+/**
+ * Successful response to vault.check.
+ */
+export interface VaultCheckResponse {
+jsonrpc: "2.0"
+id: (number | string | null)
+result: VaultCheckResult
+}
+export interface VaultCheckResult {
+format: FormatRef
+scope: CheckScope
+ok: boolean
+summary: CheckSummary
+/**
+ * Notes with violations, by path; violations by line.
+ */
+notes: CheckedNote[]
+limit: (number | null)
+}
+/**
+ * Successful response to vault.fix.
+ */
+export interface VaultFixResponse {
+jsonrpc: "2.0"
+id: (number | string | null)
+result: VaultFixResult
+}
+export interface VaultFixResult {
+operation: ("new" | "link" | "set" | "fix" | "ingest")
+/**
+ * written; refused (would add violations, nothing written); dry-run; unchanged.
+ */
+status: ("written" | "refused" | "dry-run" | "unchanged")
+dry_run: boolean
+written: boolean
+files: WrittenFile[]
+/**
+ * Parts of the request that were already so, e.g. an existing mirror.
+ */
+already: string[]
+/**
+ * Why a write was refused: violations it would add.
+ */
+new_violations: Violation[]
+/**
+ * Violations already in the notes written; they do not block a write.
+ */
+tolerated: Violation[]
+/**
+ * Null unless written.
+ */
+index: (IndexSync | null)
+/**
+ * Files restored from an interrupted earlier write.
+ */
+recovered: string[]
+skipped: SkippedFix[]
+/**
+ * All violations left once the fix is applied.
+ */
+remaining: CodeCount[]
+}
+export interface SkippedFix {
+path: string
+line: number
+code: ("missing-heading" | "heading-order" | "missing-key" | "missing-value" | "bad-value" | "missing-relation" | "unexpected-relation" | "unknown-field" | "bad-relation" | "unresolved-target" | "ambiguous-target" | "relation-target-type" | "missing-mirror")
+message: string
+related: (string | null)
+/**
+ * Why this one is not repaired automatically.
+ */
+reason: string
+}
+/**
+ * Successful response to vault.coverage.
+ */
+export interface VaultCoverageResponse {
+jsonrpc: "2.0"
+id: (number | string | null)
+result: VaultCoverageResult
+}
+export interface VaultCoverageResult {
+format: FormatRef
+source_types: string[]
+citing_types: string[]
+citation_roles: string[]
+sources: CoverageSources
+citing: CoverageCiting
+most_cited: MostCited[]
+limit: (number | null)
+}
 
-export type VaultMethod = 'index.build' | 'index.status' | 'vault.stats' | 'health.report' | 'notes.pick' | 'note.get';
+export type VaultMethod = 'index.build' | 'index.status' | 'vault.stats' | 'health.report' | 'notes.pick' | 'note.get' | 'vault.check' | 'vault.fix' | 'vault.coverage' | 'note.new' | 'note.link' | 'note.set' | 'note.ingest';

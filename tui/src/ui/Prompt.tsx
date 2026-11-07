@@ -201,6 +201,29 @@ export function Prompt({api, registry, history, busy, onSubmit, onExit}: PromptP
 		onSubmit(line);
 	};
 
+	/** What Enter does: pick from an open list, or submit the line. */
+	const pressReturn = () => {
+		const {value, cursor, selected} = ref.current;
+		const {mention, pickerOpen, suggestions, suggestionsOpen} = overlays(ref.current, registry);
+		if (pickerOpen && mention) {
+			const chosen = picker.results[Math.min(selected, picker.results.length - 1)];
+			if (chosen) {
+				const inserted = `${formatMention(chosen.path)} `;
+				setLine(value.slice(0, mention.start) + inserted + value.slice(cursor), mention.start + inserted.length);
+			}
+
+			return;
+		}
+
+		const chosen = suggestionsOpen ? suggestions[Math.min(selected, suggestions.length - 1)] : undefined;
+		if (chosen && registry.get(value.slice(1)) === undefined) {
+			submit(`/${chosen.name}`);
+			return;
+		}
+
+		submit(value);
+	};
+
 	useInput((input, key) => {
 		const {value, cursor, selected} = ref.current;
 		const {mention, mentionKey, pickerOpen, suggestions, suggestionsOpen} = overlays(ref.current, registry);
@@ -223,7 +246,12 @@ export function Prompt({api, registry, history, busy, onSubmit, onExit}: PromptP
 				return;
 			}
 
-			if (key.tab || key.return) {
+			if (key.return) {
+				pressReturn();
+				return;
+			}
+
+			if (key.tab) {
 				const chosen = picker.results[Math.min(selected, count - 1)];
 				if (chosen) {
 					const inserted = `${formatMention(chosen.path)} `;
@@ -250,10 +278,6 @@ export function Prompt({api, registry, history, busy, onSubmit, onExit}: PromptP
 				return;
 			}
 
-			if (key.return && chosen && registry.get(value.slice(1)) === undefined) {
-				submit(`/${chosen.name}`);
-				return;
-			}
 
 			if (key.escape) {
 				update({dismissed: `/${value}`, selected: 0});
@@ -262,7 +286,7 @@ export function Prompt({api, registry, history, busy, onSubmit, onExit}: PromptP
 		}
 
 		if (key.return) {
-			submit(value);
+			pressReturn();
 			return;
 		}
 
@@ -294,7 +318,10 @@ export function Prompt({api, registry, history, busy, onSubmit, onExit}: PromptP
 		} else if (key.delete) {
 			update({value: value.slice(0, cursor) + value.slice(cursor + 1), selected: 0, dismissed: undefined, recalled: false});
 		} else if (input && !key.ctrl && !key.meta && !key.escape && !key.tab) {
-			const text = input.replaceAll(/\r?\n/g, ' ');
+			// Keys typed quickly (or a paste) can arrive as one chunk, e.g. "h\r": the text goes
+			// in, line breaks inside it become spaces, and a trailing line break is Enter.
+			const enter = /[\r\n]$/.test(input);
+			const text = input.replace(/[\r\n]+$/, '').replaceAll(/\r\n|\r|\n/g, ' ');
 			update({
 				value: value.slice(0, cursor) + text + value.slice(cursor),
 				cursor: cursor + text.length,
@@ -302,6 +329,9 @@ export function Prompt({api, registry, history, busy, onSubmit, onExit}: PromptP
 				dismissed: undefined,
 				recalled: false,
 			});
+			if (enter) {
+				pressReturn();
+			}
 		}
 	});
 

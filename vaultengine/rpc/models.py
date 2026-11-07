@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal, Union
 
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr, model_validator
 
 JSONRPC_VERSION = "2.0"
 
@@ -23,6 +23,9 @@ INTERNAL_ERROR = -32603
 # Server-defined error codes (-32000 to -32099)
 INDEX_NOT_BUILT = -32001
 NOTE_NOT_FOUND = -32002
+FORMAT_NOT_CONFIGURED = -32003
+WRITE_REJECTED = -32004
+WRITE_FAILED = -32005
 
 ERROR_MESSAGES = {
     PARSE_ERROR: "Parse error",
@@ -32,6 +35,9 @@ ERROR_MESSAGES = {
     INTERNAL_ERROR: "Internal error",
     INDEX_NOT_BUILT: "Index not built",
     NOTE_NOT_FOUND: "Note not found",
+    FORMAT_NOT_CONFIGURED: "Format not configured",
+    WRITE_REJECTED: "Write rejected",
+    WRITE_FAILED: "Write failed",
 }
 
 RequestId = Union[StrictInt, StrictStr, None]
@@ -349,6 +355,269 @@ class NoteGetResult(Result):
     links_in: list[IncomingLink] = Field(description="Resolved links from other notes (self-links excluded).")
 
 
+# ----- formats: shared pieces -------------------------------------------------------
+
+ViolationCode = Literal[
+    "missing-heading", "heading-order", "missing-key", "missing-value", "bad-value", "missing-relation",
+    "unexpected-relation", "unknown-field", "bad-relation", "unresolved-target", "ambiguous-target",
+    "relation-target-type", "missing-mirror",
+]
+WriteStatus = Literal["written", "refused", "dry-run", "unchanged"]
+FixKind = Literal["missing-mirror", "missing-heading"]
+
+
+class FormatRef(Result):
+    name: str
+    path: str
+
+
+class Violation(Result):
+    path: str
+    line: int = Field(description="Where it is, or for something missing, where it belongs.")
+    code: ViolationCode
+    message: str
+    related: str | None = Field(description="Another note involved: for missing-mirror, the note whose field implies it.")
+
+
+class CodeCount(Result):
+    code: str
+    count: int
+
+
+class WrittenFile(Result):
+    path: str
+    action: Literal["create", "modify"]
+    changes: list[str] = Field(description="What was done, for people: 'line 11: added [[X]] to `supported-by::`'.")
+    diff: str = Field(description="Unified diff of the file (against /dev/null for a new file).")
+    content: str | None = Field(description="The whole new file, for action 'create'; null otherwise.")
+
+
+class IndexSync(Result):
+    status: Literal["updated", "no-index", "needs-rebuild"]
+    synced: list[str] = Field(description="Written notes now up to date in the index.")
+    pending: list[str] = Field(description="Written notes left 'changed' for vault.check changed=true.")
+    reason: str | None = None
+
+
+class WriteResult(Result):
+    operation: Literal["new", "link", "set", "fix", "ingest"]
+    status: WriteStatus = Field(description="written; refused (would add violations, nothing written); dry-run; unchanged.")
+    dry_run: bool
+    written: bool
+    files: list[WrittenFile]
+    already: list[str] = Field(description="Parts of the request that were already so, e.g. an existing mirror.")
+    new_violations: list[Violation] = Field(description="Why a write was refused: violations it would add.")
+    tolerated: list[Violation] = Field(description="Violations already in the notes written; they do not block a write.")
+    index: IndexSync | None = Field(description="Null unless written.")
+    recovered: list[str] = Field(description="Files restored from an interrupted earlier write.")
+
+
+class WriteParams(Params):
+    dry_run: bool = Field(False, description="Check and return the diff; write nothing.")
+
+
+# ----- vault.check ----------------------------------------------------------------
+
+
+class VaultCheckParams(Params):
+    changed: bool = Field(False, description="Only notes added or changed since the last index.build, plus violations they cause elsewhere.")
+    limit: int | None = Field(None, ge=1, description="Max notes listed (null = all). The summary is never limited.")
+
+
+class CheckScope(Result):
+    mode: Literal["all", "changed"]
+    checked: int = Field(description="Notes checked.")
+    notes: list[str] | None = Field(description="The notes checked, for mode 'changed'.")
+    added: list[str]
+    changed: list[str]
+    deleted: list[str]
+    last_indexed_at: str | None
+    reason: str | None = Field(description="Why a 'changed' check looked at every note (the index needs a rebuild).")
+
+
+class CheckSummary(Result):
+    violations: int
+    notes: int
+    by_code: list[CodeCount]
+
+
+class CheckedNote(Result):
+    path: str
+    type: str | None
+    checked: bool = Field(description="False: not changed itself, but affected by a changed or deleted note.")
+    violations: list[Violation]
+
+
+class VaultCheckResult(Result):
+    format: FormatRef
+    scope: CheckScope
+    ok: bool
+    summary: CheckSummary
+    notes: list[CheckedNote] = Field(description="Notes with violations, by path; violations by line.")
+    limit: int | None
+
+
+# ----- vault.fix ---------------------------------------------------------------------
+
+
+class VaultFixParams(WriteParams):
+    only: list[FixKind] | None = Field(None, min_length=1, description="Repair only these kinds (default: both).")
+
+
+class SkippedFix(Result):
+    path: str
+    line: int
+    code: ViolationCode
+    message: str
+    related: str | None
+    reason: str = Field(description="Why this one is not repaired automatically.")
+
+
+class VaultFixResult(WriteResult):
+    skipped: list[SkippedFix]
+    remaining: list[CodeCount] = Field(description="All violations left once the fix is applied.")
+
+
+# ----- note.new / note.link / note.set --------------------------------------------------
+
+
+class RelationRef(Params):
+    relation: str = Field(min_length=1, description="A relation of the format, e.g. supports.")
+    note: str = Field(min_length=1, description="Vault path or note name.")
+
+
+class NoteNewParams(WriteParams):
+    type: str = Field(min_length=1, description="A note type of the format, e.g. zettel.")
+    title: str = Field(min_length=1)
+    folder: str | None = Field(None, description="Default: the type's match folder.")
+    name: str | None = Field(None, description="File name without .md; default: from the title per the type's new.name.")
+    values: dict[str, str] = Field(default_factory=dict, description="Metadata values; {now} works for date keys.")
+    relations: list[RelationRef] = Field(default_factory=list, description="Relations to existing notes; their mirrors are written there.")
+    sections: dict[str, str] = Field(default_factory=dict, description="Text under required headings.")
+
+
+class NoteLinkParams(WriteParams):
+    source: str = Field(min_length=1, description="Note A (path or name): gets `relation:: [[B]]`.")
+    target: str = Field(min_length=1, description="Note B: gets the mirror if the relation has an inverse.")
+    relation: str = Field(min_length=1)
+
+
+class NoteSetParams(WriteParams):
+    note: str = Field(min_length=1)
+    key: str = Field(min_length=1, description="A metadata key of the note's type.")
+    value: str = Field(description="As written in the note, e.g. '#supported'; {now} works for date keys.")
+
+
+# ----- note.ingest --------------------------------------------------------------------------
+
+
+class NoteIngestParams(WriteParams):
+    path: str | None = Field(None, min_length=1, description="A .md, .txt or .html file the server can read.")
+    content: str | None = Field(None, description="The document itself, instead of path; needs filename.")
+    filename: str | None = Field(None, min_length=1, description="Original file name (decides the kind); with content.")
+    type: str = Field("source", min_length=1, description="Note type with an ingest: block.")
+    title: str | None = None
+    folder: str | None = None
+    values: dict[str, str] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _one_source(self) -> "NoteIngestParams":
+        if (self.path is None) == (self.content is None):
+            raise ValueError("give exactly one of path or content")
+        if self.content is not None and self.filename is None:
+            raise ValueError("content needs a filename (its extension decides markdown, text or html)")
+        return self
+
+
+class IngestDocument(Result):
+    file: str
+    kind: Literal["markdown", "text", "html"]
+    title: str
+    sha256: str
+    url: str | None
+    warnings: list[str]
+
+
+class DuplicateCandidate(Result):
+    path: str
+    duplicate: bool
+    reasons: list[str]
+    title_similarity: float
+    titles_compared: list[str] = Field(description="[the document's title, the note's closest title]")
+    content_overlap: float | None = Field(description="Null when a text is too short to compare.")
+    shared_shingles: int
+    shingles_compared: int
+    same_hash: bool
+
+
+class NoteIngestResult(WriteResult):
+    status: Literal["written", "refused", "dry-run", "unchanged", "duplicate"] = Field(
+        description="duplicate: an existing note matches; nothing written (see duplicates)."
+    )
+    document: IngestDocument
+    duplicates: list[DuplicateCandidate]
+    candidates: list[DuplicateCandidate] = Field(description="The closest existing notes, duplicates first (up to 5).")
+
+
+# ----- vault.coverage ---------------------------------------------------------------------
+
+
+class VaultCoverageParams(Params):
+    limit: int | None = Field(None, ge=1, description="Max items per list (null = all). Counts are never limited.")
+
+
+class CoverageSources(Result):
+    total: int
+    linked: int
+    unlinked: list[str] = Field(description="Sources no other note links to.")
+
+
+class CoverageReasons(Result):
+    missing: int
+    not_a_source: int
+    none: int
+
+
+class CoverageCitation(Result):
+    line: int
+    raw: str
+    role: str | None
+    status: LinkStatus
+    target_path: str | None
+    target_type: str | None
+
+
+class UncitedNote(Result):
+    path: str
+    type: str | None
+    reason: Literal["missing", "not-a-source", "none"]
+    citations: list[CoverageCitation]
+
+
+class CoverageCiting(Result):
+    total: int
+    cite_a_source: int
+    without_source: int
+    by_reason: CoverageReasons
+    notes: list[UncitedNote]
+
+
+class MostCited(Result):
+    path: str
+    citing_notes: int
+
+
+class VaultCoverageResult(Result):
+    format: FormatRef
+    source_types: list[str]
+    citing_types: list[str]
+    citation_roles: list[str]
+    sources: CoverageSources
+    citing: CoverageCiting
+    most_cited: list[MostCited]
+    limit: int | None
+
+
 # ----- registry ------------------------------------------------------------------
 
 
@@ -369,5 +638,12 @@ METHODS: dict[str, MethodSpec] = {
         MethodSpec("health.report", "Link and structure problems.", HealthReportParams, HealthReportResult),
         MethodSpec("notes.pick", "Fuzzy-find notes by title and alias.", NotesPickParams, NotesPickResult),
         MethodSpec("note.get", "Properties, tags, headings, blocks and links in/out of one note.", NoteGetParams, NoteGetResult),
+        MethodSpec("vault.check", "Every violation of the format, per note, with line numbers.", VaultCheckParams, VaultCheckResult),
+        MethodSpec("vault.fix", "Repair missing mirrors and missing required headings (safe write path).", VaultFixParams, VaultFixResult),
+        MethodSpec("vault.coverage", "Sources nothing links to, and notes that cite no source.", VaultCoverageParams, VaultCoverageResult),
+        MethodSpec("note.new", "Create a note of a type; refused if it would add a violation.", NoteNewParams, WriteResult),
+        MethodSpec("note.link", "Relate note A to note B and write the mirror in B.", NoteLinkParams, WriteResult),
+        MethodSpec("note.set", "Set a metadata value of a note.", NoteSetParams, WriteResult),
+        MethodSpec("note.ingest", "Turn a document into a note; nothing is written if it duplicates one.", NoteIngestParams, NoteIngestResult),
     )
 }

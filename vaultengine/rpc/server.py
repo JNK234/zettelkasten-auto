@@ -10,7 +10,10 @@ Error handling follows the spec: -32700 for unparseable JSON, -32600 for
 anything that is not a valid Request object (including an empty batch),
 -32601 for an unknown method, -32602 when params fail validation, and -32603
 for unexpected failures (including a result that does not match its own model).
-Server errors: -32001 index not built, -32002 note not found. A request's "id"
+Server errors: -32001 index not built, -32002 note not found, -32003 format not
+configured (serve --format), -32004 write rejected (bad arguments, name taken;
+nothing written), -32005 write failed (rolled back, or a file changed meanwhile).
+A write that would add violations is not an error: its result has status "refused". A request's "id"
 is echoed in its error response when it is a valid id, otherwise null.
 """
 
@@ -25,6 +28,7 @@ from pydantic import BaseModel, ValidationError
 
 from vaultengine.rpc.models import (
     ERROR_MESSAGES,
+    FORMAT_NOT_CONFIGURED,
     INDEX_NOT_BUILT,
     INTERNAL_ERROR,
     INVALID_PARAMS,
@@ -34,11 +38,21 @@ from vaultengine.rpc.models import (
     METHODS,
     NOTE_NOT_FOUND,
     PARSE_ERROR,
+    WRITE_FAILED,
+    WRITE_REJECTED,
     Request,
 )
-from vaultengine.service import IndexNotBuilt, NoteNotFound, ServiceError, VaultService
+from vaultengine.service import (
+    FormatNotConfigured, IndexNotBuilt, NoteNotFound, ServiceError, VaultService, WriteFailedError, WriteRejected,
+)
 
-_SERVICE_ERROR_CODES: dict[type[ServiceError], int] = {IndexNotBuilt: INDEX_NOT_BUILT, NoteNotFound: NOTE_NOT_FOUND}
+_SERVICE_ERROR_CODES: dict[type[ServiceError], int] = {
+    IndexNotBuilt: INDEX_NOT_BUILT,
+    NoteNotFound: NOTE_NOT_FOUND,
+    FormatNotConfigured: FORMAT_NOT_CONFIGURED,
+    WriteRejected: WRITE_REJECTED,
+    WriteFailedError: WRITE_FAILED,
+}
 
 
 def _reject_constant(name: str) -> None:
@@ -78,6 +92,19 @@ class RpcServer:
             "health.report": lambda p: service.health(limit=p.limit),
             "notes.pick": lambda p: service.pick(p.query, limit=p.limit),
             "note.get": lambda p: service.note(p.path),
+            "vault.check": lambda p: service.check(changed=p.changed, limit=p.limit),
+            "vault.fix": lambda p: service.fix(dry_run=p.dry_run, only=p.only),
+            "vault.coverage": lambda p: service.coverage(limit=p.limit),
+            "note.new": lambda p: service.new(
+                p.type, p.title, folder=p.folder, name=p.name, values=p.values,
+                relations=[(r.relation, r.note) for r in p.relations], sections=p.sections, dry_run=p.dry_run,
+            ),
+            "note.link": lambda p: service.link(p.source, p.target, p.relation, dry_run=p.dry_run),
+            "note.set": lambda p: service.set(p.note, p.key, p.value, dry_run=p.dry_run),
+            "note.ingest": lambda p: service.ingest(
+                path=p.path, content=p.content, filename=p.filename, type=p.type, title=p.title,
+                folder=p.folder, values=p.values, dry_run=p.dry_run,
+            ),
         }
         if set(self._handlers) != set(METHODS):
             raise RuntimeError(f"handlers and METHODS disagree: {set(self._handlers) ^ set(METHODS)}")
@@ -136,7 +163,8 @@ def serve_stdio(service: VaultService, stdin: BinaryIO | None = None, stdout: Bi
     reader = stdin if stdin is not None else sys.stdin.buffer
     writer = stdout if stdout is not None else sys.stdout.buffer
     saved_stdout, sys.stdout = sys.stdout, sys.stderr
-    print(f"vaultengine: serving {service.root} (index {service.db_path}) on stdio", file=sys.stderr)
+    shown_format = f", format {service.format_path}" if service.format_path else ""
+    print(f"vaultengine: serving {service.root} (index {service.db_path}{shown_format}) on stdio", file=sys.stderr)
     try:
         for raw in reader:
             try:

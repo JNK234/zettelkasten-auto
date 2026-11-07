@@ -7,7 +7,7 @@
  *   status line  - vault, counts, index freshness
  */
 import {basename, resolve} from 'node:path';
-import {Box, Static, Text, useAnimation, useApp} from 'ink';
+import {Box, Static, Text, useAnimation, useApp, useStdout} from 'ink';
 import {type ReactNode, useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import type {CommandRegistry} from '../commands/registry.js';
 import {ConnectionClosedError, RpcError} from '../rpc/client.js';
@@ -24,6 +24,8 @@ export type AppProps = {
 	api: VaultApi;
 	registry: CommandRegistry;
 	vaultPath: string;
+	/** The --format given to the server, shown in the status line. */
+	formatName?: string;
 	/** Run an incremental index.build on start (default true). */
 	autoIndex?: boolean;
 	/** Subscribe to connection loss; returns an unsubscribe function. */
@@ -66,9 +68,11 @@ function Echo({line}: {line: string}) {
 	);
 }
 
-function TranscriptEntry({entry}: {entry: TranscriptItem}) {
+function TranscriptEntry({entry, width}: {entry: TranscriptItem; width?: number}) {
+	// <Static> output is not laid out against the terminal width unless given one: without it,
+	// long lines are wrapped by the terminal at its edge instead of inside their column.
 	return (
-		<Box flexDirection="column" marginBottom={1}>
+		<Box flexDirection="column" marginBottom={1} width={width}>
 			<Echo line={entry.line} />
 			{entry.kind === 'error' ? (
 				<Text>
@@ -97,8 +101,10 @@ function Activity({line}: {line: string}) {
 	);
 }
 
-export function App({api, registry, vaultPath, autoIndex = true, onDisconnect}: AppProps) {
+export function App({api, registry, vaultPath, formatName, autoIndex = true, onDisconnect}: AppProps) {
 	const {exit} = useApp();
+	const {stdout} = useStdout();
+	const columns = (stdout as {columns?: number}).columns;
 	const history = useMemo(() => new PromptHistory(), []);
 	const nextId = useRef(1);
 	const [entries, setEntries] = useState<Entry[]>([{id: 0, kind: 'banner'}]);
@@ -181,7 +187,13 @@ export function App({api, registry, vaultPath, autoIndex = true, onDisconnect}: 
 	return (
 		<Box flexDirection="column">
 			<Static items={entries}>
-				{(entry) => (entry.kind === 'banner' ? <Banner key={entry.id} vaultPath={vaultPath} /> : <TranscriptEntry key={entry.id} entry={entry} />)}
+				{(entry) =>
+					entry.kind === 'banner' ? (
+						<Banner key={entry.id} vaultPath={vaultPath} />
+					) : (
+						<TranscriptEntry key={entry.id} entry={entry} width={columns && columns > 0 ? columns : undefined} />
+					)
+				}
 			</Static>
 			{running ? <Activity line={running} /> : null}
 			{disconnected ? (
@@ -197,7 +209,7 @@ export function App({api, registry, vaultPath, autoIndex = true, onDisconnect}: 
 				}}
 				onExit={exit}
 			/>
-			<StatusLine vaultName={basename(resolve(vaultPath))} index={index} disconnected={disconnected} />
+			<StatusLine vaultName={basename(resolve(vaultPath))} formatName={formatName} index={index} disconnected={disconnected} />
 		</Box>
 	);
 }

@@ -6,7 +6,14 @@ Pipeline:
 3. mask frontmatter, fenced/inline code and %% comments (see ``mask.py``);
 4. scan the masked text for headings, block IDs, wikilinks/embeds, markdown
    links and inline tags. Because masking keeps offsets stable, every match
-   maps straight back to a line in the original file.
+   maps straight back to a line in the original file;
+5. collect generic fields, without knowing what any key means:
+   * header fields: the ``Key: value`` lines at the very top of the body
+     (blank lines allowed between them; the block ends at the first other line);
+   * inline fields: Dataview-style ``key:: value`` lines anywhere in the body,
+     also as list items or in blockquotes. ``::`` must be followed by a space or
+     the end of the line, so ``std::vector`` is not a field. Dataview's bracketed
+     ``[key:: value]`` form inside a sentence is not read.
 
 Nothing here resolves links to files. That belongs to the vault index.
 """
@@ -20,8 +27,8 @@ from pathlib import Path
 from urllib.parse import unquote
 
 from vaultengine.frontmatter import frontmatter_aliases, frontmatter_tags, split_frontmatter
-from vaultengine.mask import mask_code, mask_region
-from vaultengine.model import BlockId, ExternalLink, Heading, Link, ParsedNote, Tag
+from vaultengine.mask import mask_code, mask_region, mask_regions
+from vaultengine.model import BlockId, ExternalLink, HeaderField, Heading, InlineField, Link, ParsedNote, Tag
 
 # Bump whenever parse output can change for the same input; the SQLite index
 # re-parses every note when the stored version differs.
@@ -48,6 +55,13 @@ _HEADING = re.compile(r"^ {0,3}(?P<hashes>#{1,6})(?=[ \t]|$)(?P<rest>.*)$", re.M
 _CLOSING_HASHES = re.compile(r"(?:^|[ \t]+)#+[ \t]*$")
 _BLOCK_ID = re.compile(r"(?:^|[ \t])\^(?P<id>[A-Za-z0-9-]+)[ \t]*$", re.MULTILINE)
 _TAG_START = re.compile(r"(?<!\S)#")
+# "Key: value" (one colon, then space or end of line). Keys start with a letter.
+_HEADER_FIELD = re.compile(r"^(?P<key>[^\W\d_][\w \-]{0,39}?)[ \t]*:(?=[ \t]|$)(?P<value>.*)$")
+_INLINE_FIELD = re.compile(
+    r"^(?P<prefix>[ \t]*(?:>[ \t]*)*(?:(?:[-*+]|\d+[.)])[ \t]+)?)"
+    r"(?P<key>[^\W_][\w \-]{0,63}?)[ \t]*::(?=[ \t]|$)(?P<value>.*)$",
+    re.MULTILINE,
+)
 
 
 class _LineIndex:
@@ -185,6 +199,58 @@ def _extract_block_ids(masked: str, lines: _LineIndex) -> list[BlockId]:
     return [BlockId(m["id"], lines.line_of(m.start("id"))) for m in _BLOCK_ID.finditer(masked)]
 
 
+def _value_span(text: str, start: int, end: int) -> tuple[int, int]:
+    """Shrink [start, end) to exclude surrounding whitespace."""
+    while start < end and text[start] in " \t":
+        start += 1
+    while end > start and text[end - 1] in " \t":
+        end -= 1
+    return start, end
+
+
+def _field_parts(note: ParsedNote, line: int, start: int, end: int) -> tuple[tuple[Link, ...], tuple[str, ...]]:
+    links = tuple(
+        link for link in sorted(note.links + note.embeds, key=lambda item: item.start)
+        if link.start >= start and link.end <= end
+    )
+    # A field line holds nothing but key and value, and keys cannot contain '#'.
+    tags = tuple(tag.name for tag in note.tags if tag.source == "inline" and tag.line == line)
+    return links, tags
+
+
+def _extract_inline_fields(text: str, masked: str, lines: _LineIndex, note: ParsedNote) -> list[InlineField]:
+    fields = []
+    for match in _INLINE_FIELD.finditer(masked):
+        start, end = _value_span(text, match.start("value"), match.end("value"))
+        line = lines.line_of(match.start())
+        links, tags = _field_parts(note, line, start, end)
+        fields.append(InlineField(match["key"].strip(), text[start:end], line, start, end, links, tags))
+    return fields
+
+
+def _extract_header_fields(text: str, masked: str, body_offset: int, body_line: int, note: ParsedNote) -> list[HeaderField]:
+    fields = []
+    offset, line = body_offset, body_line
+    while offset <= len(text):
+        newline = text.find("\n", offset)
+        line_end = len(text) if newline == -1 else newline
+        original, visible = text[offset:line_end], masked[offset:line_end]
+        if original.strip():
+            if not visible.strip():
+                break  # code or a %% comment: not part of the header block
+            if not _INLINE_FIELD.match(visible):  # "key:: value" lines may sit in the block
+                match = _HEADER_FIELD.match(visible)
+                if match is None:
+                    break
+                start, end = _value_span(text, offset + match.start("value"), offset + match.end("value"))
+                links, tags = _field_parts(note, line, start, end)
+                fields.append(HeaderField(match["key"].strip(), text[start:end], line, start, end, links, tags))
+        if newline == -1:
+            break
+        offset, line = newline + 1, line + 1
+    return fields
+
+
 def parse_note(text: str, path: str | None = None) -> ParsedNote:
     text = normalize_text(text)
     lines = _LineIndex(text)
@@ -196,6 +262,7 @@ def parse_note(text: str, path: str | None = None) -> ParsedNote:
         frontmatter_error=block.error,
         has_frontmatter=block.present,
         body_start_line=block.body_start_line,
+        last_line=text.count("\n") + (0 if not text or text.endswith("\n") else 1),
         aliases=frontmatter_aliases(block.data),
     )
     note.tags.extend(
@@ -207,9 +274,7 @@ def parse_note(text: str, path: str | None = None) -> ParsedNote:
     note.block_ids = _extract_block_ids(masked, lines)
 
     wikilinks = _extract_wikilinks(masked, lines)
-    without_wikilinks = masked
-    for link in wikilinks:
-        without_wikilinks = mask_region(without_wikilinks, link.start, link.end)
+    without_wikilinks = mask_regions(masked, [(link.start, link.end) for link in wikilinks])
     markdown_links, note.external_links, destinations = _extract_markdown_links(without_wikilinks, lines)
 
     all_links = sorted(wikilinks + markdown_links, key=lambda link: link.start)
@@ -217,10 +282,11 @@ def parse_note(text: str, path: str | None = None) -> ParsedNote:
     note.embeds = [link for link in all_links if link.is_embed]
 
     # '#' inside link targets or URLs is a subpath/fragment, never a tag.
-    tag_scan = without_wikilinks
-    for start, end in destinations:
-        tag_scan = mask_region(tag_scan, start, end)
+    tag_scan = mask_regions(without_wikilinks, destinations)
     note.tags.extend(_extract_tags(tag_scan, lines))
+
+    note.inline_fields = _extract_inline_fields(text, masked, lines, note)
+    note.header_fields = _extract_header_fields(text, masked, block.end_offset, block.body_start_line, note)
     return note
 
 

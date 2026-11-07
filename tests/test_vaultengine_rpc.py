@@ -29,8 +29,14 @@ from vaultengine.rpc.server import RpcServer, serve_stdio
 from vaultengine.service import VaultService
 
 FIXTURES = Path(__file__).parent / "fixtures"
-SESSIONS = {"sample_vault": FIXTURES / "vault", "resolver_vault": FIXTURES / "resolver_vault"}
+SESSIONS = {
+    "sample_vault": FIXTURES / "vault",
+    "resolver_vault": FIXTURES / "resolver_vault",
+    "sample_vault_format": FIXTURES / "vault",  # served with --format brain: check, fix, coverage, writes, ingest
+}
+SESSION_FORMATS = {"sample_vault_format": "brain"}
 REPO_ROOT = Path(__file__).parent.parent
+BRAIN_PATH = REPO_ROOT / "formats" / "brain.yaml"
 RECORD = os.environ.get("VAULTENGINE_RECORD") == "1"
 SCHEMA = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
 
@@ -54,7 +60,7 @@ def normalize(value, vault_root):
     if isinstance(value, list):
         return [normalize(item, vault_root) for item in value]
     if isinstance(value, str):
-        return value.replace(vault_root, "<VAULT>")
+        return value.replace(vault_root, "<VAULT>").replace(str(REPO_ROOT), "<REPO>")
     return value
 
 
@@ -94,8 +100,9 @@ class RecordedSessionReplayTests(unittest.TestCase):
                 self.record(path, exchanges, vault)
                 return
             stdin = "".join(wire_line(e) + "\n" for e in exchanges)
+            serve_args = ["--format", SESSION_FORMATS[name]] if name in SESSION_FORMATS else []
             proc = subprocess.run(
-                [sys.executable, "-m", "vaultengine", "serve", str(vault.root)],
+                [sys.executable, "-m", "vaultengine", "serve", str(vault.root), *serve_args],
                 input=stdin.encode("utf-8"), capture_output=True, cwd=REPO_ROOT, timeout=120,
             )
             self.assertEqual(proc.returncode, 0, proc.stderr.decode())
@@ -109,7 +116,8 @@ class RecordedSessionReplayTests(unittest.TestCase):
             vault.cleanup()
 
     def record(self, path, exchanges, vault):
-        server = RpcServer(VaultService(vault.root))
+        name = path.stem
+        server = RpcServer(VaultService(vault.root, format_path=BRAIN_PATH if name in SESSION_FORMATS else None))
         try:
             for exchange in exchanges:
                 reply = server.handle_text(wire_line(exchange))
@@ -123,6 +131,9 @@ class RecordedSessionReplayTests(unittest.TestCase):
 
     def test_replay_resolver_vault(self):
         self.replay("resolver_vault")
+
+    def test_replay_sample_vault_format(self):
+        self.replay("sample_vault_format")
 
 
 class RecordedSessionContentTests(unittest.TestCase):
@@ -160,7 +171,8 @@ class RecordedSessionContentTests(unittest.TestCase):
         for _, exchange in self.exchanges():
             responses = exchange["response"] if isinstance(exchange["response"], list) else [exchange["response"]]
             codes.update(r["error"]["code"] for r in filter(None, responses) if "error" in r)
-        self.assertEqual(codes, {-32700, -32600, -32601, -32602, -32001, -32002})
+        # -32005 (write failed, rolled back) needs a crash or a concurrent edit; see WriteFailedErrorTests.
+        self.assertEqual(codes, {-32700, -32600, -32601, -32602, -32001, -32002, -32003, -32004})
 
 
 class ProtocolErrorTests(unittest.TestCase):
@@ -255,6 +267,91 @@ class ProtocolErrorTests(unittest.TestCase):
     def test_result_that_violates_its_model_is_an_internal_error(self):
         with patch("vaultengine.queries.stats", return_value={"unexpected": 1}), patch("sys.stderr", io.StringIO()):
             self.assertError({"jsonrpc": "2.0", "id": 1, "method": "vault.stats"}, -32603, 1)
+
+
+class FormatMethodTests(unittest.TestCase):
+    """Format methods: what the recordings cannot show (a failed commit, a changed format file, no format)."""
+
+    def setUp(self):
+        self.vault = TempVaultCopy(SESSIONS["sample_vault"])
+        self.service = VaultService(self.vault.root, format_path=BRAIN_PATH)
+        self.server = RpcServer(self.service)
+
+    def tearDown(self):
+        self.service.close()
+        self.vault.cleanup()
+
+    def call(self, method, params=None):
+        message = {"jsonrpc": "2.0", "id": 1, "method": method, "params": params or {}}
+        return json.loads(self.server.handle_text(json.dumps(message)))
+
+    def test_write_failed_is_error_32005_and_nothing_changes(self):
+        from vaultengine.formats.write import WriteFailed
+
+        before = {p: p.read_bytes() for p in self.vault.root.rglob("*.md")}
+        with patch("vaultengine.formats.write.commit", side_effect=WriteFailed("disk full; every file was restored")):
+            reply = self.call("note.set", {"note": "CLM - Grade the observed end state rather than the trajectory",
+                                           "key": "Status", "value": "#contested"})
+        self.assertEqual(reply["error"]["code"], -32005)
+        self.assertEqual(reply["error"]["message"], "disk full; every file was restored")
+        self.assertEqual({p: p.read_bytes() for p in self.vault.root.rglob("*.md")}, before)
+
+    def test_the_format_file_is_reloaded_when_it_changes(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            custom = Path(scratch) / "custom.yaml"
+            custom.write_text(BRAIN_PATH.read_text(encoding="utf-8"), encoding="utf-8")
+            service = VaultService(self.vault.root, format_path=custom)
+            server = RpcServer(service)
+            first = json.loads(server.handle_text('{"jsonrpc":"2.0","id":1,"method":"vault.check","params":{"limit":1}}'))
+            self.assertEqual(first["result"]["summary"]["violations"], 102)
+            marker = "Tags as #hashtags.\n      Created: {required: true"
+            text = custom.read_text(encoding="utf-8")
+            self.assertIn(marker, text)
+            custom.write_text(text.replace(marker, "Tags as #hashtags.\n      Created: {required: false"), encoding="utf-8")
+            os.utime(custom, ns=(custom.stat().st_mtime_ns + 10**9,) * 2)
+            second = json.loads(server.handle_text('{"jsonrpc":"2.0","id":2,"method":"vault.check","params":{"limit":1}}'))
+            self.assertEqual(second["result"]["summary"]["violations"], 87)  # the 15 zettels without Created are fine now
+            custom.write_text("format: 1\ntypes: {}\n", encoding="utf-8")
+            os.utime(custom, ns=(custom.stat().st_mtime_ns + 2 * 10**9,) * 2)
+            broken = json.loads(server.handle_text('{"jsonrpc":"2.0","id":3,"method":"vault.check"}'))
+            self.assertEqual(broken["error"]["code"], -32003)
+            self.assertIn("Invalid format file", broken["error"]["message"])
+            service.close()
+
+    def test_the_parse_cache_never_serves_a_stale_note(self):
+        first = self.call("vault.check", {"limit": 1})["result"]["summary"]["violations"]
+        claim = self.vault.root / "50_MOC/discourse/rl-environment-design/CLM - Grade the observed end state rather than the trajectory.md"
+        mtime = claim.stat().st_mtime_ns
+        claim.write_text(claim.read_text(encoding="utf-8").replace("Status: #supported", "Status: #settled"), encoding="utf-8")
+        os.utime(claim, ns=(mtime, mtime))  # same mtime: the cache must go by content
+        self.assertEqual(self.call("vault.check", {"limit": 1})["result"]["summary"]["violations"], first + 1)
+        (self.vault.root / "10_SOURCES/RLHF.md").unlink()  # a deleted note leaves the cache
+        after_delete = self.call("vault.check", {})["result"]
+        self.assertNotIn("10_SOURCES/RLHF.md", [n["path"] for n in after_delete["notes"]])
+        (self.vault.root / "20_ZETTLEKASTEN/brand-new.md").write_text("no header\n", encoding="utf-8")
+        after_add = self.call("vault.check", {})["result"]
+        self.assertIn("20_ZETTLEKASTEN/brand-new.md", [n["path"] for n in after_add["notes"]])
+
+    def test_reads_do_not_create_an_index(self):
+        self.assertIn("result", self.call("vault.check", {"limit": 1}))
+        self.assertIn("result", self.call("vault.coverage", {"limit": 1}))
+        self.assertFalse((self.vault.root / ".vaultengine").exists())
+
+    def test_invalid_params(self):
+        for method, params in [
+            ("vault.check", {"changed": "yes"}), ("vault.check", {"limit": 0}), ("vault.fix", {"only": []}),
+            ("vault.fix", {"only": ["everything"]}), ("note.new", {"type": "zettel"}), ("note.link", {"source": "a", "target": "b"}),
+            ("note.ingest", {}), ("note.ingest", {"path": "a.md", "content": "x", "filename": "a.md"}),
+            ("note.new", {"type": "zettel", "title": "t", "relations": [{"relation": "supports"}]}),
+        ]:
+            with self.subTest(method=method, params=params):
+                self.assertEqual(self.call(method, params)["error"]["code"], -32602)
+
+    def test_serve_refuses_a_bad_format_at_start(self):
+        proc = subprocess.run([sys.executable, "-m", "vaultengine", "serve", str(self.vault.root), "--format", "nope"],
+                              input=b"", capture_output=True, cwd=REPO_ROOT, timeout=60)
+        self.assertEqual(proc.returncode, 2)
+        self.assertIn(b"no format named 'nope'", proc.stderr)
 
 
 class StdioTransportTests(unittest.TestCase):

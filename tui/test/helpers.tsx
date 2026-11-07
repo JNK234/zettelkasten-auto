@@ -17,7 +17,9 @@ export const REPO_ROOT = fileURLToPath(new URL('../..', import.meta.url));
 
 type Exchange = {request?: {method?: string; params?: Record<string, unknown>}; response: {result?: unknown} | unknown[] | null};
 
-export function recorded(session: 'resolver_vault' | 'sample_vault'): Map<string, unknown> {
+export type Session = 'resolver_vault' | 'sample_vault' | 'sample_vault_format';
+
+export function recorded(session: Session): Map<string, unknown> {
 	const results = new Map<string, unknown>();
 	const text = readFileSync(`${REPO_ROOT}/tests/fixtures/rpc/${session}.jsonl`, 'utf8');
 	for (const line of text.split('\n').filter(Boolean)) {
@@ -29,6 +31,33 @@ export function recorded(session: 'resolver_vault' | 'sample_vault'): Map<string
 	}
 
 	return results;
+}
+
+/** The recorded response to request `id` of a session: its result, or its error as an RpcError. */
+export function recordedById(session: Session, id: number): unknown {
+	const text = readFileSync(`${REPO_ROOT}/tests/fixtures/rpc/${session}.jsonl`, 'utf8');
+	for (const line of text.split('\n').filter(Boolean)) {
+		const exchange = JSON.parse(line) as {request?: {id?: unknown}; response: {result?: unknown; error?: {code: number; message: string; data?: unknown}}};
+		if (exchange.request?.id === id) {
+			if (exchange.response.error) {
+				return new RpcError(exchange.response.error.code, exchange.response.error.message, exchange.response.error.data);
+			}
+
+			return exchange.response.result;
+		}
+	}
+
+	throw new Error(`no request ${id} in ${session}`);
+}
+
+/** Result of request `id` of the sample_vault_format session (vault.check, note.link, ...). */
+export function formatResult<T>(id: number): T {
+	const value = recordedById('sample_vault_format', id);
+	if (value instanceof Error) {
+		throw value;
+	}
+
+	return value as T;
 }
 
 export const freshStatus: IndexStatusResult = {
@@ -48,10 +77,25 @@ export const freshStatus: IndexStatusResult = {
 
 export type FakeApi = VaultApi & {calls: string[]};
 
-/** A VaultApi over the recorded resolver_vault session. Override any method. */
+/**
+ * A VaultApi over the recorded resolver_vault session; the format methods
+ * (check, fix, coverage, new, link, set, ingest) replay the sample_vault_format
+ * session by method and params. Override any method.
+ */
 export function fakeApi(overrides: Partial<VaultApi> = {}): FakeApi {
 	const results = recorded('resolver_vault');
+	const formatResults = recorded('sample_vault_format');
 	const calls: string[] = [];
+	const replay = async <T,>(method: string, params: object = {}): Promise<T> => {
+		const clean = Object.fromEntries(Object.entries(params).filter(([, value]) => value !== undefined));
+		calls.push(`${method} ${JSON.stringify(clean)}`);
+		const key = `${method} ${JSON.stringify(clean)}`;
+		if (!formatResults.has(key)) {
+			throw new RpcError(-32_003, 'No format configured; start the server with --format <name or file>');
+		}
+
+		return formatResults.get(key) as T;
+	};
 	const lookup = <T,>(method: string, params: Record<string, unknown> = {}): T | undefined =>
 		results.get(`${method} ${JSON.stringify(params)}`) as T | undefined;
 	const api: VaultApi = {
@@ -85,6 +129,13 @@ export function fakeApi(overrides: Partial<VaultApi> = {}): FakeApi {
 
 			return note as Awaited<ReturnType<VaultApi['note']>>;
 		},
+		check: async (params) => replay('vault.check', params),
+		fix: async (params) => replay('vault.fix', params),
+		coverage: async (params) => replay('vault.coverage', params),
+		newNote: async (params) => replay('note.new', params),
+		link: async (params) => replay('note.link', params),
+		set: async (params) => replay('note.set', params),
+		ingest: async (params) => replay('note.ingest', params),
 	};
 	return Object.assign(api, overrides, {calls});
 }

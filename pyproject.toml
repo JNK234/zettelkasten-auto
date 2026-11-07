@@ -13,7 +13,12 @@ dependencies = [
     "requests>=2.28.0",
     "anthropic>=0.45.0",
     "pydantic>=2.12.5",
+    "markdownify>=1.2",
 ]
+
+[project.optional-dependencies]
+# Experimental embedding ranking for `vault suggest --method semantic|fused` (runs offline).
+semantic = ["wordllama>=0.4"]
 
 [project.scripts]
 zettel = "src.main:main"

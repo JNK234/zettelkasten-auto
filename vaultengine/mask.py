@@ -31,8 +31,17 @@ def _blank(chars: list[str], start: int, end: int) -> None:
 
 
 def mask_region(text: str, start: int, end: int) -> str:
+    return mask_regions(text, [(start, end)])
+
+
+def mask_regions(text: str, regions) -> str:
+    """Blank several [start, end) regions in one pass (newlines kept)."""
+    regions = list(regions)
+    if not regions:
+        return text
     chars = list(text)
-    _blank(chars, start, end)
+    for start, end in regions:
+        _blank(chars, start, end)
     return "".join(chars)
 
 

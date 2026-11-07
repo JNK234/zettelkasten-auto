@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * vault-tui --vault <path> [--python <interpreter>] [--db <index.sqlite>] [--no-index]
+ * vault-tui --vault <path> [--format <name|file>] [--python <interpreter>] [--db <index.sqlite>] [--no-index]
  */
 import {statSync} from 'node:fs';
 import {parseArgs} from 'node:util';
@@ -15,6 +15,7 @@ const USAGE = `Usage: vault-tui --vault <path> [options]
 
 Options:
   -v, --vault <path>     Obsidian vault folder (required)
+  -f, --format <name>    note format for /check /fix /new /link /ingest /coverage (e.g. brain, or a .yaml file)
       --python <path>    Python interpreter with vaultengine (default: $VAULT_TUI_PYTHON, repo .venv, python3)
       --db <path>        index file (default: <vault>/.vaultengine/index.sqlite)
       --no-index         do not update the index on start
@@ -30,6 +31,7 @@ try {
 	options = parseArgs({
 		options: {
 			vault: {type: 'string', short: 'v'},
+			format: {type: 'string', short: 'f'},
 			python: {type: 'string'},
 			db: {type: 'string'},
 			'no-index': {type: 'boolean', default: false},
@@ -55,7 +57,7 @@ if (!process.stdin.isTTY) {
 	fail('needs an interactive terminal (stdin is not a TTY)');
 }
 
-const server = startVaultServer({vault, python: options.python, db: options.db});
+const server = startVaultServer({vault, python: options.python, db: options.db, format: options.format});
 const api = createVaultApi(server.client);
 const registry = new CommandRegistry().register(...builtinCommands);
 
@@ -64,6 +66,7 @@ const app = render(
 		api={api}
 		registry={registry}
 		vaultPath={vault}
+		formatName={options.format}
 		autoIndex={!options['no-index']}
 		onDisconnect={(listener) => {
 			server.client.events.on('close', listener);

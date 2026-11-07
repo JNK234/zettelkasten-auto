@@ -97,3 +97,54 @@ describe('server start-up failures are explained', () => {
 		expect(error.message).toMatch(/Vault server exited with code 2: error: vault folder not found/);
 	});
 });
+
+describe('format commands against a real server started with --format brain', () => {
+	const EVD = 'EVD - Reward is a deterministic outcome check 1 only if the final database equals the data';
+	const CLM = 'CLM - Grade the observed end state rather than the trajectory';
+	let formatDir: string;
+	let formatServer: VaultServer;
+
+	beforeAll(() => {
+		formatDir = mkdtempSync(join(tmpdir(), 'vault-tui-format-'));
+		cpSync(join(REPO_ROOT, 'tests', 'fixtures', 'vault'), join(formatDir, 'vault'), {
+			recursive: true,
+			preserveTimestamps: true,
+			filter: (source) => !source.split(/[\\/]/).includes('.vaultengine'),
+		});
+		formatServer = startVaultServer({vault: join(formatDir, 'vault'), format: 'brain'});
+	});
+
+	afterAll(() => {
+		formatServer.stop();
+		rmSync(formatDir, {recursive: true, force: true});
+	});
+
+	test('/check, /coverage, /link and /check changed, end to end', async () => {
+		const formatApi = createVaultApi(formatServer.client);
+		const app = renderApp({api: formatApi, vaultPath: join(formatDir, 'vault'), formatName: 'brain'});
+		await app.waitFor('format brain  ·  180 notes · 1,787 links  ·  ● index fresh', 15_000);
+
+		await app.type('/check');
+		await app.press(keys.escape, keys.enter);
+		let frame = await app.waitFor('✗ 102 violations in 77 notes', 15_000);
+		expect(frame).toMatch(/L138 +missing-heading +missing heading 'Notes'/);
+
+		await app.type('/coverage');
+		await app.press(keys.escape, keys.enter);
+		frame = await app.waitFor('Most cited sources', 15_000);
+		expect(frame).toContain('28 sources: 23 linked, 5 that nothing links to');
+
+		await app.type(`/link @"${EVD}" supports @"${CLM}"`);
+		await app.press(keys.escape, keys.enter);
+		frame = await app.waitFor('index: updated 2 notes', 15_000);
+		expect(frame).toContain('⏺ Wrote 2 notes  link');
+
+		await app.type('/check changed');
+		await app.press(keys.escape, keys.enter);
+		await app.waitFor('✓ no violations in 0 notes checked', 15_000);
+
+		await app.type(`/link @"${EVD}" supports @kl-penalty-in-rlhf`);
+		await app.press(keys.escape, keys.enter);
+		await app.waitFor('⏺ Refused: the link would add 1 violation  nothing was written', 15_000);
+	}, 90_000); // six real round trips; each check and write reads the whole vault
+});

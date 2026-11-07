@@ -276,6 +276,17 @@ describe('prompt: suggestions and history (R3, R8)', () => {
 		await app.waitFor('Not a command. Commands start with "/"; try /help.');
 	});
 
+	test('keys that arrive in one chunk (typed fast or pasted): a trailing Enter still runs the command', async () => {
+		const app = renderApp();
+		await app.waitFor('index fresh');
+		app.stdin.write('/health\r'); // one chunk, as a pty delivers fast typing
+		await app.waitFor('⏺ Vault health');
+		app.stdin.write('/he\r'); // Enter picks the highlighted suggestion, as a keypress would
+		await app.waitFor((frame) => frame.split('⏺ Vault health').length === 3);
+		app.stdin.write('/note one\ntwo'); // a line break inside a paste is a space, not Enter
+		await app.waitFor((frame) => promptLine(frame) === '> /note one two');
+	});
+
 	test('↑/↓ recall history and restore the draft', async () => {
 		const app = renderApp();
 		await app.waitFor('index fresh');

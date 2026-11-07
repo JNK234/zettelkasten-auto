@@ -1,0 +1,217 @@
+# Note conventions of the "brain" vault, read by `vault formats <vault> --format brain`.
+#
+# Written by reading every note in tests/fixtures/vault (180 notes). Counts in the
+# comments are from that survey. Where a rule describes the current convention and
+# older notes do not follow it, the older notes show up as issues on purpose.
+# Loosen a rule here if you would rather accept them.
+
+format: 1
+name: brain
+description: Zettelkasten with sources, atomic zettels, topic overviews and a QUE/CLM/EVD discourse graph.
+
+# No note in the vault has YAML frontmatter. Metadata is the block of `Key: value`
+# lines at the top of each note. "either" would also accept frontmatter properties.
+metadata_source: inline
+
+# Typed relation fields, written `name:: [[a]], [[b]]` (only in discourse notes).
+# A pair with `inverse` mirrors: A supports B implies B supported-by A. Every resolved
+# supports/supported-by pair in the vault (28 of 28) is already written on both sides.
+relations:
+  supports:
+    inverse: supported-by
+    targets: [claim]
+    description: evidence backs a claim
+  supported-by:
+    targets: [evidence]
+  opposes:
+    inverse: opposed-by
+    targets: [claim]
+    description: evidence cuts against a claim
+  opposed-by:
+    targets: [evidence]
+  from:
+    targets: [source]
+    description: the source an evidence note was taken from (one-way)
+  informs:
+    targets: [question]
+    description: a claim is a position on a question (one-way)
+  refines:
+    targets: [claim]
+    description: a claim narrows or corrects another claim (one-way)
+  different-context:
+    targets: [claim]
+    description: >-
+      two claims look opposed but apply to different settings. Used twice, both
+      targets missing from the vault, so symmetry cannot be checked; kept one-way.
+      Add `inverse: different-context` to make it its own mirror.
+
+# Section -> link role. A link gets the role of the innermost enclosing heading that
+# has one. Links in relation fields get the relation name instead; links in `Tags:`
+# get the role set on that key below.
+link_roles:
+  tension: [Tensions]                 # zettels: 481 links
+  reference: [References]             # zettels, sources: 120 links
+  see-also: [See Also]                # older zettels: 52 links
+  connection:                         # sources name this section several ways
+    - Connections
+    - "/connections?$/"               # "13. Connections", "Why this matters / connections"
+    - Connections to existing vault knowledge
+    - Cross-links into the vault
+    - How it fits with other work in the vault
+  position: [Positions]               # questions: the claims that answer them
+  related-zettel: [Related zettels]   # claims
+  contradiction: [Contradictions]     # topics
+  open-question: [Open Questions]     # topics
+  source: [Sources]                   # topics
+
+# What `vault coverage` reports on. Claims and questions are not listed as citing types:
+# they cite through their evidence (EVD from::), which is.
+coverage:
+  sources: [source]
+  citing: [zettel, evidence, topic, comparison]
+  citation_roles: [reference, from, source]    # links under References / Sources, and from:: fields
+
+# `new:` in a type says how `vault new` writes one: the file name (`{title}` = the title
+# without characters names cannot hold, `{slug}` = lower-case-with-dashes), whether metadata
+# lines have a blank line between them, and default values (`{now}` = current time).
+# Headings are written at the level they have in most notes of the type.
+
+types:
+  # First matching type wins, so the discourse types come before anything broader.
+  question:
+    description: QUE, an open question in a discourse graph, with the claims that answer it
+    match: {folder: 50_MOC/discourse, name: "QUE *"}
+    # From a single note (QUE 03). Check these against your other questions.
+    headings: [Terms, Positions, The issue, Current answer]
+    ordered_headings: true
+    metadata:
+      Created: {required: true, kind: datetime, format: "%d-%m-%Y %H:%M"}
+      Tags: {required: true, kind: links, link_role: tag}
+      Status: {required: true, kind: tags, multiple: false, values: [partly-settled]}
+    relations: {}   # questions carry no relation fields; claims point at them
+    new:
+      name: "QUE {title}"           # e.g. --title "04 - Who writes the grader"
+      spaced_metadata: true         # discourse notes: 40 of 40
+      defaults: {Created: "{now}", Tags: "[[discourse-graph]]"}
+
+  claim:
+    description: CLM, one position, backed and opposed by evidence
+    match: {folder: 50_MOC/discourse, name: "CLM - *"}
+    headings: [Relations, Scope, Related zettels]     # 8 of 8
+    ordered_headings: true
+    relations_heading: Relations                      # where `vault fix` puts a relation field
+    metadata:
+      Created: {required: true, kind: datetime, format: "%d-%m-%Y %H:%M"}
+      Tags: {required: true, kind: links, link_role: tag}
+      # Only #supported is written on a claim so far; QUE 03 labels claims
+      # (supported), (contested) and (weak), so those are allowed too.
+      Status: {required: true, kind: tags, multiple: false, values: [supported, contested, weak]}
+    relations:
+      required: [informs, supported-by]               # 8 of 8 each
+      optional: [opposed-by, refines, different-context]
+    new:
+      name: "CLM - {title}"
+      max_name_length: 90           # long discourse titles are cut at 90 characters in the file name
+      spaced_metadata: true
+      defaults: {Created: "{now}", Tags: "[[discourse-graph]]"}
+
+  evidence:
+    description: EVD, a quoted finding from one source, supporting or opposing claims
+    match: {folder: 50_MOC/discourse, name: "EVD - *"}
+    headings: [Relations, Quote, Setup]               # 31 of 31
+    ordered_headings: true
+    relations_heading: Relations
+    metadata:
+      Created: {required: true, kind: datetime, format: "%d-%m-%Y %H:%M"}
+      Tags: {required: true, kind: links, link_role: tag}
+      Status: {required: true, kind: tags, multiple: false, values: [evidence]}
+      # Seen: B (12), C (17), D (2). A is assumed to be the top of the scale.
+      Strength: {required: true, kind: text, values: [A, B, C, D]}
+    relations:
+      required: [from, supports]                      # 31 of 31 each
+      optional: [opposes]
+    new:
+      name: "EVD - {title}"
+      max_name_length: 90
+      spaced_metadata: true
+      defaults: {Created: "{now}", Tags: "[[discourse-graph]]", Status: "#evidence"}
+
+  zettel:
+    description: one atomic idea
+    match: {folder: 20_ZETTLEKASTEN}
+    # The template in use since 12-05-2026 (82 of 109). The 23 older notes
+    # (17-01-2026 to 03-04-2026) use Definition / How It Works / Key Points / Connections,
+    # and 4 stubs from 2025 have only a title and References. Both groups are reported.
+    # References is an H1 in most notes and an H2 in some; levels are not checked.
+    headings: [What This Is, Why It Matters, Key Details, Tensions, References]
+    ordered_headings: true
+    metadata:
+      # Missing in 15 of the 18 notes from June-July 2026 that write Tags as #hashtags.
+      Created: {required: true, kind: datetime, format: "%d-%m-%Y %H:%M"}
+      Status: {required: true, kind: tags, multiple: false, values: [baby, teen, mature]}
+      # [[links]] in 91 notes, #hashtags in 18.
+      Tags: {required: true, kind: [links, tags], link_role: tag}
+    new:
+      name: "{slug}"                # kl-penalty-in-rlhf
+      spaced_metadata: true         # 66 of 109 (43 have none)
+      defaults: {Created: "{now}", Status: "#baby"}
+
+  source:
+    description: notes on one paper, post or course
+    match: {folder: 10_SOURCES}
+    headings: [References, Notes]                     # 28 and 27 of 28
+    ordered_headings: true
+    metadata:
+      Created: {required: true, kind: datetime, format: "%d-%m-%Y %H:%M"}
+      # Every source has the Tags line; 18 of 28 leave it empty.
+      Tags: {required: true, allow_empty: true, kind: links, link_role: tag}
+      # A maturity tag, plus #processed once the zettel tool has run on it
+      # ("#baby  #processed", "#teen   #processed").
+      Status: {required: true, kind: tags, multiple: true, values: [baby, teen, mature, processed]}
+      # Provenance, written by `vault ingest` (the 28 older sources have none).
+      Original: {kind: text, description: file name the source was ingested from}
+      Content hash: {kind: text, description: "sha256:<hex> of the ingested file's bytes"}
+      Ingested: {kind: datetime, format: "%d-%m-%Y %H:%M"}
+    # Sources have no title heading: the title is the file name, and the first link under
+    # References carries the full title ("Adding Error Bars to Evals: A Statistical ...").
+    title_section: References
+    new:
+      spaced_metadata: true         # 28 of 28
+      title_heading: false          # 0 of 28 have one
+      defaults: {Created: "{now}", Tags: "", Status: "#baby"}
+    ingest:
+      body_heading: Notes           # the document goes under "# Notes"
+      references_heading: References   # "1. [title](url)"
+      provenance: {file: Original, hash: Content hash, date: Ingested}
+
+  topic:
+    description: an overview that walks through a topic as questions, citing zettels
+    match: {folder: 50_MOC/topics}
+    # The middle sections are questions that differ per topic; the tail is fixed (2 of 2).
+    headings: [Open Questions, Contradictions, Sources]
+    ordered_headings: true
+    metadata:
+      Created: {required: true, kind: datetime, format: "%d-%m-%Y %H:%M"}
+      Updated: {required: true, kind: datetime, format: "%d-%m-%Y %H:%M"}
+      Type: {required: true, kind: text, values: [topic-overview]}
+      Sources: {required: true, kind: integer}
+      Zettels: {required: true, kind: integer}
+      Tags: {required: true, kind: links, link_role: tag}
+    new:
+      name: "{slug}"
+      defaults: {Created: "{now}", Updated: "{now}", Type: topic-overview}
+
+  comparison:
+    description: two approaches side by side
+    match: {folder: 50_MOC/comparisons}
+    # From a single note; only the two generic sections are required.
+    headings: [Summary, Comparison Table]
+    ordered_headings: true
+    metadata:
+      Created: {required: true, kind: datetime, format: "%d-%m-%Y %H:%M"}
+      Updated: {required: true, kind: datetime, format: "%d-%m-%Y %H:%M"}
+      Type: {required: true, kind: text, values: [comparison]}
+      Tags: {required: true, kind: links, link_role: tag}
+    new:
+      name: "{slug}"
+      defaults: {Created: "{now}", Updated: "{now}", Type: comparison}

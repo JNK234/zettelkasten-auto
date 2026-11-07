@@ -11,11 +11,23 @@ import type {
 	IndexBuildResult,
 	IndexStatusResult,
 	NoteGetResult,
+	NoteIngestParams,
+	NoteIngestResult,
+	NoteLinkParams,
+	NoteNewParams,
+	NoteSetParams,
 	NotesPickParams,
 	NotesPickResult,
+	VaultCheckParams,
+	VaultCheckResult,
+	VaultCoverageParams,
+	VaultCoverageResult,
+	VaultFixParams,
+	VaultFixResult,
 	VaultMethod,
 	VaultStatsParams,
 	VaultStatsResult,
+	WriteResult,
 } from './schema.js';
 
 export type VaultApi = {
@@ -25,6 +37,15 @@ export type VaultApi = {
 	health(params?: HealthReportParams): Promise<HealthReportResult>;
 	pick(params: NotesPickParams): Promise<NotesPickResult>;
 	note(path: string): Promise<NoteGetResult>;
+	/** vault.check: every violation of the format (the server needs --format). */
+	check(params?: VaultCheckParams): Promise<VaultCheckResult>;
+	/** vault.fix: missing mirrors and missing headings; dry_run shows the diff. */
+	fix(params?: VaultFixParams): Promise<VaultFixResult>;
+	coverage(params?: VaultCoverageParams): Promise<VaultCoverageResult>;
+	newNote(params: NoteNewParams): Promise<WriteResult>;
+	link(params: NoteLinkParams): Promise<WriteResult>;
+	set(params: NoteSetParams): Promise<WriteResult>;
+	ingest(params: NoteIngestParams): Promise<NoteIngestResult>;
 };
 
 export type RpcRequester = {
@@ -39,5 +60,12 @@ export function createVaultApi(client: RpcRequester): VaultApi {
 		health: async (params) => client.request('health.report', params),
 		pick: async (params) => client.request('notes.pick', params),
 		note: async (path) => client.request('note.get', {path}),
+		check: async (params) => client.request('vault.check', params),
+		fix: async (params) => client.request('vault.fix', params),
+		coverage: async (params) => client.request('vault.coverage', params),
+		newNote: async (params) => client.request('note.new', params),
+		link: async (params) => client.request('note.link', params),
+		set: async (params) => client.request('note.set', params),
+		ingest: async (params) => client.request('note.ingest', params),
 	};
 }

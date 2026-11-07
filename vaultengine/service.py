@@ -32,10 +32,25 @@ class NoteNotFound(ServiceError):
     pass
 
 
+class FormatNotConfigured(ServiceError):
+    """No format was given (serve --format), or it cannot be loaded."""
+
+
+class WriteRejected(ServiceError):
+    """The write cannot be planned: bad arguments, a name already taken, ... Nothing was written."""
+
+
+class WriteFailedError(ServiceError):
+    """The commit failed and every file was restored, or a file changed meanwhile. Nothing was written."""
+
+
 class VaultService:
-    def __init__(self, vault_root: str | Path, db_path: str | Path | None = None) -> None:
+    def __init__(self, vault_root: str | Path, db_path: str | Path | None = None, format_path: str | Path | None = None) -> None:
         self.root = Path(vault_root).resolve()
         self.db_path = Path(db_path).resolve() if db_path else default_db_path(self.root)
+        self.format_path = Path(format_path).resolve() if format_path else None
+        self._format: tuple[int, Any] | None = None  # (mtime_ns, FormatSpec): reloaded when the file changes
+        self._parse_cache: dict[str, Any] = {}  # {path: (sha256, ParsedNote)}: only changed notes are re-parsed
         self._index: VaultIndex | None = None
         # Prepared pick candidates, keyed by the index generation they were built from.
         self._pick_cache: tuple[str | None, list[tuple[str, str, Prepared]]] | None = None
@@ -153,3 +168,146 @@ class VaultService:
         if detail is None:
             raise NoteNotFound(f"No indexed note at {path!r}", path=path)
         return detail
+
+    # ----- formats: check, coverage and the safe writes -------------------------------
+
+    def _spec(self):
+        from vaultengine.formats import FormatError, load_format
+
+        if self.format_path is None:
+            raise FormatNotConfigured("No format configured; start the server with --format <name or file>")
+        try:
+            mtime = self.format_path.stat().st_mtime_ns
+        except OSError as exc:
+            raise FormatNotConfigured(f"Format file not readable: {exc}", format=str(self.format_path)) from None
+        if self._format is None or self._format[0] != mtime:
+            try:
+                self._format = (mtime, load_format(self.format_path))
+            except FormatError as exc:
+                raise FormatNotConfigured(f"Invalid format file: {exc}", format=str(self.format_path)) from None
+        return self._format[1]
+
+    def _typed(self):
+        from vaultengine.formats import TypedVault
+        from vaultengine.vault import Vault
+
+        return TypedVault(self._spec(), Vault.load(self.root, cache=self._parse_cache))
+
+    def check(self, changed: bool = False, limit: int | None = None) -> dict[str, Any]:
+        from vaultengine.formats.check import check_report, scope_all, scope_changed, select_issues
+
+        spec = self._spec()
+        if changed:
+            index = self._built_index()
+            stale = index.staleness(self.root)
+            last = index.meta().get("last_indexed_at")
+        typed = self._typed()
+        if changed:
+            scope = scope_changed(typed, stale.added, stale.changed, stale.deleted, last, stale.reason)
+        else:
+            scope = scope_all(typed)
+        report = check_report(typed, scope, select_issues(typed, scope))
+        report["format"] = {"name": spec.name, "path": str(self.format_path)}
+        if limit is not None:
+            report["notes"] = report["notes"][:limit]
+        report["limit"] = limit
+        return report
+
+    def coverage(self, limit: int | None = None) -> dict[str, Any]:
+        from vaultengine.formats.coverage import coverage
+
+        typed = self._typed()
+        if typed.spec.coverage is None:
+            raise FormatNotConfigured(f"Format {typed.spec.name!r} has no `coverage:` block", format=str(self.format_path))
+        report = coverage(typed)
+        report["format"] = {"name": typed.spec.name, "path": str(self.format_path)}
+        if limit is not None:
+            report["sources"]["unlinked"] = report["sources"]["unlinked"][:limit]
+            report["citing"]["notes"] = report["citing"]["notes"][:limit]
+        report["limit"] = limit
+        return report
+
+    def _write(self, build, dry_run: bool) -> dict[str, Any]:
+        from vaultengine.formats.write import NoteMissing, WriteError, WriteFailed, outcome_to_dict, run_write
+
+        spec = self._spec()
+        try:
+            outcome = run_write(spec, self.root, self.db_path, build, dry_run=dry_run, parse_cache=self._parse_cache)
+        except NoteMissing as exc:
+            raise NoteNotFound(str(exc)) from None
+        except WriteError as exc:
+            raise WriteRejected(str(exc)) from None
+        except WriteFailed as exc:
+            raise WriteFailedError(str(exc)) from None
+        return outcome_to_dict(outcome, dry_run)
+
+    def new(self, type: str, title: str, *, folder: str | None = None, name: str | None = None,
+            values: dict[str, str] | None = None, relations: list[tuple[str, str]] | None = None,
+            sections: dict[str, str] | None = None, dry_run: bool = False) -> dict[str, Any]:
+        from vaultengine.formats.write import plan_new
+
+        return self._write(lambda typed: plan_new(
+            typed, type, title, folder=folder, name=name, values=values, relations=relations, sections=sections,
+        ), dry_run)
+
+    def link(self, source: str, target: str, relation: str, dry_run: bool = False) -> dict[str, Any]:
+        from vaultengine.formats.write import plan_link
+
+        return self._write(lambda typed: plan_link(typed, source, target, relation), dry_run)
+
+    def set(self, note: str, key: str, value: str, dry_run: bool = False) -> dict[str, Any]:
+        from vaultengine.formats.write import plan_set
+
+        return self._write(lambda typed: plan_set(typed, note, key, value), dry_run)
+
+    def fix(self, dry_run: bool = False, only: list[str] | None = None) -> dict[str, Any]:
+        from vaultengine.formats.fix import FIXABLE, plan_fixes
+        from vaultengine.formats.write import FileChange, WritePlan
+
+        found: dict[str, Any] = {}
+
+        def build(typed):
+            plan = plan_fixes(typed, only=tuple(only) if only else FIXABLE)
+            found["plan"] = plan
+            return WritePlan("fix", [FileChange(f.path, f.original, f.new, f.changes) for f in plan.files])
+
+        result = self._write(build, dry_run)
+        plan = found["plan"]
+        result["skipped"] = [{**issue.to_dict(), "reason": reason} for issue, reason in plan.skipped]
+        result["remaining"] = [
+            {"code": code, "count": count} for code, count in sorted(plan.remaining.items(), key=lambda kv: (-kv[1], kv[0]))
+        ]
+        return result
+
+    def ingest(self, *, path: str | None = None, content: str | None = None, filename: str | None = None,
+               type: str = "source", title: str | None = None, folder: str | None = None,
+               values: dict[str, str] | None = None, dry_run: bool = False) -> dict[str, Any]:
+        from vaultengine.formats.ingest import (
+            DuplicateFound, document_from_bytes, document_to_dict, plan_ingest, read_document,
+        )
+        from vaultengine.formats.write import WriteError
+
+        try:
+            if path is not None:
+                document = read_document(Path(path).expanduser(), title=title)
+            else:
+                document = document_from_bytes(filename or "document.txt", (content or "").encode("utf-8"), title)
+        except WriteError as exc:
+            raise WriteRejected(str(exc)) from None
+        found: dict[str, Any] = {}
+        try:
+            result = self._write(
+                lambda typed: plan_ingest(typed, document, type, folder=folder, values=values, found=found), dry_run,
+            )
+        except DuplicateFound as dup:
+            return {
+                "operation": "ingest", "status": "duplicate", "dry_run": dry_run, "written": False, "files": [],
+                "already": [], "new_violations": [], "tolerated": [], "index": None, "recovered": [],
+                "document": document_to_dict(document),
+                "duplicates": [c.to_dict() for c in dup.duplicates],
+                "candidates": [c.to_dict() for c in dup.candidates[:5]],
+            }
+        result["document"] = document_to_dict(document)
+        result["duplicates"] = []
+        result["candidates"] = [c.to_dict() for c in found.get("candidates", [])[:5]]
+        return result

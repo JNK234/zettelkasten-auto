@@ -41,7 +41,17 @@ function Freshness({index}: {index: IndexState}) {
 	}
 }
 
-export function StatusLine({vaultName, index, disconnected}: {vaultName: string; index: IndexState; disconnected?: string}) {
+export function StatusLine({
+	vaultName,
+	formatName,
+	index,
+	disconnected,
+}: {
+	vaultName: string;
+	formatName?: string;
+	index: IndexState;
+	disconnected?: string;
+}) {
 	const status = index.phase === 'ready' ? index.status : undefined;
 	return (
 		<Box paddingX={1} justifyContent="space-between" gap={2}>
@@ -49,6 +59,7 @@ export function StatusLine({vaultName, index, disconnected}: {vaultName: string;
 			<Box flexShrink={0}>
 				<Text>
 				<Text color={theme.accent}>◆ {vaultName}</Text>
+				{formatName ? <Text dimColor>  ·  format {formatName}</Text> : null}
 				{status?.built ? (
 					<Text dimColor>
 						{'  ·  '}
