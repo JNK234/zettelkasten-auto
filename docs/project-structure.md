@@ -24,14 +24,12 @@ zettelkasten-auto/
 │   │   ├── ingest.py        # vault ingest: conversion and the duplicate gate
 │   │   ├── similarity.py    # title similarity and content overlap
 │   │   └── coverage.py      # vault coverage
-│   ├── experimental/        # vault suggest: lexical / embedding ranking, and its evaluation data
 │   └── rpc/                 # JSON-RPC 2.0 server, Pydantic models, schema.json
 ├── formats/brain.yaml       # the format of the sample vault
 ├── tui/                     # `vault-tui` terminal app (TypeScript + Ink), see tui/README.md
 ├── scripts/
 │   ├── verify.sh            # every check of the engine, CLI, API and app
 │   ├── check_docs.py        # every link in the docs resolves
-│   └── semantic_eval.py     # the embedding experiment
 ├── config/
 │   └── config.yaml          # zettel tool configuration
 ├── src/                     # zettel tool (LLM extraction), see docs/zettel.md

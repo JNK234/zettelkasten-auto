@@ -73,6 +73,54 @@ describe('against the real vaultengine server', () => {
 		expect(frame).toContain('← the-environment-not-flops-bottlenecks-agentic-rl  20_ZETTLEKASTEN');
 	});
 
+	test('search, preview, related, suggestions and unlinked mentions round trip', async () => {
+		const result = await api.search({query: 'reward hacking tag:ai-safety', limit: 3});
+		expect(result.tree).toBe('(and (tag ai-safety) (any reward hacking))');
+		expect(result.total).toBe(9); // 9 of the 15 ai-safety notes mention reward or hacking (or a close spelling)
+		expect(result.hits[0]?.snippet?.marks.length).toBeGreaterThan(0);
+		const syntax = await api.search({query: 'reward (tag:x', limit: 3}).catch((error_: unknown) => error_);
+		expect(syntax).toBeInstanceOf(RpcError);
+		expect(syntax).toMatchObject({code: -32_006, message: 'this ( is never closed', data: {start: 7, end: 8, hint: 'add ) after the group'}});
+		const preview = await api.preview({path: result.hits[0]!.path, query: 'reward hacking tag:ai-safety'});
+		expect(preview.marks).toBeGreaterThan(0);
+		const related = await api.related({note: 'kl-penalty-in-rlhf', limit: 2});
+		expect(related.hits[1]).toMatchObject({title: 'RLHF', linked: false});
+		const links = await api.suggestLinks({limit: 1, path: '20_ZETTLEKASTEN'});
+		expect(links.links[0]?.reason).toContain('cited together by scheming-as-threat-model');
+		const notes = await api.suggestNotes({limit: 1});
+		expect(notes.notes[0]?.name).toBe('rl-environment-design');
+		const unlinked = await api.unlinked({note: 'monitorability-tax'});
+		expect(unlinked.total).toBe(4);
+	});
+
+	test('the App: /search, preview with highlights, open in Obsidian, end to end', async () => {
+		const opened: string[] = [];
+		const app = renderApp({
+			api,
+			vaultPath: join(workdir, 'vault'),
+			openUrl: async (url) => {
+				opened.push(url);
+			},
+		});
+		await app.waitFor('● index fresh', 15_000);
+		await app.type('/search reward hacking tag:ai-safety');
+		await app.press(keys.escape, keys.enter);
+		const list = await app.waitFor('Enter preview', 10_000);
+		expect(list).toContain('⏺ Search “reward hacking tag:ai-safety”  9 of 180 notes');
+		await app.press(keys.down, keys.enter);
+		const preview = await app.waitFor((frame) => /\d+ match(es)? · lines/.test(frame), 10_000); // loaded, not "Loading…"
+		expect(preview).toContain('Esc back to the list');
+		expect(preview).toContain('«');
+		await app.type('o');
+		await app.waitFor('in Obsidian', 5000);
+		expect(opened).toHaveLength(1);
+		expect(opened[0]).toMatch(/^obsidian:\/\/open\?vault=vault&file=20_ZETTLEKASTEN%2F.+\.md$/);
+		await app.press(keys.escape);
+		await app.waitFor('Enter preview');
+		await app.press(keys.escape);
+		await app.waitFor((frame) => promptLine(frame).includes('Try /help'));
+	});
+
 	test('when the server dies, requests fail with its exit reason', async () => {
 		const closed = new Promise<Error>((resolve) => {
 			server.client.events.once('close', resolve);

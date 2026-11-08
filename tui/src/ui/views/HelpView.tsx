@@ -7,6 +7,7 @@ const KEYS: Array<[string, string]> = [
 	['↑ / ↓', 'prompt history (or move in a list)'],
 	['/', 'command suggestions · Tab completes · Enter runs'],
 	['@', 'pick a note · Tab/Enter inserts · Esc closes'],
+	['in /search', '↑↓ move · Enter preview · o open in Obsidian · Esc back / close'],
 	['ctrl+a / ctrl+e', 'start / end of line · ctrl+u clears'],
 	['ctrl+c · ctrl+d', 'quit'],
 ];

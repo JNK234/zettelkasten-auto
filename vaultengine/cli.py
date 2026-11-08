@@ -1,5 +1,5 @@
-"""`vault` command line: index, stats, health, formats, check, fix, new, link, set, ingest, coverage,
-serve (JSON-RPC), rpc-schema.
+"""`vault` command line: index, stats, health, search, related, suggest, unlinked, formats, check, fix,
+new, link, set, ingest, coverage, serve (JSON-RPC), rpc-schema.
 
 Human-readable output by default, machine-readable with --json.
 Exit codes: 0 success, 2 usage error, missing index or invalid format file,
@@ -11,12 +11,18 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import shutil
 import sys
 from pathlib import Path
 from collections import Counter
 from typing import Any, Sequence
 
+from dataclasses import asdict
+
 from vaultengine import queries
+from vaultengine.vault import link_name
+from vaultengine import search as search_module
 from vaultengine.index import IndexReport, Staleness, VaultIndex, default_db_path
 
 
@@ -635,13 +641,6 @@ def _cmd_coverage(args: argparse.Namespace) -> int:
         return 2
     typed = TypedVault(spec, Vault.load(args.vault))
     data = coverage(typed)
-    if args.suggest:
-        from vaultengine.experimental.semantic import Ranker, suggest_sources
-
-        ranker = Ranker(typed)
-        for note in data["citing"]["notes"]:
-            best = suggest_sources(ranker, note["path"], "lexical", 1)
-            note["suggested_source"] = best[0].to_dict() if best else None
     if args.json:
         _print_json({"vault": str(Path(args.vault).resolve()), **data})
         return 0
@@ -671,9 +670,6 @@ def _cmd_coverage(args: argparse.Namespace) -> int:
                 target = f" -> {first['target_path']} ({first['target_type'] or 'no type'})" if first["target_path"] else ""
                 detail = f": line {first['line']} {first['raw']}{target}{also}"
             out.append(f"  {note['path']}  ({note['type']}) {labels[note['reason']]}{detail}")
-            if note.get("suggested_source"):
-                best = note["suggested_source"]
-                out.append(f"      perhaps: {best['path']}  (lexical {best['lexical']:.3f}, experimental)")
         if more:
             out.append(more)
     if data["most_cited"]:
@@ -683,56 +679,431 @@ def _cmd_coverage(args: argparse.Namespace) -> int:
     return 0
 
 
-# ----- suggest (experimental) -------------------------------------------------------
+# ----- search ------------------------------------------------------------------
+
+_FIELD_NAMES = {"title": "title", "aliases": "alias", "headings": "heading", "tags": "tag", "body": "body"}
+
+
+class _Style:
+    """ANSI styling when writing to a colour terminal; «marks» otherwise."""
+
+    def __init__(self, color: bool) -> None:
+        self.color = color
+
+    def _wrap(self, code: str, text: str) -> str:
+        return f"\x1b[{code}m{text}\x1b[0m" if self.color and text else text
+
+    def bold(self, text: str) -> str:
+        return self._wrap("1", text)
+
+    def dim(self, text: str) -> str:
+        return self._wrap("2", text)
+
+    def width(self, pieces) -> int:
+        """Characters the pieces take on screen (the «» marks count when not in colour)."""
+        return sum(len(p.text) + (2 if p.mark and not self.color else 0) for p in pieces)
+
+    def pieces(self, pieces, base: str = "") -> str:
+        out = []
+        for piece in pieces:
+            if not piece.mark:
+                out.append(self._wrap(base, piece.text) if base else piece.text)
+            elif self.color:
+                out.append(self._wrap("1;33" if piece.mark == "exact" else "4;33", piece.text))
+            else:
+                out.append(f"«{piece.text}»")
+        return "".join(out)
+
+
+def _use_color(choice: str) -> bool:
+    if choice == "always":
+        return True
+    if choice == "never":
+        return False
+    return sys.stdout.isatty() and not os.environ.get("NO_COLOR") and os.environ.get("TERM") != "dumb"
+
+
+def _where(match) -> str:
+    parts = []
+    for name, f in match.fields.items():
+        parts.append(_FIELD_NAMES[name] + (f" ×{f.tf}" if f.tf > 1 else ""))
+    label = match.clause if match.exact else f"{match.clause} ≈ {match.term} ({_plural(match.edits, 'edit')})"
+    return f"{label}: {', '.join(parts)}"
+
+
+def _clause_line(label: str, stats) -> str:
+    if stats.kind == "word":
+        found = f"{_plural(stats.df, 'note')}" if stats.df else "no notes"
+        if stats.required:
+            found += " (exact word, required)"
+        if stats.variants:
+            shown = [f"{term} ({_plural(edits, 'edit')}, {_plural(stats.variant_df[term], 'note')})"
+                     for term, edits in list(stats.variants.items())[:4]]
+            more = f", +{len(stats.variants) - 4} more" if len(stats.variants) > 4 else ""
+            found += " · close spellings: " + ", ".join(shown) + more
+        elif not stats.df and not stats.required:
+            found += ", no close spellings"
+        return f"{label}  {found}"
+    kind = "phrase" if stats.kind == "phrase" else "near"
+    return f"{label}  {_plural(stats.df, 'note')} ({kind}, required)"
+
+
+def _group_label(hit, clauses: int) -> str:
+    if not hit.matches:
+        return "matches the filters, none of the words"
+    if hit.exact == 0:
+        return "close spellings only"
+    if clauses == 1:
+        return "exact"
+    return f"{hit.exact} of {clauses} exactly"
+
+
+def _group(hit) -> tuple[int, bool]:
+    return hit.exact, bool(hit.matches)
+
+
+def _format_search(result, header: str, contexts, style: _Style, width: int, explain: bool) -> str:
+    out = [header, ""]
+    if not result.tree:
+        out.append("  empty query")
+        return "\n".join(out)
+    for warning in result.warnings:
+        out.append(f"  note: {warning}")
+    if result.clauses:
+        pad = max(len(label) for label in result.clauses)
+        for label, stats in result.clauses.items():
+            out.append("  " + _clause_line(label.ljust(pad), stats))
+        order = "exact matches first, then score" if any(s.variants for s in result.clauses.values()) or len(result.clauses) > 1 else "by score"
+    else:
+        order = "by path (no words to rank by)"
+    out.append(f"  {result.total} of {_plural(result.notes, 'note')} match · {order}")
+    tiers = {_group(hit) for hit in result.hits} if result.clauses else set()
+    previous = None
+    for rank, (hit, context) in enumerate(zip(result.hits, contexts), 1):
+        if len(tiers) > 1 and _group(hit) != previous:
+            out.extend(["", "  " + style.dim(f"── {_group_label(hit, len(result.clauses))} ──")])
+            previous = _group(hit)
+        score = f"{hit.score:.2f}" if result.clauses else ""
+        prefix = f"{rank:>4}. "
+        room = max(10, width - len(prefix) - len(score) - 2)
+        title_pieces = context.title
+        if style.width(title_pieces) > room:  # long titles: cut, keeping the marks that fit
+            cut, kept = room - 1, []
+            for piece in title_pieces:
+                if cut <= 0:
+                    break
+                kept.append(type(piece)(piece.text[:cut], piece.mark))
+                cut -= style.width([kept[-1]])
+            title_pieces = kept + [type(title_pieces[0])("…")]
+        title_len = style.width(title_pieces)
+        out.append("")
+        padding = " " * (width - len(prefix) - title_len - len(score)) if score else ""
+        out.append(prefix + style.bold(style.pieces(title_pieces)) + padding + score)
+        indent = " " * len(prefix)
+        out.append(indent + style.dim(hit.path))
+        if hit.matches:
+            out.append(indent + " · ".join(_where(m) for m in hit.matches.values()))
+        if context.snippet is not None:
+            snip = context.snippet
+            text = ("… " if snip.truncated_start else "") + style.pieces(snip.pieces) + (" …" if snip.truncated_end else "")
+            out.append(indent + text)
+        if explain:
+            for match in hit.matches.values():
+                weight = f" × {match.weight:g} (fuzzy)" if not match.exact else ""
+                out.append(indent + style.dim(f"  {match.clause}: tf~ {match.tf:.4f} -> {match.score:.4f}{weight}"))
+                for name, f in match.fields.items():
+                    out.append(indent + style.dim(
+                        f"    {name:<8} tf {f.tf:<3} len {f.length:<5} avg {f.avg_length:8.2f}  w*tf/norm {f.weighted_tf:.4f}"))
+    if result.total > len(result.hits):
+        out.extend(["", f"  … {result.total - len(result.hits)} more (--limit 0 shows all)"])
+    facets = result.facets
+    if facets is not None and result.total:
+        def block(title: str, rows, render) -> None:
+            if rows:
+                out.extend(["", f"  {title}"])
+                out.extend(f"  {n:>5}  {render(name)}" for name, n in rows)
+
+        block("Tags (notes)", facets.tags, lambda name: f"#{name}")
+        block("Folders (notes)", facets.folders, lambda name: f"{name}/" if name else "(vault root)")
+    return "\n".join(out)
+
+
+def _cmd_search(args: argparse.Namespace) -> int:
+    from vaultengine.snippets import hit_context
+
+    opened = _open_for_reading(args)
+    if opened is None:
+        return 2
+    index, info = opened
+    with index:
+        try:
+            result = search_module.search(
+                index.conn, args.query, limit=args.limit or None, fuzzy=not args.no_fuzzy, facets=args.facets or None
+            )
+        except search_module.QueryError as exc:
+            if args.json:
+                _print_json({"error": exc.to_dict(), "query": args.query})
+            else:
+                print(exc.render(args.query), file=sys.stderr)
+            return 2
+    if args.tree:
+        print(result.tree or "(empty query)")
+        return 0
+    width = max(40, min(shutil.get_terminal_size((100, 24)).columns, 120))
+    contexts = [hit_context(args.vault, hit, args.query, width=width - 6) for hit in result.hits]
+    if args.json:
+        data = result.to_dict()
+        for hit, context in zip(data["hits"], contexts):
+            hit["snippet"] = context.snippet.to_dict() if context.snippet else None
+        _print_json({"vault": str(Path(args.vault).resolve()), "index": info, **data})
+    else:
+        header = _header(f"Search {args.query!r}", args.vault, info)
+        print(_format_search(result, header, contexts, _Style(_use_color(args.color)), width, args.explain))
+    return 0
+
+
+# ----- related -----------------------------------------------------------------
+
+
+def _format_related(result, header: str, style: _Style, width: int, explain: bool) -> str:
+    from vaultengine.related import WEIGHTS
+
+    seed = result.seed
+    if seed.path is None:
+        title = f"Related to {seed.label} (no note yet; {_plural(len(seed.linkers), 'note')} link to it)"
+    else:
+        title = f"Related to {seed.label}"
+    out = [style.bold(title), header, ""]
+    weights = " + ".join(f"{WEIGHTS[k]:g} × {k}" for k in ("graph", "text", "tags"))
+    out.append(f"  score = {weights} · {_plural(result.compared, 'note')} compared")
+    if not result.hits:
+        out.append("  nothing related found")
+    for rank, hit in enumerate(result.hits, 1):
+        prefix = f"{rank:>4}. "
+        status = "linked" if hit.linked else "not linked"
+        right = f"{hit.score:.2f}  {status:>10}"
+        room = max(10, width - len(prefix) - len(right) - 2)
+        name = hit.title if len(hit.title) <= room else hit.title[: room - 1] + "…"
+        padding = " " * (width - len(prefix) - len(name) - len(right))
+        shown_status = style.dim(status) if hit.linked else style._wrap("1;33", status)
+        out.append("")
+        out.append(prefix + style.bold(name) + padding + f"{hit.score:.2f}  " + " " * (10 - len(status)) + shown_status)
+        indent = " " * len(prefix)
+        out.append(indent + (hit.reason or style.dim("(weak: only distant links)")))
+        if explain:
+            out.append(indent + style.dim(f"graph {hit.graph:.2f} · text {hit.text:.2f} · tags {hit.tags:.2f} · {hit.path}"))
+    return "\n".join(out)
+
+
+def _cmd_related(args: argparse.Namespace) -> int:
+    from vaultengine.querylang import QueryError
+    from vaultengine.related import Relatedness
+
+    opened = _open_for_reading(args)
+    if opened is None:
+        return 2
+    index, info = opened
+    with index:
+        engine = Relatedness(index.conn)
+        try:
+            seed = engine.seed(args.note)
+        except QueryError as exc:
+            print(f"error: {exc.message}" + (f"\n  {exc.hint}" if exc.hint else ""), file=sys.stderr)
+            return 2
+        result = engine.related(seed, limit=args.limit or None, unlinked_only=args.unlinked)
+    if args.json:
+        _print_json({"vault": str(Path(args.vault).resolve()), "index": info, "compared": result.compared, **result.to_dict()})
+        return 0
+    width = max(40, min(shutil.get_terminal_size((100, 24)).columns, 120))
+    header = "  " + (seed.path or "missing note") + f" · index {info['last_indexed_at']}" + (" (OUT OF DATE)" if info["stale"] else "")
+    print(_format_related(result, header, _Style(_use_color(args.color)), width, args.explain))
+    return 0
+
+
+# ----- suggest -----------------------------------------------------------------
+
+
+def _format_links(pairs, style: _Style, width: int, explain: bool) -> list[str]:
+    from vaultengine.connect import WEIGHTS
+
+    out = [style.bold("  Links to add") + f"  (notes with no link between them; score = {WEIGHTS['shared']:g} × shared neighbours"
+           f" + {WEIGHTS['cited']:g} × cited together + {WEIGHTS['text']:g} × similar text)"]
+    if not pairs:
+        out.extend(["", "    nothing to suggest"])
+    for rank, pair in enumerate(pairs, 1):
+        a, b = link_name(pair.a), link_name(pair.b)
+        score = f"{pair.score:.2f}"
+        prefix = f"  {rank:>3}. "
+        line = f"{a}  ↔  {b}"
+        room = width - len(prefix) - len(score) - 2
+        if len(line) > room:
+            half = (room - 5) // 2
+            a = a if len(a) <= half else a[: half - 1] + "…"
+            b = b if len(b) <= half else b[: half - 1] + "…"
+            line = f"{a}  ↔  {b}"
+        out.extend(["", prefix + style.bold(line) + " " * max(2, width - len(prefix) - len(line) - len(score)) + score])
+        out.append(" " * len(prefix) + pair.reason)
+        if explain:
+            out.append(" " * len(prefix) + style.dim(
+                f"shared {pair.shared:.2f} · cited {pair.cited:.2f} · text {pair.text:.2f} · {pair.a} ↔ {pair.b}"))
+    return out
+
+
+def _format_suggestions(result, header: str, style: _Style, links=None, width: int = 100, explain: bool = False) -> str:
+    out = [header, ""]
+    if links is not None:
+        out.extend(_format_links(links, style, width, explain))
+        if result is None:
+            return "\n".join(out)
+        out.append("")
+    out.append(style.bold("  Notes to write") + f"  ({result.total_missing} link targets have no note;"
+               f" {len(result.notes)} most wanted, linked from 2+ notes)")
+    for rank, item in enumerate(result.notes, 1):
+        mentions = f" · {item.mentions} more mention it" if item.mentions else ""
+        out.extend(["", f"  {rank:>3}. {style.bold(item.name)}", f"       {_plural(item.linking_notes, 'note')} link here{mentions}"])
+        where = " · ".join(f"{folder or '(vault root)'} ({n})" for folder, n in item.folders)
+        out.append(f"       in: {where}")
+        if item.about:
+            out.append(f"       about: {', '.join(item.about)}")
+    if result.same_idea:
+        out.extend(["", "  Overlapping names (the same idea twice, or a topic and a narrower one):"])
+        for group in result.same_idea:
+            out.append("    " + " · ".join(f"{name} ({n})" for name, n in group))
+    if result.existing:
+        out.extend(["", "  Probably an existing note (the link's words are all in its title or alias):"])
+        for name, n, path in result.existing:
+            out.append(f"    [[{name}]] ({_plural(n, 'note')}) → {path}")
+    out.extend(["", "  Draft one: vault suggest <vault> --draft \"<name>\"  (add --write to create it)"])
+    return "\n".join(out)
 
 
 def _cmd_suggest(args: argparse.Namespace) -> int:
-    from vaultengine.experimental.semantic import (
-        Ranker, SemanticUnavailable, related_to_text, suggest_sources, suggest_targets,
-    )
-    from vaultengine.formats import TypedVault
-    from vaultengine.formats.ingest import fit_body, read_document
-    from vaultengine.formats.write import WriteError, find_note
-    from vaultengine.vault import Vault, link_name
+    from vaultengine.connect import LinkSuggester
+    from vaultengine.querylang import QueryError
+    from vaultengine.suggest import Suggester
 
-    spec = _load_spec(args)
-    if spec is None:
+    opened = _open_for_reading(args)
+    if opened is None:
         return 2
-    if (args.note is None) == (args.file is None):
-        print("error: give --note <note>, or --file <document>", file=sys.stderr)
-        return 2
-    typed = TypedVault(spec, Vault.load(args.vault))
-    ranker = Ranker(typed)
-    subject = None
-    try:
-        if args.file:
-            document = read_document(args.file)
-            body = fit_body(document.body, document.title, 1, [])
-            what = f"existing {args.type} notes {document.file_name} resembles (advisory; the duplicate gate is vault ingest)"
-            suggestions = related_to_text(ranker, body, args.type, args.method, args.limit)
-        else:
-            subject = find_note(typed, args.note)
-            if args.relation:
-                what = f"notes {subject} may `{args.relation}`"
-                suggestions = suggest_targets(ranker, subject, args.relation, args.method, args.limit)
+    index, info = opened
+    with index:
+        suggester = Suggester(index.conn)
+        if args.draft is None:
+            links = None
+            if not args.notes:
+                for_note = None
+                if args.for_note:
+                    try:
+                        seed = suggester.engine.seed(args.for_note)
+                    except QueryError as exc:
+                        print(f"error: {exc.message}", file=sys.stderr)
+                        return 2
+                    if seed.path is None:
+                        print(f'error: "{args.for_note}" is not a note yet; only notes can be linked', file=sys.stderr)
+                        return 2
+                    for_note = suggester.engine.graph.note_ids[seed.node]
+                links = LinkSuggester(index.conn, suggester.engine).suggestions(
+                    limit=args.limit or None, for_note=for_note, path=args.path
+                )
+            result = None if args.links or args.for_note else suggester.suggestions(limit=args.limit or None, min_links=args.min_links)
+            if args.json:
+                data = {"vault": str(Path(args.vault).resolve()), "index": info}
+                if links is not None:
+                    data["links"] = [pair.to_dict() for pair in links]
+                if result is not None:
+                    data.update(result.to_dict())
+                _print_json(data)
             else:
-                what = f"sources {subject} may draw on (not linked yet)"
-                suggestions = suggest_sources(ranker, subject, args.method, args.limit)
-    except (WriteError, ValueError, SemanticUnavailable) as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        return 2
-    if args.json:
-        _print_json({"vault": str(Path(args.vault).resolve()), "note": subject, "file": args.file, "relation": args.relation,
-                     "method": args.method, "suggestions": [s.to_dict() for s in suggestions]})
+                width = max(60, min(shutil.get_terminal_size((100, 24)).columns, 140))
+                header = _header("Suggestions", args.vault, info)
+                print(_format_suggestions(result, header, _Style(_use_color(args.color)), links, width, args.explain))
+            return 0
+        try:
+            path, text = suggester.draft(args.draft)
+        except KeyError:
+            print(f'error: no link points to a missing note called "{args.draft}"', file=sys.stderr)
+            print("  run `vault suggest` to list them", file=sys.stderr)
+            return 2
+    if args.folder is not None:
+        path = f"{args.folder.strip('/')}/{path.rsplit('/', 1)[-1]}" if args.folder.strip("/") else path.rsplit("/", 1)[-1]
+    if not args.write:
+        print(f"# would be written to {path} (add --write to create it)\n")
+        print(text, end="")
         return 0
-    print(f"Suggestions ({args.method}, experimental): {what}")
-    for item in suggestions:
-        parts = [f"lexical {item.lexical:.3f}" if item.lexical is not None else "",
-                 f"semantic {item.semantic:.3f}" if item.semantic is not None else ""]
-        print(f"  {item.rank}  {item.path}   {'  '.join(p for p in parts if p)}")
-    if subject and args.relation and suggestions:
-        print(f"\nto link the first: vault link {args.vault} -f {args.format} \"{link_name(subject)}\" "
-              f"\"{link_name(suggestions[0].path)}\" --as {args.relation}")
+    target = Path(args.vault) / path
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with open(target, "x", encoding="utf-8") as handle:
+            handle.write(text)
+    except FileExistsError:
+        print(f"error: {path} already exists; nothing written", file=sys.stderr)
+        return 2
+    print(f"Wrote {path}. Run `vault index {args.vault}` to link it up.")
+    return 0
+
+
+# ----- unlinked ----------------------------------------------------------------
+
+
+def _cmd_unlinked(args: argparse.Namespace) -> int:
+    from vaultengine.connect import MentionFinder
+    from vaultengine.querylang import QueryError
+    from vaultengine.related import Relatedness
+
+    opened = _open_for_reading(args)
+    if opened is None:
+        return 2
+    index, info = opened
+    with index:
+        finder = MentionFinder(index.conn, args.vault, min_words=args.min_words)
+        if args.note:
+            try:
+                seed = Relatedness(index.conn).seed(args.note)
+            except QueryError as exc:
+                print(f"error: {exc.message}", file=sys.stderr)
+                return 2
+            if seed.path is None:
+                print(f'error: "{args.note}" is not a note yet, so there is nothing to link to', file=sys.stderr)
+                return 2
+            target = next(f for f, p in finder.paths.items() if p == seed.path)
+            mentions = finder.of(target)
+        else:
+            mentions = finder.all()
+    by_target: dict[str, list] = {}
+    for mention in mentions:
+        by_target.setdefault(mention.target, []).append(mention)
+    order = sorted(by_target, key=lambda t: (-len({m.source for m in by_target[t]}), t))
+    if args.json:
+        _print_json({"vault": str(Path(args.vault).resolve()), "index": info, "mentions": [asdict(m) for m in mentions]})
+        return 0
+    style = _Style(_use_color(args.color))
+    out = [_header("Unlinked mentions", args.vault, info), ""]
+    notes = len({m.source for m in mentions})
+    scope = f"of {link_name(seed.path)}" if args.note else "of any note"
+    verb = "does" if notes == 1 else "do"
+    out.append(f"  {_plural(len(mentions), 'plain-text mention')} {scope} in {_plural(notes, 'note')} that {verb} not link to it yet")
+    shown = order if args.limit == 0 or args.note else order[: args.limit]
+    for target in shown:
+        items = by_target[target]
+        names = sorted({m.name for m in items})
+        out.extend(["", "  " + style.bold(link_name(target)) + f"  ({_plural(len({m.source for m in items}), 'note')}"
+                    + (f"; as {', '.join(repr(n) for n in names)}" if names != [link_name(target)] else "") + ")"])
+        per = items if args.note or args.all else items[:3]
+        for m in per:
+            flat = lambda text: " ".join(text.split()) if text.strip() else ""
+            words = flat(m.text)
+            mark = style._wrap("1;33", words) if style.color else f"«{words}»"
+            before = flat(m.before) + (" " if m.before[-1:].isspace() else "")
+            after = (" " if m.after[:1].isspace() else "") + flat(m.after)
+            out.append(f"    {m.source}:{m.line}  {before}{mark}{after}")
+        if len(per) < len(items):
+            out.append(f"    … {len(items) - len(per)} more (--all shows every mention)")
+    if len(shown) < len(order):
+        out.extend(["", f"  … {len(order) - len(shown)} more notes are mentioned (--limit 0 shows all)"])
+    single = [t for t in shown if any(len(m.name.split()) == 1 and "-" not in m.name for m in by_target[t])]
+    if single and not args.note and args.min_words < 2:
+        out.append("  one-word titles match every use of the word; --min-words 2 leaves them out")
+    print("\n".join(out))
     return 0
 
 
@@ -792,6 +1163,57 @@ def build_parser() -> argparse.ArgumentParser:
     stats.add_argument("--top", type=int, default=10, help="rows in each top-N table")
     health = add("health", "Link and structure problems in the indexed vault.", _cmd_health)
     health.add_argument("--limit", type=int, default=10, help="max items listed per problem type (0 = all)")
+    search = add(
+        "search",
+        "Full-text search ranked by BM25F (title > headings/aliases/tags > body).",
+        _cmd_search,
+    )
+    search.description = (
+        "Search the vault with text and structure. Words rank (and forgive typos); "
+        '"phrases", NEAR/n, tag:, path:, [property], links-to:, linked-from:, within:N of:, '
+        "has:, missing:, modified:, -, NOT, OR and ( ) narrow. See README.md for the full syntax."
+    )
+    search.add_argument("query", help='e.g.  reward hacking links-to:[[GRPO]] -path:10_SOURCES')
+    search.add_argument("--limit", type=int, default=10, help="number of results (0 = all)")
+    search.add_argument("--explain", action="store_true", help="show the score breakdown per clause and field")
+    search.add_argument("--no-fuzzy", action="store_true", help="match words only as typed")
+    search.add_argument("--facets", type=int, default=8, help="rows of tag and folder counts (0 = all)")
+    search.add_argument("--tree", action="store_true", help="print the syntax tree of the query and stop")
+    search.add_argument("--color", choices=("auto", "always", "never"), default="auto", help="colour output (default: auto)")
+    related = add("related", "Notes related to a note: links, tags and text, each with a reason.", _cmd_related)
+    related.description = (
+        "Notes related to a note, including ones it does not link to yet: personalized PageRank over the "
+        "link graph (missing notes included), blended with text similarity and shared tags. Each result says why."
+    )
+    related.add_argument("note", help="note name, path or alias (as in a link), or the target of a link to a missing note")
+    related.add_argument("--limit", type=int, default=10, help="number of results (0 = all)")
+    related.add_argument("--unlinked", action="store_true", help="only notes with no link to or from the note")
+    related.add_argument("--explain", action="store_true", help="show the three signals behind each score")
+    related.add_argument("--color", choices=("auto", "always", "never"), default="auto", help="colour output (default: auto)")
+    suggest = add("suggest", "Links to add between notes, notes to write, and drafts of them.", _cmd_suggest)
+    suggest.add_argument("--limit", type=int, default=10, help="items per list (0 = all)")
+    only = suggest.add_mutually_exclusive_group()
+    only.add_argument("--links", action="store_true", help="only the links to add")
+    only.add_argument("--notes", action="store_true", help="only the notes to write")
+    suggest.add_argument("--for", dest="for_note", metavar="NOTE", help="links to add to or from this note")
+    suggest.add_argument("--path", help="links between notes whose paths both contain this text, e.g. --path 20_ZETTLEKASTEN")
+    suggest.add_argument("--explain", action="store_true", help="show the three kinds of evidence as numbers")
+    suggest.add_argument("--min-links", type=int, default=2, help="only missing notes linked from at least this many notes")
+    suggest.add_argument("--draft", metavar="NAME", help="print a draft for this missing note, built from the notes that link to it")
+    suggest.add_argument("--write", action="store_true", help="with --draft: create the note (never overwrites)")
+    suggest.add_argument("--folder", help="with --draft: folder for the note (default: where most linking notes are)")
+    suggest.add_argument("--color", choices=("auto", "always", "never"), default="auto", help="colour output (default: auto)")
+    unlinked = add("unlinked", "Plain-text mentions of notes (titles and aliases) that are not links yet.", _cmd_unlinked)
+    unlinked.description = (
+        "Plain-text mentions of a note's title or alias that are not links yet. Titles match as words, so "
+        "'reward hacking' mentions reward-hacking. Never inside code, links or URLs, never a note that already "
+        "links to it, never a note mentioning itself."
+    )
+    unlinked.add_argument("note", nargs="?", help="only mentions of this note (name, path or alias); default: every note")
+    unlinked.add_argument("--limit", type=int, default=10, help="notes listed when no note is given (0 = all)")
+    unlinked.add_argument("--all", action="store_true", help="show every mention, not the first three per note")
+    unlinked.add_argument("--min-words", type=int, default=1, help="ignore titles and aliases shorter than this many words")
+    unlinked.add_argument("--color", choices=("auto", "always", "never"), default="auto", help="colour output (default: auto)")
     formats = commands.add_parser(
         "formats",
         help="Check notes against a format file (note types, headings, metadata, relations, link roles).",
@@ -849,19 +1271,7 @@ def build_parser() -> argparse.ArgumentParser:
     cov = add("coverage", "Sources nothing links to, and notes that cite no source.", _cmd_coverage)
     cov.add_argument("--format", "-f", required=True, help="format file, or a name in ./formats/ or the bundled formats/")
     cov.add_argument("--limit", type=int, default=10, help="max notes listed per list (0 = all)")
-    cov.add_argument("--suggest", action="store_true", help="experimental: a likely source for each note that cites none")
     cov.set_defaults(uses_index=False)
-    sug = add("suggest", "Experimental: rank likely sources, relation targets, or notes a document resembles.", _cmd_suggest,
-              vault_required=True)
-    sug.add_argument("--note", "-n", help="the note (path or name)")
-    sug.add_argument("--format", "-f", required=True, help="format file, or a name in ./formats/ or the bundled formats/")
-    sug.add_argument("--as", dest="relation", help="suggest targets for this relation (default: sources the note may cite)")
-    sug.add_argument("--file", help="instead of a note: a document, ranked against existing notes of --type")
-    sug.add_argument("--type", default="source", help="note type for --file (default: source)")
-    sug.add_argument("--method", choices=["lexical", "semantic", "fused"], default="lexical",
-                     help="lexical (TF-IDF, default), semantic (WordLlama embeddings) or fused (both)")
-    sug.add_argument("--limit", type=int, default=3)
-    sug.set_defaults(uses_index=False)
     serve = add("serve", "Serve the JSON-RPC 2.0 API on stdin/stdout (one JSON message per line).", _cmd_serve, json_flag=False)
     serve.add_argument("--format", "-f", help="format for vault.check/fix/coverage and the note.* writes (name or file)")
     schema = commands.add_parser("rpc-schema", help="Print the JSON Schema of the JSON-RPC API.")

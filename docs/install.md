@@ -19,9 +19,7 @@ cd tui && npm ci && npm run build && npm link && cd ..   # puts `vault-tui` on P
 ```
 
 `uv sync` also installs `torch`/`sentence-transformers` for the zettel tool's embeddings (several GB on Linux, about 5 minutes).
-The engine, CLI and app don't need them. Optional: `uv pip install wordllama` (or `uv sync --extra semantic`) for the
-experimental `vault suggest --method semantic|fused`.
-
+The engine, CLI and app don't need them. 
 Offline or behind a proxy: `npm ci` builds `node-pty` with node-gyp, which downloads the Node.js headers from nodejs.org.
 If that fails (`gyp ERR! … ENOTFOUND`), point it at the headers installed with Node: `npm_config_nodedir=/usr npm ci`
 (the folder that contains `include/node/node.h`).

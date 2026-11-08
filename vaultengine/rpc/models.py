@@ -26,6 +26,7 @@ NOTE_NOT_FOUND = -32002
 FORMAT_NOT_CONFIGURED = -32003
 WRITE_REJECTED = -32004
 WRITE_FAILED = -32005
+INVALID_QUERY = -32006
 
 ERROR_MESSAGES = {
     PARSE_ERROR: "Parse error",
@@ -38,6 +39,7 @@ ERROR_MESSAGES = {
     FORMAT_NOT_CONFIGURED: "Format not configured",
     WRITE_REJECTED: "Write rejected",
     WRITE_FAILED: "Write failed",
+    INVALID_QUERY: "Invalid query",
 }
 
 RequestId = Union[StrictInt, StrictStr, None]
@@ -618,6 +620,250 @@ class VaultCoverageResult(Result):
     limit: int | None
 
 
+# ----- search.query ---------------------------------------------------------------
+
+
+class SearchQueryParams(Params):
+    query: str = Field(
+        min_length=1, max_length=2000,
+        description='The query language of `vault search` (README: "Search and queries"). A syntax error is error -32006, '
+                    "with data.start/data.end (offsets in the query) and data.hint.",
+    )
+    limit: int = Field(10, ge=1, le=500, description="Hits returned; total counts all matches.")
+    fuzzy: bool = Field(True, description="Let words match close spellings.")
+    facets: int = Field(8, ge=0, le=200, description="Rows of tag and folder counts (0 = all).")
+    snippet_width: int = Field(100, ge=20, le=400, description="Longest snippet, in characters.")
+
+
+class Mark(Result):
+    start: int = Field(description="Offset of the first marked character in the text it belongs to.")
+    end: int
+    kind: Literal["exact", "fuzzy"] = Field(description="fuzzy: a close spelling of a query word.")
+
+
+class FieldCount(Result):
+    field: Literal["title", "aliases", "headings", "tags", "body"]
+    count: int = Field(description="Occurrences (for a phrase or NEAR pair: its matches).")
+
+
+class ClauseMatch(Result):
+    clause: str = Field(description="The clause as written in the query, e.g. reward, \"reward hacking\", a NEAR/3 b.")
+    exact: bool
+    term: str | None = Field(description="For a word: the indexed word that matched (a close spelling when not exact).")
+    edits: int
+    fields: list[FieldCount]
+
+
+class Snippet(Result):
+    field: Literal["body", "headings", "aliases", "tags"]
+    text: str
+    marks: list[Mark]
+    truncated_start: bool
+    truncated_end: bool
+
+
+class SearchHit(Result):
+    path: str
+    title: str
+    score: float
+    exact: int = Field(description="Words, phrases and NEAR pairs matched exactly; the first sort key.")
+    matches: list[ClauseMatch] = Field(description="Empty when the note matched only the filters.")
+    title_marks: list[Mark]
+    snippet: Snippet | None
+
+
+class Variant(Result):
+    term: str
+    edits: int
+    notes: int
+
+
+class SearchClause(Result):
+    label: str
+    kind: Literal["word", "phrase", "near"]
+    required: bool
+    notes: int = Field(description="Notes that match it exactly.")
+    variants: list[Variant] = Field(description="Close spellings found in the index.")
+
+
+class Count(Result):
+    name: str
+    notes: int
+
+
+class Facets(Result):
+    tags: list[Count] = Field(description="Tags of all matching notes; a nested tag also counts for its parents.")
+    folders: list[Count] = Field(description="Folders of all matching notes, every ancestor; \"\" is the vault root.")
+
+
+class SearchQueryResult(Result):
+    query: str
+    tree: str = Field(description="The parsed query as an s-expression.")
+    notes: int = Field(description="Notes in the vault.")
+    total: int = Field(description="Matching notes before the limit.")
+    order: Literal["exact_then_score", "score", "path"]
+    warnings: list[str]
+    clauses: list[SearchClause] = Field(description="Words, phrases and NEAR pairs that rank (not negated).")
+    hits: list[SearchHit]
+    facets: Facets
+
+
+# ----- note.preview --------------------------------------------------------------
+
+
+class NotePreviewParams(Params):
+    path: str = Field(min_length=1, description="Vault-relative path, e.g. from search.query.")
+    query: str | None = Field(None, max_length=2000, description="Mark this query's matches, as search.query counts them.")
+
+
+class PreviewLine(Result):
+    number: int = Field(description="1-based line number in the file.")
+    text: str
+    marks: list[Mark]
+
+
+class NotePreviewResult(Result):
+    path: str
+    title: str
+    query: str | None
+    matched: bool = Field(description="Whether the note matches the query at all.")
+    marks: int = Field(description="Marked spans in the whole note.")
+    first_match_line: int | None
+    lines: list[PreviewLine] = Field(description="Every line of the file; matches marked in the body and headings.")
+
+
+# ----- note.related --------------------------------------------------------------
+
+
+class NoteRelatedParams(Params):
+    note: str = Field(min_length=1, description="Note name, path or alias as in a link, or the target of links to a missing note.")
+    limit: int = Field(10, ge=1, le=500)
+    unlinked: bool = Field(False, description="Only notes with no link to or from the note.")
+
+
+class RelatedSeed(Result):
+    label: str
+    path: str | None = Field(description="null for a missing note (a link target without a note).")
+    linkers: list[str] = Field(description="For a missing note: the notes that link to it.")
+
+
+class RelatedHit(Result):
+    path: str
+    title: str
+    score: float = Field(description="0.5 graph + 0.3 text + 0.2 tags.")
+    graph: float
+    text: float
+    tags: float
+    linked: bool
+    hops: int | None
+    reason: str = Field(description='E.g. "2 hops via kl-penalty-in-rlhf · shares #rl · similar text (kl, ppo)".')
+
+
+class NoteRelatedResult(Result):
+    seed: RelatedSeed
+    compared: int
+    hits: list[RelatedHit]
+
+
+# ----- links.suggest -------------------------------------------------------------
+
+
+class LinksSuggestParams(Params):
+    limit: int = Field(10, ge=1, le=500)
+    note: str | None = Field(None, min_length=1, description="Only pairs with this note.")
+    path: str | None = Field(None, min_length=1, description="Only pairs whose paths both contain this text.")
+
+
+class LinkSuggestion(Result):
+    a: str
+    b: str
+    score: float = Field(description="0.4 shared + 0.3 cited + 0.3 text.")
+    shared: float
+    cited: float
+    text: float
+    shared_with: list[str]
+    cited_by: list[str]
+    terms: list[str]
+    reason: str
+
+
+class LinksSuggestResult(Result):
+    note: str | None
+    path: str | None
+    links: list[LinkSuggestion] = Field(description="Never a pair that is already linked, or a note with itself.")
+
+
+# ----- notes.suggest -------------------------------------------------------------
+
+
+class NotesSuggestParams(Params):
+    limit: int = Field(10, ge=1, le=500)
+    min_links: int = Field(2, ge=1, description="Only missing notes linked from at least this many notes.")
+
+
+class MissingNote(Result):
+    name: str
+    linking_notes: int
+    links: int
+    mentions: int = Field(description="Other notes that contain the name without linking it.")
+    folders: list[Count]
+    about: list[str]
+
+
+class NameCount(Result):
+    name: str
+    linking_notes: int
+
+
+class ProbablyExisting(Result):
+    name: str
+    linking_notes: int
+    path: str
+
+
+class NotesSuggestResult(Result):
+    total_missing: int
+    notes: list[MissingNote]
+    same_idea: list[list[NameCount]] = Field(description="Overlapping names: the same idea twice, or a topic and a narrower one.")
+    existing: list[ProbablyExisting]
+
+
+# ----- mentions.unlinked ---------------------------------------------------------
+
+
+class MentionsUnlinkedParams(Params):
+    note: str | None = Field(None, min_length=1, description="Only mentions of this note; omit for every note.")
+    min_words: int = Field(1, ge=1, description="Ignore titles and aliases shorter than this many words.")
+    limit: int | None = Field(20, ge=1, description="Mentioned notes returned (null = all); totals are never limited.")
+    per_note: int = Field(20, ge=1, le=10000, description="Mentions returned per mentioned note.")
+
+
+class UnlinkedMention(Result):
+    source: str = Field(description="The note with the mention; it does not link to the target.")
+    line: int
+    start: int = Field(description="Offset in the source note's text.")
+    end: int
+    before: str
+    text: str
+    after: str
+
+
+class MentionedNote(Result):
+    path: str
+    title: str
+    names: list[str] = Field(description="Titles and aliases that matched.")
+    total: int
+    notes: int
+    mentions: list[UnlinkedMention]
+
+
+class MentionsUnlinkedResult(Result):
+    note: str | None
+    total: int
+    notes: int = Field(description="Notes with at least one unlinked mention.")
+    targets: list[MentionedNote] = Field(description="By number of mentioning notes.")
+
+
 # ----- registry ------------------------------------------------------------------
 
 
@@ -645,5 +891,15 @@ METHODS: dict[str, MethodSpec] = {
         MethodSpec("note.link", "Relate note A to note B and write the mirror in B.", NoteLinkParams, WriteResult),
         MethodSpec("note.set", "Set a metadata value of a note.", NoteSetParams, WriteResult),
         MethodSpec("note.ingest", "Turn a document into a note; nothing is written if it duplicates one.", NoteIngestParams, NoteIngestResult),
+        MethodSpec("search.query", "Search with text and structure; ranked hits with snippets, tag and folder counts.",
+                   SearchQueryParams, SearchQueryResult),
+        MethodSpec("note.preview", "A note's lines with a query's matches marked.", NotePreviewParams, NotePreviewResult),
+        MethodSpec("note.related", "Notes related to a note by links, text and tags, each with a reason.",
+                   NoteRelatedParams, NoteRelatedResult),
+        MethodSpec("links.suggest", "Pairs of notes that probably belong linked, with the evidence.", LinksSuggestParams, LinksSuggestResult),
+        MethodSpec("notes.suggest", "Missing notes worth writing, overlapping names, links meant for existing notes.",
+                   NotesSuggestParams, NotesSuggestResult),
+        MethodSpec("mentions.unlinked", "Plain-text mentions of note titles and aliases that are not links yet.",
+                   MentionsUnlinkedParams, MentionsUnlinkedResult),
     )
 }

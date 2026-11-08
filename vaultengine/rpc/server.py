@@ -12,7 +12,8 @@ anything that is not a valid Request object (including an empty batch),
 for unexpected failures (including a result that does not match its own model).
 Server errors: -32001 index not built, -32002 note not found, -32003 format not
 configured (serve --format), -32004 write rejected (bad arguments, name taken;
-nothing written), -32005 write failed (rolled back, or a file changed meanwhile).
+nothing written), -32005 write failed (rolled back, or a file changed meanwhile),
+-32006 invalid query (data: query, start, end, hint).
 A write that would add violations is not an error: its result has status "refused". A request's "id"
 is echoed in its error response when it is a valid id, otherwise null.
 """
@@ -31,6 +32,7 @@ from vaultengine.rpc.models import (
     FORMAT_NOT_CONFIGURED,
     INDEX_NOT_BUILT,
     INTERNAL_ERROR,
+    INVALID_QUERY,
     INVALID_PARAMS,
     INVALID_REQUEST,
     JSONRPC_VERSION,
@@ -43,7 +45,8 @@ from vaultengine.rpc.models import (
     Request,
 )
 from vaultengine.service import (
-    FormatNotConfigured, IndexNotBuilt, NoteNotFound, ServiceError, VaultService, WriteFailedError, WriteRejected,
+    FormatNotConfigured, IndexNotBuilt, InvalidQuery, NoteNotFound, ServiceError, VaultService, WriteFailedError,
+    WriteRejected,
 )
 
 _SERVICE_ERROR_CODES: dict[type[ServiceError], int] = {
@@ -52,6 +55,7 @@ _SERVICE_ERROR_CODES: dict[type[ServiceError], int] = {
     FormatNotConfigured: FORMAT_NOT_CONFIGURED,
     WriteRejected: WRITE_REJECTED,
     WriteFailedError: WRITE_FAILED,
+    InvalidQuery: INVALID_QUERY,
 }
 
 
@@ -105,6 +109,14 @@ class RpcServer:
                 path=p.path, content=p.content, filename=p.filename, type=p.type, title=p.title,
                 folder=p.folder, values=p.values, dry_run=p.dry_run,
             ),
+            "search.query": lambda p: service.search(
+                p.query, limit=p.limit, fuzzy=p.fuzzy, facets=p.facets or None, snippet_width=p.snippet_width
+            ),
+            "note.preview": lambda p: service.preview(p.path, query=p.query),
+            "note.related": lambda p: service.related(p.note, limit=p.limit, unlinked=p.unlinked),
+            "links.suggest": lambda p: service.suggest_links(limit=p.limit, note=p.note, path=p.path),
+            "notes.suggest": lambda p: service.suggest_notes(limit=p.limit, min_links=p.min_links),
+            "mentions.unlinked": lambda p: service.unlinked(note=p.note, min_words=p.min_words, limit=p.limit, per_note=p.per_note),
         }
         if set(self._handlers) != set(METHODS):
             raise RuntimeError(f"handlers and METHODS disagree: {set(self._handlers) ^ set(METHODS)}")

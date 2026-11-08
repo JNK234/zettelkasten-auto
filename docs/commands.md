@@ -362,7 +362,7 @@ href="https://fieldnotes.example.org/posts/ensembles/">`, a `<nav>`, an `<articl
 and a link to `/posts/kl/`, and a `<footer>`.) Ingesting the same file again is stopped with title 1.000, content 1.000 and
 the same SHA-256.
 
-## `vault coverage <vault> -f F [--limit N] [--suggest] [--json]`
+## `vault coverage <vault> -f F [--limit N] [--json]`
 
 Sources nothing links to, and notes of citing types that link to no source, saying why: their citations point at notes that
 do not exist, at notes that are not sources, or there are none. After the ingest above:
@@ -394,42 +394,6 @@ Most cited sources (citing notes)
 ```
 
 On a fresh copy the first lines read `28 … 23 linked …, 5 that nothing links to` and `143 … 33 cite a source, 110 cite none`
-(106 / 0 / 4). The new zettel and the new source account for the difference. `--suggest` adds a likely source for each note that
-cites none (experimental, see below):
+(106 / 0 / 4). The new zettel and the new source account for the difference.
 
-```
-  20_ZETTLEKASTEN/a-bounty-list-is-a-map-of-what-cannot-be-verified.md  (zettel) cites only missing notes: line 37 [[Prime Intellect - Environments Hub]]
-      perhaps: 10_SOURCES/HUD - Verifier and Reward Design for RL Environments.md  (lexical 0.214, experimental)
-```
-
-## `vault suggest <vault> -f F (--note N [--as RELATION] | --file DOC [--type T]) [--method lexical|semantic|fused] [--limit N]` (experimental)
-
-Ranks notes by text similarity for the three questions the commands above leave open: which claim an evidence note may
-support (`--as supports`), which sources a note may draw on (no `--as`), which existing notes a document resembles (`--file`,
-which catches a reworded copy the duplicate gate scores near 0). Advisory only; it writes nothing and nothing depends on it.
-
-```
-$ vault suggest /tmp/sample-vault -f brain --note "EVD - Reward is a deterministic outcome check 1 only if the final database equals the data" --as supports
-Suggestions (lexical, experimental): notes 50_MOC/discourse/rl-environment-design/EVD - Reward is a deterministic outcome check 1 only if the final database equals the data.md may `supports`
-  1  50_MOC/discourse/rl-environment-design/CLM - State graders should check what must not change as well as what must.md   lexical 0.112
-  2  50_MOC/discourse/rl-environment-design/CLM - Hack-robustness is the first requirement of a verifier.md   lexical 0.098
-  3  50_MOC/discourse/rl-environment-design/CLM - Grading end state lets the action space open safely.md   lexical 0.087
-
-to link the first: vault link /tmp/sample-vault -f brain "EVD - Reward is a deterministic outcome check 1 only if the final database equals the data" "CLM - State graders should check what must not change as well as what must" --as supports
-```
-
-(The claim it was just linked to is not suggested again.) `--method lexical` (default) is TF-IDF over the whole vault;
-`semantic` uses [WordLlama](https://github.com/dleemiller/WordLlama) static embeddings (offline; its model ships in the wheel);
-`fused` combines both rankings. [`python scripts/semantic_eval.py`](../scripts/semantic_eval.py) measures them on the vault's own links:
-
-```
-task                         queries           lexical          semantic             fused
-A  note -> its source             33   33/33 · 33 top3   26/33 · 29 top3   28/33 · 30 top3
-B  evidence -> its claim          26   16/26 · 24 top3   11/26 · 20 top3   13/26 · 23 top3
-C  paraphrase -> its paper         8    7/8 ·  8 top3    6/8 ·  8 top3    7/8 ·  8 top3
-```
-
-On the sample vault the embeddings did not beat words, and their absolute scores cannot be thresholded (unrelated long notes
-score about 0.6 against each other), so nothing gates on them.
-
-The same operations over JSON-RPC: [The JSON-RPC API](api.md#format-methods). In the terminal app: [The terminal app](tui.md).
+Search, related notes, link suggestions and unlinked mentions: [Search and connections](search.md).

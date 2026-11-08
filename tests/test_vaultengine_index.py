@@ -30,13 +30,16 @@ def snapshot(conn):
         return sorted(tuple(path_of.get(v, v) if i == 0 else v for i, v in enumerate(row)) for row in conn.execute(sql))
 
     return {
-        "files": rows("SELECT id, kind, content_hash FROM files"),
+        "files": rows("SELECT id, kind, content_hash, modified_ns FROM files"),
         "notes": rows("SELECT file_id, has_frontmatter, frontmatter_error, body_start_line, body_chars, line_count FROM notes"),
-        "properties": rows("SELECT file_id, key, value_json FROM properties"),
+        "properties": rows("SELECT file_id, key, value_json, source FROM properties"),
         "aliases": rows("SELECT file_id, alias, alias_key FROM aliases"),
         "tags": rows("SELECT file_id, name, name_key, source, line FROM tags"),
         "headings": rows("SELECT file_id, ordinal, level, text, line FROM headings"),
         "blocks": rows("SELECT file_id, block_id, line FROM blocks"),
+        "postings": rows("SELECT file_id, term, field, tf, positions FROM postings"),
+        "field_lengths": rows("SELECT file_id, field, length FROM field_lengths"),
+        "terms": sorted(tuple(row) for row in conn.execute("SELECT term, df FROM terms")),
         "links": sorted(
             (path_of[r["source_id"]], r["ordinal"], r["raw"], r["target"], r["heading_path"], r["block_id"], r["display"],
              r["line"], r["target_key"], r["target_name_key"], r["status"], path_of.get(r["target_id"]),
@@ -310,7 +313,7 @@ class InvalidationTests(IncrementalTestCase):
         before = snapshot(self.ix.conn)
         self.vault.write("A.md", "[[C]]")
         self.vault.write("New.md", "# new")
-        with patch.object(index_module, "parse_note", side_effect=RuntimeError("boom")):
+        with patch.object(index_module, "parse_note_with_layout", side_effect=RuntimeError("boom")):
             with self.assertRaises(RuntimeError):
                 self.ix.update(self.vault.root)
         self.assertEqual(snapshot(self.ix.conn), before)

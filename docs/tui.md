@@ -67,3 +67,5 @@ All write commands take `--dry-run`. Without `--format`, the format commands say
 `No format configured. Start vault-tui with --format <name>, e.g. --format brain (error -32003)`.
 Options: `--format <name or file>`, `--python <interpreter>` (default: `$VAULT_TUI_PYTHON`, then this repo's `.venv`,
 then `python3`), `--db <index file>`, `--no-index`. `vault-tui` needs an interactive terminal. Development (layout, tests): [tui/README.md](../tui/README.md).
+
+Searching, related notes, link suggestions and unlinked mentions in the app (`/search`, `/related`, `/suggest`, `/unlinked`): [Search and connections](search.md#in-the-terminal-app).

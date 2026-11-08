@@ -172,11 +172,13 @@ export type PromptProps = {
 	registry: CommandRegistry;
 	history: PromptHistory;
 	busy: boolean;
+	/** An interactive view has the keyboard: hide the prompt, keep its state. */
+	inactive?: boolean;
 	onSubmit: (line: string) => void;
 	onExit: () => void;
 };
 
-export function Prompt({api, registry, history, busy, onSubmit, onExit}: PromptProps) {
+export function Prompt({api, registry, history, busy, inactive = false, onSubmit, onExit}: PromptProps) {
 	const [state, setState] = useState<EditorState>({value: '', cursor: 0, selected: 0, dismissed: undefined, recalled: false});
 	const ref = useRef(state);
 	const update = (next: Partial<EditorState>) => {
@@ -224,7 +226,14 @@ export function Prompt({api, registry, history, busy, onSubmit, onExit}: PromptP
 		submit(value);
 	};
 
+	// Always subscribed: while an interactive view has the keys the prompt ignores them, and
+	// it takes them back the moment the view closes (unsubscribing would leave a gap in which
+	// keys are lost, and a stale subscription could still catch the view's first keys).
 	useInput((input, key) => {
+		if (inactive) {
+			return;
+		}
+
 		const {value, cursor, selected} = ref.current;
 		const {mention, mentionKey, pickerOpen, suggestions, suggestionsOpen} = overlays(ref.current, registry);
 
@@ -336,10 +345,10 @@ export function Prompt({api, registry, history, busy, onSubmit, onExit}: PromptP
 	});
 
 	return (
-		<Box flexDirection="column">
+		<Box flexDirection="column" display={inactive ? 'none' : 'flex'}>
 			<Box borderStyle="round" borderColor="gray" paddingX={1}>
 				<Text color={busy ? 'gray' : theme.accent}>{'> '}</Text>
-				<InputLine value={state.value} cursor={state.cursor} active={!busy} placeholder='Try /help, /stats, /health or /note @…' />
+				<InputLine value={state.value} cursor={state.cursor} active={!busy} placeholder='Try /help, /search, /related @…, /stats or /note @…' />
 			</Box>
 			{view.pickerOpen ? <NotePicker picker={picker} selected={Math.min(state.selected, Math.max(0, picker.results.length - 1))} /> : null}
 			{view.suggestionsOpen ? (

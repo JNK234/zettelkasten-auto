@@ -14,11 +14,8 @@ dependencies = [
     "anthropic>=0.45.0",
     "pydantic>=2.12.5",
     "markdownify>=1.2",
+    "regex>=2024.11.6",
 ]
-
-[project.optional-dependencies]
-# Experimental embedding ranking for `vault suggest --method semantic|fused` (runs offline).
-semantic = ["wordllama>=0.4"]
 
 [project.scripts]
 zettel = "src.main:main"
@@ -35,4 +32,5 @@ packages = ["src", "vaultengine"]
 dev = [
     "jsonschema>=4.26.0",
     "pytest>=9.1.1",
+    "uniseg>=0.9",
 ]

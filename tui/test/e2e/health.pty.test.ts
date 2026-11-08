@@ -5,7 +5,7 @@
  * Python server is gone.
  */
 import {execFileSync} from 'node:child_process';
-import {cpSync, existsSync, mkdtempSync, rmSync} from 'node:fs';
+import {chmodSync, cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -39,13 +39,13 @@ afterAll(() => {
 });
 
 /** A running terminal session with helpers to wait for text and type. */
-function launch(args: string[]) {
+function launch(args: string[], env: Record<string, string> = {}) {
 	const term = pty.spawn(process.execPath, [CLI, ...args], {
 		name: 'xterm-256color',
 		cols: 100,
 		rows: 50,
 		cwd: workdir,
-		env: {...process.env, FORCE_COLOR: '1'},
+		env: {...process.env, FORCE_COLOR: '1', ...env},
 	});
 	let raw = '';
 	term.onData((data) => {
@@ -131,6 +131,53 @@ describe('vault-tui in a real terminal', () => {
 		await new Promise((resolve) => {
 			setTimeout(resolve, 300);
 		});
+		expect(serverProcesses()).toEqual([]);
+	});
+
+	test('/search: move, preview, open in Obsidian, back, close', async () => {
+		// A stand-in for the system opener: records the URL instead of launching Obsidian.
+		const opener = join(workdir, 'opener.sh');
+		const openedFile = join(workdir, 'opened.txt');
+		writeFileSync(opener, `#!/bin/sh\nprintf '%s\\n' "$1" >> '${openedFile}'\n`);
+		chmodSync(opener, 0o755);
+		const app = launch(['--vault', vault], {VAULT_TUI_OPENER: opener});
+		await app.waitFor('180 notes · 1,787 links  ·  ● index fresh');
+
+		const pause = async (ms: number) =>
+			new Promise((resolve) => {
+				setTimeout(resolve, ms);
+			});
+		const press = async (key: string) => {
+			app.term.write(key);
+			await pause(key === '\u001B' ? 100 : 60); // a lone Esc must not merge with the next key
+		};
+
+		await app.type('/search reward hacking');
+		await press('\u001B'); // close the "/" suggestions
+		await press('\r');
+		await app.waitFor('↑↓ move · Enter preview · o open in Obsidian · Esc close');
+		expect(app.text()).toContain('⏺ Search “reward hacking”  106 of 180 notes · exact matches first, then score');
+
+		await press('\u001B[B'); // ↓
+		await app.waitFor('2 of 30 shown (106 match)');
+		await press('\r');
+		await app.waitFor('matches · lines');
+		await app.waitFor('Esc back to the list');
+		expect(app.text()).toContain('⏺ reward-hacking-as-eval-false-positive');
+
+		await press('o');
+		await app.waitFor('in Obsidian');
+		await pause(300);
+		expect(readFileSync(openedFile, 'utf8')).toBe('obsidian://open?vault=sample-vault&file=20_ZETTLEKASTEN%2Freward-hacking-as-eval-false-positive.md\n');
+
+		await press('\u001B'); // back to the list, same hit selected
+		await app.waitFor('2 of 30 shown (106 match)');
+		await press('\u001B'); // close: the summary stays, the prompt is back
+		await app.waitFor('… 96 more (narrow the query');
+
+		app.term.write('\u0003');
+		expect(await app.exited).toBe(0);
+		await pause(300);
 		expect(serverProcesses()).toEqual([]);
 	});
 

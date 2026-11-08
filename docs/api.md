@@ -90,3 +90,7 @@ refused ['Status: #settled is not an allowed value (supported, contested, weak)'
 
 The server keeps parsed notes between calls and re-parses only notes whose content changed, so after the first call
 `vault.check` takes about 0.1 s on the sample vault and a write about 0.3 s.
+
+## Search and connection methods
+
+`search.query`, `note.preview`, `note.related`, `links.suggest`, `notes.suggest` and `mentions.unlinked` back `vault search`, `related`, `suggest` and `unlinked`. A query syntax error is `-32006` (invalid query), with `data.start`/`data.end` offsets and a `hint`. Examples and result shapes: [Search and connections](search.md#over-json-rpc).

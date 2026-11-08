@@ -15,7 +15,11 @@ import {App, type AppProps} from '../src/ui/App.js';
 
 export const REPO_ROOT = fileURLToPath(new URL('../..', import.meta.url));
 
-type Exchange = {request?: {method?: string; params?: Record<string, unknown>}; response: {result?: unknown} | unknown[] | null};
+type ErrorObject = {code: number; message: string; data?: unknown};
+type Exchange = {
+	request?: {method?: string; params?: Record<string, unknown>};
+	response: {result?: unknown; error?: ErrorObject} | unknown[] | null;
+};
 
 export type Session = 'resolver_vault' | 'sample_vault' | 'sample_vault_format';
 
@@ -59,6 +63,40 @@ export function formatResult<T>(id: number): T {
 
 	return value as T;
 }
+
+/** Every recorded single request of a session: its result or its error, by "method params". */
+export function recordedReplies(session: 'resolver_vault' | 'sample_vault'): Map<string, {result?: unknown; error?: ErrorObject}> {
+	const replies = new Map<string, {result?: unknown; error?: ErrorObject}>();
+	const text = readFileSync(`${REPO_ROOT}/tests/fixtures/rpc/${session}.jsonl`, 'utf8');
+	for (const line of text.split('\n').filter(Boolean)) {
+		const {request, response} = JSON.parse(line) as Exchange;
+		if (request?.method && response && !Array.isArray(response)) {
+			replies.set(`${request.method} ${JSON.stringify(request.params ?? {})}`, response);
+		}
+	}
+
+	return replies;
+}
+
+/**
+ * Replays a recorded sample_vault reply for (method, params); recorded errors are
+ * thrown as RpcError. A call that was never recorded fails loudly, naming it.
+ */
+export function sampleReply<T>(method: string, params: object = {}): T {
+	const key = `${method} ${JSON.stringify(params)}`;
+	const reply = sampleReplies.get(key);
+	if (!reply) {
+		throw new Error(`no recorded sample_vault reply for ${key} (add it to tests/fixtures/rpc/sample_vault.jsonl and re-record)`);
+	}
+
+	if (reply.error) {
+		throw new RpcError(reply.error.code, reply.error.message, reply.error.data);
+	}
+
+	return reply.result as T;
+}
+
+const sampleReplies = recordedReplies('sample_vault');
 
 export const freshStatus: IndexStatusResult = {
 	vault: '/vaults/resolver_vault',
@@ -136,6 +174,30 @@ export function fakeApi(overrides: Partial<VaultApi> = {}): FakeApi {
 		link: async (params) => replay('note.link', params),
 		set: async (params) => replay('note.set', params),
 		ingest: async (params) => replay('note.ingest', params),
+		search: async (params) => {
+			calls.push(`search.query ${params.query}`);
+			return sampleReply('search.query', params);
+		},
+		preview: async (params) => {
+			calls.push(`note.preview ${params.path}`);
+			return sampleReply('note.preview', params);
+		},
+		related: async (params) => {
+			calls.push(`note.related ${params.note}`);
+			return sampleReply('note.related', params);
+		},
+		suggestLinks: async (params = {}) => {
+			calls.push(`links.suggest ${JSON.stringify(params)}`);
+			return sampleReply('links.suggest', params);
+		},
+		suggestNotes: async (params = {}) => {
+			calls.push(`notes.suggest ${JSON.stringify(params)}`);
+			return sampleReply('notes.suggest', params);
+		},
+		unlinked: async (params = {}) => {
+			calls.push(`mentions.unlinked ${JSON.stringify(params)}`);
+			return sampleReply('mentions.unlinked', params);
+		},
 	};
 	return Object.assign(api, overrides, {calls});
 }
@@ -143,6 +205,8 @@ export function fakeApi(overrides: Partial<VaultApi> = {}): FakeApi {
 export const keys = {
 	up: '\u001B[A',
 	down: '\u001B[B',
+	pageDown: '\u001B[6~',
+	pageUp: '\u001B[5~',
 	right: '\u001B[C',
 	left: '\u001B[D',
 	enter: '\r',
@@ -160,7 +224,12 @@ export const delay = async (ms: number) =>
 export function renderApp(props: Partial<AppProps> = {}) {
 	const api = (props.api as FakeApi | undefined) ?? fakeApi();
 	const registry = props.registry ?? new CommandRegistry().register(...builtinCommands);
-	const instance = render(<App api={api} registry={registry} vaultPath="/vaults/resolver_vault" {...props} />);
+	/** URLs "opened" (no real opener runs in tests unless a test passes its own openUrl). */
+	const opened: string[] = [];
+	const openUrl = props.openUrl ?? (async (url: string) => {
+		opened.push(url);
+	});
+	const instance = render(<App api={api} registry={registry} vaultPath="/vaults/resolver_vault" {...props} openUrl={openUrl} />);
 
 	const frame = () => instance.lastFrame() ?? '';
 
@@ -193,7 +262,7 @@ export function renderApp(props: Partial<AppProps> = {}) {
 
 	const type = async (text: string) => press(...text);
 
-	return {...instance, api, registry, frame, waitFor, press, type};
+	return {...instance, api, registry, frame, waitFor, press, type, opened};
 }
 
 /** The last prompt box line, e.g. "│ > /note @ppo │" -> "> /note @ppo". */
