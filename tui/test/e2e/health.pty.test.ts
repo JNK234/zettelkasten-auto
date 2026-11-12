@@ -167,7 +167,10 @@ describe('vault-tui in a real terminal', () => {
 
 		await press('o');
 		await app.waitFor('in Obsidian');
-		await pause(300);
+		// The opener runs detached: wait for what it records (a fixed 300 ms was too short on macOS).
+		for (let waited = 0; !existsSync(openedFile) && waited < 5000; waited += 100) {
+			await pause(100);
+		}
 		expect(readFileSync(openedFile, 'utf8')).toBe('obsidian://open?vault=sample-vault&file=20_ZETTLEKASTEN%2Freward-hacking-as-eval-false-positive.md\n');
 
 		await press('\u001B'); // back to the list, same hit selected

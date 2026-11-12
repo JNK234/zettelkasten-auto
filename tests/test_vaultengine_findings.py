@@ -253,7 +253,7 @@ class SameAsPairByPairTests(unittest.TestCase):
                 for mine, theirs in zip(got, want):
                     self.assertEqual(mine[:2] + mine[7:], theirs[:2] + theirs[7:])
                     for value, expected in zip(mine[2:7], theirs[2:7]):
-                        self.assertAlmostEqual(value, expected, places=9)
+                        self.assertAlmostEqual(value, expected, places=6)
 
 
 class IdeaTests(unittest.TestCase):

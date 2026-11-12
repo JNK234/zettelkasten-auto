@@ -356,7 +356,7 @@ expect "$out" "✗ behind: 2 zettels with at least two of its tags or links in c
 	"20_ZETTLEKASTEN/reward-hacking-as-eval-false-positive.md   tags ai-safety · links obfuscated-reward-hacking"
 reject "$out" "block out of date" "changed since the last refresh"
 printf '\nMy own text, kept byte for byte.\n' >>"$pv/50_MOC/monitoring-reasoning.md"
-sed -i 's/^The monitorability tax is the cost you pay/The monitorability tax is the capability you give up/' "$pv/20_ZETTLEKASTEN/monitorability-tax.md"
+sed -i.bak 's/^The monitorability tax is the cost you pay/The monitorability tax is the capability you give up/' "$pv/20_ZETTLEKASTEN/monitorability-tax.md" && rm "$pv/20_ZETTLEKASTEN/monitorability-tax.md.bak"
 run_status 1 $VAULT page check "$pv" monitoring-reasoning -f core
 expect "$out" "✗ zettels block out of date" "changed       20_ZETTLEKASTEN/monitorability-tax.md"
 run_status 0 $VAULT page refresh "$pv" monitoring-reasoning -f core --write

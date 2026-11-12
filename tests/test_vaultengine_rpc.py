@@ -23,6 +23,8 @@ from unittest.mock import patch
 
 import jsonschema
 
+from approx import assert_same
+
 from vaultengine.fuzzy import fuzzy_match
 from vaultengine.rpc.models import METHODS
 from vaultengine.rpc.schema import SCHEMA_PATH, schema_text
@@ -39,6 +41,10 @@ SESSIONS = {
     "sample_vault_core": FIXTURES / "vault",
 }
 SESSION_FORMATS = {"sample_vault_format": "brain", "sample_vault_explore": "brain", "sample_vault_core": "core"}
+# The core session writes notes (a page, an idea) before it asks for findings. Their Created line holds the current
+# minute, which is part of the text they are embedded as, so it moves the vault's mean vector and every centered
+# embedding cosine a little (about 1e-4 of a link score) from one minute to the next.
+SESSION_FLOAT_TOLERANCE = {"sample_vault_core": 1e-3}
 REPO_ROOT = Path(__file__).parent.parent
 BRAIN_PATH = REPO_ROOT / "formats" / "brain.yaml"
 RECORD = os.environ.get("VAULTENGINE_RECORD") == "1"
@@ -141,7 +147,8 @@ class RecordedSessionReplayTests(unittest.TestCase):
             self.assertEqual(len(outputs), len(expected), "number of response lines")
             for number, (exchange, actual) in enumerate(zip(expected, outputs), start=1):
                 with self.subTest(exchange=number, sent=wire_line(exchange)[:80]):
-                    self.assertEqual(normalize(actual, str(vault.root)), exchange["response"])
+                    assert_same(self, normalize(actual, str(vault.root)), exchange["response"],
+                                SESSION_FLOAT_TOLERANCE.get(name, 1e-6))
         finally:
             vault.cleanup()
 

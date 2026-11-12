@@ -405,7 +405,7 @@ class CacheTextTests(unittest.TestCase):
 class SettingsTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.dir = Path(self.tmp.name)
+        self.dir = Path(self.tmp.name).resolve()  # /var/folders is /private/var/folders on macOS: compare real paths
         self.config = self.dir / "conf" / "config.yaml"
         self.config.parent.mkdir()
 

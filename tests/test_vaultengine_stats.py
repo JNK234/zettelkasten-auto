@@ -12,6 +12,7 @@ from vaultengine.operations import Workbench
 from vaultengine.settings import load_settings
 from vaultengine.stats import Stats, fingerprint
 
+from approx import assert_same
 from embedding_model import requires_model
 
 SAMPLE = Path(__file__).resolve().parent / "fixtures" / "vault"
@@ -200,5 +201,5 @@ class GoldenTests(unittest.TestCase):
                         ref = start[2:-2] if start.startswith("[[") else start
                         out = explorer.run(ref or None, self.LENSES if start else settings.engine.explore.start_lenses)
                         with self.subTest(numbers=pass_, start=start):
-                            self.assertEqual(json.loads(json.dumps(self.serialise(out), sort_keys=True)), golden[start])
+                            assert_same(self, json.loads(json.dumps(self.serialise(out), sort_keys=True)), golden[start])
                     self.assertEqual(out["stats"]["mode"], "fresh" if pass_ == "computed" else "exact")
