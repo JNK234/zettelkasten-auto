@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 
+from vaultengine.model import field_kinds
 from vaultengine.resolver import ResolvedLink, Resolver
 from vaultengine.vault import Vault
 
@@ -15,6 +16,7 @@ from vaultengine.vault import Vault
 class LinkGraph:
     def __init__(self, vault: Vault, resolve_aliases: bool = True) -> None:
         self.vault = vault
+        self._field_kinds: dict[str, dict[int, str]] = {}
         resolver = Resolver(vault, resolve_aliases=resolve_aliases)
         self.edges: list[ResolvedLink] = []
         self._outgoing: dict[str, list[ResolvedLink]] = defaultdict(list)
@@ -30,6 +32,21 @@ class LinkGraph:
 
     def outgoing(self, path: str) -> list[ResolvedLink]:
         return list(self._outgoing.get(path, []))
+
+    def _kinds(self, path: str) -> dict[int, str]:
+        if path not in self._field_kinds:
+            self._field_kinds[path] = field_kinds(self.vault.notes[path])
+        return self._field_kinds[path]
+
+    def outgoing_fields(self, path: str) -> list[tuple[str | None, str, str | None]]:
+        """(target path, status, field kind) of each link of ``path``, in order. Field kind:
+        'header', 'inline' or None (see ``model.field_kinds``)."""
+        kinds = self._kinds(path) if path in self.vault.notes else {}
+        return [(e.target_path, e.status, kinds.get(e.link.start)) for e in self._outgoing.get(path, [])]
+
+    def incoming_fields(self, path: str) -> list[tuple[str, str | None]]:
+        """(source, field kind) of each resolved link to ``path`` from another note."""
+        return [(e.source, self._kinds(e.source).get(e.link.start)) for e in self._incoming.get(path, [])]
 
     def backlinks(self, path: str) -> list[ResolvedLink]:
         """Resolved links pointing at ``path`` from other files (self-links excluded)."""

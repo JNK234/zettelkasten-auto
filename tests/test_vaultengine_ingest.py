@@ -394,6 +394,66 @@ class IngestGateTests(unittest.TestCase):
         self.assertIn("has no `ingest:` block", str(caught.exception))
 
 
+class CoreIngestTests(unittest.TestCase):
+    """formats/core.yaml: `ingest: {url: Source}`: no body heading (the document goes right after the title), and the
+    document's URL fills Source. Only the fields of the format are written (Created, Tags, Source)."""
+
+    CORE = load_format(REPO_ROOT / "formats" / "core.yaml")
+
+    def setUp(self):
+        self._dir = tempfile.TemporaryDirectory()
+        self.root = Path(self._dir.name) / "vault"
+        self.inbox = Path(self._dir.name) / "inbox"
+        self.inbox.mkdir()
+        shutil.copytree(VAULT, self.root)
+        self.db = self.root / ".vaultengine" / "index.sqlite"
+        with VaultIndex(self.db) as index:
+            index.update(self.root)
+
+    def tearDown(self):
+        self._dir.cleanup()
+
+    def ingest(self, path: Path, values: dict[str, str]):
+        document = read_document(path)
+        return run_write(self.CORE, self.root, self.db, lambda t: plan_ingest(t, document, "source", values=values))
+
+    def test_the_url_fills_source_and_the_body_follows_the_title(self):
+        page = self.inbox / "ensembles.html"
+        page.write_text(NEW_ARTICLE, encoding="utf-8")
+        outcome = self.ingest(page, {"Tags": "[[reward]]"})
+        self.assertEqual(outcome.status, "written")
+        path = "10_SOURCES/Why Reward Model Ensembles Delay Overoptimization.md"
+        text = (self.root / path).read_text(encoding="utf-8")
+        head, _, body = text.partition("\n\n# Why Reward Model Ensembles Delay Overoptimization\n\n")
+        self.assertRegex(head, r"^Created: \d\d-\d\d-\d{4} \d\d:\d\d\nTags: \[\[reward\]\]\n"
+                               r"Source: https://fieldnotes\.example\.org/posts/ensembles/$")
+        self.assertTrue(body.startswith("Optimizing a policy"))
+        self.assertIn("\n## The proxy is right on average and wrong at the edges\n", body)  # below the title's H1
+        typed = TypedVault(self.CORE, Vault.load(self.root))
+        self.assertEqual((typed.type_of(path), typed.issues(path)), ("source", []))
+
+    def test_a_given_source_wins_and_without_one_it_is_refused(self):
+        text_file = self.inbox / "talk.txt"
+        text_file.write_text("Notes From a Talk on Graders\n\n" + "Graders should be tested before training starts. " * 12,
+                             encoding="utf-8")
+        refused = self.ingest(text_file, {"Tags": "[[reward]]"})  # a text file has no URL: Source stays missing
+        self.assertEqual(refused.status, "refused")
+        self.assertEqual([i.code for i in refused.verdict.new_violations], ["missing-value"])  # "Source:" left empty
+        self.assertFalse((self.root / "10_SOURCES/Notes From a Talk on Graders.md").exists())
+        written = self.ingest(text_file, {"Tags": "[[reward]]", "Source": "Talk at the lab, 2026"})
+        self.assertEqual(written.status, "written")
+        self.assertIn("Source: Talk at the lab, 2026\n", (self.root / "10_SOURCES/Notes From a Talk on Graders.md").read_text())
+
+    def test_spec_errors(self):
+        from vaultengine.formats import FormatError
+        base = "format: 1\ntypes: {s: {match: {folder: S}, metadata: {Source: {kind: text}}, ingest: %s}}\n"
+        parse_format(base % "{url: Source}")
+        parse_format(base % "{}")
+        with self.assertRaises(FormatError) as caught:
+            parse_format(base % "{url: Nope}")
+        self.assertIn("ingest.url: 'Nope' is not a metadata key of the type", str(caught.exception))
+
+
 # ----- coverage ----------------------------------------------------------------------------------------------
 
 

@@ -1,0 +1,122 @@
+# The lean format: four kinds of note, each with one home, and only the fields you decide.
+#
+#   vault check <vault> -f core                       every violation
+#   vault check <vault> -f core --update-baseline     record today's violations (the only check that writes)
+#   vault check <vault> -f core --baseline            fail only on violations added since
+#   vault pipeline <vault> -f core                    each source's stage, and the gaps
+#   vault note <vault> <note> -f core                 what the engine knows about one note
+#   vault page new|refresh|check <vault> ... -f core  pages: scaffold, rebuild their blocks, what needs attention
+#   vault findings <vault>                            what the engine discovered (missing notes, names, links)
+#   vault idea new|set <vault> ... -f core            an idea from a finding; its status
+#
+# What the engine can work out (counts, an updated date, which notes link where, a source's stage) is
+# not a field here: it is computed from the notes when asked. The rules that keep the structure are
+# enforced by the engine rather than kept by hand: every note in these folders must be one of the four
+# kinds, and the kinds that build on others must link to them.
+# formats/brain.yaml still describes the older, richer conventions; this file replaces nothing in it.
+
+format: 1
+name: core
+description: Sources, zettels, pages and ideas, each in one folder; Created and Tags everywhere.
+
+# Metadata is the block of `Key: value` lines at the top of a note, as in the existing notes.
+metadata_source: inline
+
+# Every note inside these folders, at any depth, must be one of the types below.
+# A note that none matches (say 10_SOURCES/old/x.md) is an `untyped-note` violation.
+typed_folders: [10_SOURCES, 20_ZETTLEKASTEN, 50_MOC]
+
+# Outside the format altogether: no type, no violations, and links from these notes count for nothing.
+# 50_MOC/discourse is a deleted experiment (its notes carry supports::/from:: fields on purpose).
+ignored_folders: [50_MOC/discourse]
+
+# A source is a note in 10_SOURCES. A URL, or a [[link]] to a source note that is not in the vault,
+# is not one: neither satisfies `min_links` nor moves a source through the pipeline.
+# Links under a References heading are citations: `vault coverage` and `vault pipeline` use that to
+# say why a zettel rests on no source (it cites notes that are missing, or cites nothing).
+link_roles:
+  reference: [References]
+
+coverage:
+  sources: [source]
+  citing: [zettel]
+  citation_roles: [reference]
+
+# `vault pipeline`: a source is ingested; extracted once a zettel links to it; compiled once a page
+# links to one of those zettels. Worked out from the links on every run, never stored.
+pipeline:
+  sources: [source]
+  extract: [zettel]
+  compile: [page]
+
+# `vault page`: on every page it writes, the engine rewrites the part of the index between
+# <!-- vault:pages --> markers (one line per page) and appends a line to the log.
+pages:
+  index: 50_MOC/index.md
+  log: 50_MOC/log.md                # a line appended on every page write
+  tags: Tags                        # zettels are grouped by these on a page
+
+# `vault idea new --from <finding id>`: an idea is made from a finding the engine discovered
+# (`vault findings`), written into its finding block; `vault idea set` moves its Status.
+ideas:
+  type: idea
+  status: Status
+  block: finding
+  tags: Tags                        # filled with the tags the finding's notes share
+
+types:
+  # First matching type wins: index, log and idea come before page, which takes the rest of 50_MOC.
+
+  index:
+    description: the list of pages, kept in step by the engine (not a page itself)
+    match: {folder: 50_MOC, name: index, subfolders: false}
+
+  log:
+    description: the log the engine appends a line to on every page write (not a page itself)
+    match: {folder: 50_MOC, name: log, subfolders: false}
+
+  source:
+    description: notes on one paper, post, talk or course
+    match: {folder: 10_SOURCES, subfolders: false}      # directly in 10_SOURCES, not in a subfolder
+    metadata:
+      Created: {required: true, kind: datetime, format: "%d-%m-%Y %H:%M"}
+      Tags: {required: true, kind: [links, tags], link_role: tag}
+      Source: {required: true, kind: text, description: where the original is (URL or citation)}
+    new:
+      defaults: {Created: "{now}"}    # file name: the title (28 of 28 sources)
+    # `vault ingest --as source`: the document goes right after the title, and its URL (frontmatter url/source,
+    # an HTML page's canonical URL) fills Source; without one, give it: --set "Source=<url or citation>".
+    ingest: {url: Source}
+
+  zettel:
+    description: one atomic idea
+    match: {folder: 20_ZETTLEKASTEN, subfolders: false}
+    metadata:
+      Created: {required: true, kind: datetime, format: "%d-%m-%Y %H:%M"}
+      Tags: {required: true, kind: [links, tags], link_role: tag}
+    min_links: {source: 1}          # cites at least one source note
+    new:
+      name: "{slug}"                # kl-penalty-in-rlhf (109 of 109 zettels)
+      defaults: {Created: "{now}"}
+
+  idea:
+    description: an idea being worked on, with where it stands
+    match: {folder: 50_MOC/ideas, subfolders: false}
+    metadata:
+      Created: {required: true, kind: datetime, format: "%d-%m-%Y %H:%M"}
+      Tags: {required: true, kind: [links, tags], link_role: tag}
+      Status: {required: true, kind: tags, multiple: false, values: [open, dropped, done]}
+    required_blocks: [finding]      # the finding it starts from, between <!-- vault:finding --> markers
+    new:
+      defaults: {Created: "{now}", Status: "#open"}
+
+  page:
+    description: a page that pulls zettels together (an overview, a comparison, ...)
+    match: {folder: 50_MOC}         # anywhere under 50_MOC, at any depth, except ideas and ignored folders
+    metadata:
+      Created: {required: true, kind: datetime, format: "%d-%m-%Y %H:%M"}
+      Tags: {required: true, kind: [links, tags], link_role: tag}
+    min_links: {zettel: 3}          # "a few": raise or lower it here
+    new:
+      name: "{slug}"                # 3 of 3 pages
+      defaults: {Created: "{now}"}

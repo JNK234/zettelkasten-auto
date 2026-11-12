@@ -5,8 +5,13 @@
  * testable with an in-memory fake.
  */
 import type {
+	FindingsListParams,
+	FindingsListResult,
 	HealthReportParams,
 	HealthReportResult,
+	IdeaNewParams,
+	IdeaNewResult,
+	IdeaSetParams,
 	IndexBuildParams,
 	IndexBuildResult,
 	IndexStatusResult,
@@ -14,10 +19,14 @@ import type {
 	LinksSuggestResult,
 	MentionsUnlinkedParams,
 	MentionsUnlinkedResult,
+	NoteFactsParams,
+	NoteFactsResult,
 	NoteGetResult,
 	NoteIngestParams,
 	NoteIngestResult,
 	NoteLinkParams,
+	NoteMergeParams,
+	NoteMoveParams,
 	NoteNewParams,
 	NotePreviewParams,
 	NotePreviewResult,
@@ -28,8 +37,16 @@ import type {
 	NotesPickResult,
 	NotesSuggestParams,
 	NotesSuggestResult,
+	PageCheckParams,
+	PageCheckResult,
+	PageExcludeParams,
+	PageNewParams,
+	PageNewResult,
+	PageRefreshParams,
+	RelocationResult,
 	SearchQueryParams,
 	SearchQueryResult,
+	StatefulWriteResult,
 	VaultCheckParams,
 	VaultCheckResult,
 	VaultCoverageParams,
@@ -37,6 +54,10 @@ import type {
 	VaultFixParams,
 	VaultFixResult,
 	VaultMethod,
+	VaultNextParams,
+	VaultNextResult,
+	VaultPipelineParams,
+	VaultPipelineResult,
 	VaultStatsParams,
 	VaultStatsResult,
 	WriteResult,
@@ -64,6 +85,19 @@ export type VaultApi = {
 	suggestLinks(params?: LinksSuggestParams): Promise<LinksSuggestResult>;
 	suggestNotes(params?: NotesSuggestParams): Promise<NotesSuggestResult>;
 	unlinked(params?: MentionsUnlinkedParams): Promise<MentionsUnlinkedResult>;
+	/** vault.pipeline: each source's stage and the gaps (format with a pipeline: block). */
+	pipeline(params?: VaultPipelineParams): Promise<VaultPipelineResult>;
+	noteFacts(params: NoteFactsParams): Promise<NoteFactsResult>;
+	pageNew(params: PageNewParams): Promise<PageNewResult>;
+	pageRefresh(params: PageRefreshParams): Promise<StatefulWriteResult>;
+	pageExclude(params: PageExcludeParams): Promise<StatefulWriteResult>;
+	pageCheck(params?: PageCheckParams): Promise<PageCheckResult>;
+	findings(params?: FindingsListParams): Promise<FindingsListResult>;
+	ideaNew(params: IdeaNewParams): Promise<IdeaNewResult>;
+	ideaSet(params: IdeaSetParams): Promise<StatefulWriteResult>;
+	move(params: NoteMoveParams): Promise<RelocationResult>;
+	merge(params: NoteMergeParams): Promise<RelocationResult>;
+	next(params?: VaultNextParams): Promise<VaultNextResult>;
 };
 
 export type RpcRequester = {
@@ -91,5 +125,17 @@ export function createVaultApi(client: RpcRequester): VaultApi {
 		suggestLinks: async (params) => client.request('links.suggest', params),
 		suggestNotes: async (params) => client.request('notes.suggest', params),
 		unlinked: async (params) => client.request('mentions.unlinked', params),
+		pipeline: async (params) => client.request('vault.pipeline', params),
+		noteFacts: async (params) => client.request('note.facts', params),
+		pageNew: async (params) => client.request('page.new', params),
+		pageRefresh: async (params) => client.request('page.refresh', params),
+		pageExclude: async (params) => client.request('page.exclude', params),
+		pageCheck: async (params) => client.request('page.check', params),
+		findings: async (params) => client.request('findings.list', params),
+		ideaNew: async (params) => client.request('idea.new', params),
+		ideaSet: async (params) => client.request('idea.set', params),
+		move: async (params) => client.request('note.move', params),
+		merge: async (params) => client.request('note.merge', params),
+		next: async (params) => client.request('vault.next', params),
 	};
 }

@@ -2,7 +2,7 @@
 # ABOUTME: Edit vault.root to point to your Obsidian vault
 
 vault:
-  root: "/Users/jnk789/Library/Mobile Documents/iCloud~md~obsidian/Documents/Brain/"
+  root: "/path/to/your/vault/"
   sources_dir: "10_SOURCES"
   zettel_dir: "20_ZETTLEKASTEN"
   bundles_dir: "110_BUNDLES"
@@ -18,7 +18,7 @@ llm:
   # Anthropic models: claude-sonnet-4-5, claude-haiku-4-5, claude-opus-4-6
 
 embeddings:
-  db_path: "/Users/jnk789/Developer/zettelkasten-auto/chromastores/zettledb_stf"
+  db_path: "chromastores/zettledb_stf"
   provider: "sentence-transformer"  # "openai" or "sentence-transformer"
   model: "all-MiniLM-L6-v2"  # Optional: override default model
   # OpenAI default: text-embedding-3-small

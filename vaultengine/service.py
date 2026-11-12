@@ -48,6 +48,10 @@ class InvalidQuery(ServiceError):
     """A search query that does not parse; data says where (start/end offsets in the query) and how to fix it."""
 
 
+class NoBaseline(ServiceError):
+    """vault.check with baseline=true, and no baseline is recorded (or it cannot be read)."""
+
+
 class VaultService:
     def __init__(self, vault_root: str | Path, db_path: str | Path | None = None, format_path: str | Path | None = None) -> None:
         self.root = Path(vault_root).resolve()
@@ -199,10 +203,28 @@ class VaultService:
 
         return TypedVault(self._spec(), Vault.load(self.root, cache=self._parse_cache))
 
-    def check(self, changed: bool = False, limit: int | None = None) -> dict[str, Any]:
-        from vaultengine.formats.check import check_report, scope_all, scope_changed, select_issues
+    def check(self, changed: bool = False, limit: int | None = None, baseline: bool = False,
+              update_baseline: bool = False) -> dict[str, Any]:
+        """``baseline``: only violations not in the recorded baseline count (``ok`` is about those);
+        ``update_baseline``: record the whole vault's violations as the baseline (the only write of a check)."""
+        from vaultengine.formats.check import (
+            BaselineError, BaselineResult, baseline_path, check_report, compare_to_baseline, load_baseline,
+            record_baseline, scope_all, scope_changed, select_issues,
+        )
 
         spec = self._spec()
+        if baseline and update_baseline:
+            raise WriteRejected("baseline compares with the baseline, update_baseline records it; give one")
+        baseline_file = baseline_path(self.root, spec.name) if baseline or update_baseline else None
+        recorded = None
+        if baseline:
+            if not baseline_file.exists():
+                raise NoBaseline(f"No baseline for format {spec.name!r}; record one with vault.check update_baseline=true",
+                                 path=str(baseline_file))
+            try:
+                recorded = load_baseline(baseline_file, spec.name)
+            except BaselineError as exc:
+                raise NoBaseline(str(exc), path=str(baseline_file)) from None
         if changed:
             index = self._built_index()
             stale = index.staleness(self.root)
@@ -212,8 +234,22 @@ class VaultService:
             scope = scope_changed(typed, stale.added, stale.changed, stale.deleted, last, stale.reason)
         else:
             scope = scope_all(typed)
-        report = check_report(typed, scope, select_issues(typed, scope))
+        issues = select_issues(typed, scope)
+        result = None
+        if update_baseline:
+            previous = None
+            if baseline_file.exists():
+                try:
+                    previous = len(load_baseline(baseline_file, spec.name).violations)
+                except BaselineError:
+                    previous = None
+            written = record_baseline(typed, baseline_file)
+            result = BaselineResult(written, [], issues, [], recorded=True, previous=previous)
+        elif recorded is not None:
+            result = compare_to_baseline(typed, issues, recorded)
+        report = check_report(typed, scope, result.new if result else issues)
         report["format"] = {"name": spec.name, "path": str(self.format_path)}
+        report["baseline"] = result.to_dict() if result is not None else None
         if limit is not None:
             report["notes"] = report["notes"][:limit]
         report["limit"] = limit
@@ -233,7 +269,8 @@ class VaultService:
         report["limit"] = limit
         return report
 
-    def _write(self, build, dry_run: bool) -> dict[str, Any]:
+    def _write(self, build, dry_run: bool, extra=None) -> dict[str, Any]:
+        """Plan with ``build(typed)``, check, and write unless ``dry_run``. ``extra(outcome)``: more keys."""
         from vaultengine.formats.write import NoteMissing, WriteError, WriteFailed, outcome_to_dict, run_write
 
         spec = self._spec()
@@ -245,7 +282,10 @@ class VaultService:
             raise WriteRejected(str(exc)) from None
         except WriteFailed as exc:
             raise WriteFailedError(str(exc)) from None
-        return outcome_to_dict(outcome, dry_run)
+        result = outcome_to_dict(outcome, dry_run)
+        if extra is not None:
+            result.update(extra(outcome))
+        return result
 
     def new(self, type: str, title: str, *, folder: str | None = None, name: str | None = None,
             values: dict[str, str] | None = None, relations: list[tuple[str, str]] | None = None,
@@ -317,6 +357,216 @@ class VaultService:
         result["duplicates"] = []
         result["candidates"] = [c.to_dict() for c in found.get("candidates", [])[:5]]
         return result
+
+    # ----- the reading pipeline: pipeline, note facts, pages, findings, ideas, moves, next -----------
+
+    def _reading(self):
+        """The vault through the format for a read: from the index when there is a usable one (notes changed
+        since are parsed from disk), else from every file. Close it with ``_done``."""
+        from vaultengine.indexed import open_typed
+
+        spec = self._spec()
+        typed = open_typed(spec, self.root, self.db_path) if self.db_path.exists() else None
+        return typed if typed is not None else self._typed()
+
+    @staticmethod
+    def _done(typed) -> None:
+        if hasattr(typed.vault, "close"):
+            typed.vault.close()
+
+    def _needs(self, block: str):
+        spec = self._spec()
+        if getattr(spec, block) is None:
+            raise FormatNotConfigured(f"Format {spec.name!r} has no `{block}:` block", format=str(self.format_path))
+        return spec
+
+    def _find(self, typed, ref: str) -> str:
+        from vaultengine.formats.write import NoteMissing, find_note
+
+        try:
+            return find_note(typed, ref)
+        except NoteMissing as exc:
+            raise NoteNotFound(str(exc), note=ref) from None
+
+    def pipeline(self, limit: int | None = None) -> dict[str, Any]:
+        from vaultengine.formats.pipeline import Pipeline
+
+        self._needs("pipeline")
+        typed = self._reading()
+        try:
+            report = Pipeline(typed).report()
+        finally:
+            self._done(typed)
+        if limit is not None:
+            report["sources"] = report["sources"][:limit]
+            report["extract"]["unsourced"]["notes"] = report["extract"]["unsourced"]["notes"][:limit]
+            report["gaps"] = {key: items[:limit] for key, items in report["gaps"].items()}
+        report["limit"] = limit
+        return report
+
+    def note_facts(self, note: str) -> dict[str, Any]:
+        from vaultengine.formats.pipeline import Pipeline
+
+        self._needs("pipeline")
+        typed = self._reading()
+        try:
+            pipeline = Pipeline(typed)
+            return pipeline.note(self._find(typed, note))
+        finally:
+            self._done(typed)
+
+    def _state(self, outcome) -> dict[str, Any]:
+        return {"state": [{"path": f.path, "changes": list(f.changes)} for f in outcome.plan.side_files]}
+
+    def page_new(self, title: str, zettels: list[str] | None = None, queries: list[str] | None = None, limit: int = 10,
+                 tags: str | None = None, folder: str | None = None, dry_run: bool = False) -> dict[str, Any]:
+        """A page from zettels: ``zettels`` (refs) and the best-ranked zettels of each query in ``queries``."""
+        from vaultengine.formats.pages import PageError, Pages
+
+        self._needs("pages")
+        ranked = [(query, [hit.path for hit in self._search(query, limit=None, facets=0).hits]) for query in queries or []]
+        found: dict[str, Any] = {"from": []}
+
+        def build(typed):
+            pages = Pages(typed)
+            chosen = [self._find(typed, ref) for ref in zettels or []]
+            for query, paths in ranked:
+                hits = [p for p in paths if p in typed.vault.notes and pages.is_zettel(p)]
+                found["from"].append({"query": query, "matched": len(paths), "zettels": len(hits),
+                                      "taken": hits[:limit]})
+                chosen.extend(hits[:limit])
+            if not chosen:
+                raise PageError("no zettels to make the page from (zettels and queries gave none)")
+            plan = pages.plan_new(title, list(dict.fromkeys(chosen)), folder=folder, tags=tags)
+            found["page"] = {"path": plan.files[0].path, "content": plan.files[0].new}
+            return plan
+
+        return self._write(build, dry_run, extra=lambda outcome: {**self._state(outcome), "page": found["page"],
+                                                                   "from": found["from"]})
+
+    def page_refresh(self, page: str, dry_run: bool = False) -> dict[str, Any]:
+        from vaultengine.formats.pages import Pages
+
+        self._needs("pages")
+        return self._write(lambda typed: Pages(typed).plan_refresh(page), dry_run, extra=self._state)
+
+    def page_exclude(self, page: str, zettels: list[str], undo: bool = False, dry_run: bool = False) -> dict[str, Any]:
+        from vaultengine.formats.pages import Pages
+
+        self._needs("pages")
+        return self._write(lambda typed: Pages(typed).plan_exclude(page, zettels, undo=undo), dry_run, extra=self._state)
+
+    def page_check(self, page: str | None = None) -> dict[str, Any]:
+        """One page, or every page; ``ready``: every managed page (or the one asked about) is ready to write."""
+        from vaultengine.formats.pages import PageError, Pages
+
+        spec = self._needs("pages")
+        typed = self._reading()
+        try:
+            pages = Pages(typed)
+            targets = [self._find(typed, page)] if page else pages.pages()
+            try:
+                results = [pages.check(p) for p in targets]
+            except PageError as exc:
+                raise WriteRejected(str(exc)) from None
+        finally:
+            self._done(typed)
+        attention = [r for r in results if (r["managed"] or page) and not r["ready"]]
+        return {"format": {"name": spec.name, "path": str(self.format_path)}, "pages": results, "ready": not attention,
+                "managed": sum(1 for r in results if r["managed"]),
+                "ready_pages": sum(1 for r in results if r["managed"] and r["ready"])}
+
+    def _findings(self):
+        from vaultengine.findings import Findings, counts_for, skip_for
+
+        spec = self._spec()
+        return Findings(self._built_index().conn, skip_for(spec), counts_for(spec))
+
+    def _index_info(self) -> dict[str, Any]:
+        index = self._built_index()
+        stale = index.staleness(self.root)
+        return {"db": str(self.db_path), "last_indexed_at": index.meta().get("last_indexed_at"), "stale": stale.is_stale,
+                "pending": {"added": stale.added, "changed": stale.changed, "deleted": stale.deleted, "reason": stale.reason}}
+
+    def findings(self, methods: list[str] | None = None, id: str | None = None, limit: int | None = None) -> dict[str, Any]:
+        """Findings from the index (read only). ``limit``: per method; ``total`` counts them all."""
+        findings = self._findings()
+        items = findings.all(methods or None)
+        if id is not None:
+            items = [f for f in items if f.id == id]
+            if not items:
+                raise NoteNotFound(f"No finding {id!r} now (findings.list gives the ids)", id=id)
+        shown = items
+        if limit is not None:
+            per: dict[str, int] = {}
+            shown = []
+            for finding in items:
+                per[finding.method] = per.get(finding.method, 0) + 1
+                if per[finding.method] <= limit:
+                    shown.append(finding)
+        by_method: dict[str, int] = {}
+        for finding in items:
+            by_method[finding.method] = by_method.get(finding.method, 0) + 1
+        return {"index": self._index_info(), "total": len(items), "by_method": by_method,
+                "thresholds": findings.thresholds, "findings": [f.to_dict() for f in shown], "limit": limit}
+
+    def idea_new(self, finding: str, title: str | None = None, tags: str | None = None, dry_run: bool = False) -> dict[str, Any]:
+        from vaultengine.formats.ideas import plan_idea_new
+
+        self._needs("ideas")
+        found = self._findings().get(finding)
+        if found is None:
+            raise NoteNotFound(f"No finding {finding!r} now (findings.list gives the ids)", id=finding)
+        made: dict[str, Any] = {}
+
+        def build(typed):
+            plan = plan_idea_new(typed, found, title=title, tags=tags)
+            made["idea"] = {"path": plan.files[0].path, "content": plan.files[0].new}
+            return plan
+
+        return self._write(build, dry_run, extra=lambda outcome: {**self._state(outcome), "finding": found.to_dict(),
+                                                                   "idea": made["idea"]})
+
+    def idea_set(self, idea: str, status: str, dry_run: bool = False) -> dict[str, Any]:
+        from vaultengine.formats.ideas import plan_idea_set
+
+        self._needs("ideas")
+        return self._write(lambda typed: plan_idea_set(typed, idea, status), dry_run, extra=self._state)
+
+    def _relocated(self, outcome) -> dict[str, Any]:
+        from dataclasses import asdict
+
+        report = getattr(outcome.plan, "report", None)
+        return {**self._state(outcome), "moved": dict(outcome.plan.renamed),
+                "rewritten": list(report.rewritten) if report else [],
+                "now_resolving": list(report.now_resolving) if report else [],
+                "self_links": [asdict(link) for link in report.self_links] if report else []}
+
+    def move(self, note: str, to: str, dry_run: bool = False) -> dict[str, Any]:
+        from vaultengine.formats.moves import plan_move
+
+        return self._write(lambda typed: plan_move(typed, note, to), dry_run, extra=self._relocated)
+
+    def merge(self, survivor: str, other: str, dry_run: bool = False) -> dict[str, Any]:
+        from vaultengine.formats.moves import plan_merge
+
+        return self._write(lambda typed: plan_merge(typed, survivor, other), dry_run, extra=self._relocated)
+
+    def next(self, limit: int | None = 10) -> dict[str, Any]:
+        """The queue of what needs doing, most trusted first; each item's ``command`` resolves it (CLI)."""
+        from vaultengine.formats.todo import Queue
+
+        spec = self._needs("pipeline")
+        findings = self._findings() if self.db_path.exists() else None
+        typed = self._reading()
+        try:
+            queue = Queue(typed, str(self.root), str(self.format_path), findings)
+            items = queue.items()
+        finally:
+            self._done(typed)
+        shown = items if limit is None else items[:limit]
+        return {"format": {"name": spec.name, "path": str(self.format_path)}, "total": len(items), "counts": queue.counts,
+                "items": [item.to_dict() for item in shown], "limit": limit}
 
     # ----- search, related notes, suggestions, unlinked mentions ----------
 

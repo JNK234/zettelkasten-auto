@@ -26,6 +26,11 @@ notes that are re-parsed or deleted (never recounted over the whole vault).
 
 Stored versions (schema, parser, search, resolver, alias setting, vault root)
 force a rebuild, full re-parse or full re-resolution when they change.
+
+The index also holds everything a parsed note contains (fields, external links,
+the raw frontmatter block, which field each link sits in), so a note can be
+rebuilt from it exactly without reading its file (``vaultengine.indexed``): that
+is what lets `vault pipeline` and `vault page check` answer from the index.
 """
 
 from __future__ import annotations
@@ -42,14 +47,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
-from vaultengine.model import BlockId, Heading, Link, ParsedNote
+from vaultengine.frontmatter import split_frontmatter
+from vaultengine.model import BlockId, Heading, Link, ParsedNote, field_kinds
 from vaultengine.parser import PARSER_VERSION, NoteLayout, normalize_text, parse_note_with_layout
 from vaultengine.resolver import RESOLVER_VERSION, Resolver
 from vaultengine.properties import body_fields
 from vaultengine.search import SEARCH_VERSION, note_fields, postings
 from vaultengine.vault import Vault, is_markdown, iter_vault_files, link_name, lookup_key
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 6  # 5: everything a ParsedNote holds (fields, external links, frontmatter block); 6: markers
 DEFAULT_DB_RELATIVE = Path(".vaultengine") / "index.sqlite"
 RACY_WINDOW_NS = 2_000_000_000
 RACY_MTIME = -1
@@ -76,7 +82,55 @@ CREATE TABLE notes (
     frontmatter_error TEXT,
     body_start_line   INTEGER NOT NULL,
     body_chars        INTEGER NOT NULL,     -- non-whitespace characters after frontmatter
-    line_count        INTEGER NOT NULL
+    line_count        INTEGER NOT NULL,
+    last_line         INTEGER NOT NULL,     -- ParsedNote.last_line
+    frontmatter_block TEXT                  -- the note's text up to the end of its frontmatter, NULL without one
+);
+
+-- Key: value header fields and key:: value inline fields (ParsedNote.header_fields / inline_fields).
+-- Their links and tags are the note's links inside [value_start, value_end) and its inline tags on that line.
+CREATE TABLE fields (
+    file_id     INTEGER NOT NULL REFERENCES files (id) ON DELETE CASCADE,
+    ordinal     INTEGER NOT NULL,
+    kind        TEXT NOT NULL CHECK (kind IN ('header', 'inline')),
+    key         TEXT NOT NULL,
+    value       TEXT NOT NULL,
+    line        INTEGER NOT NULL,
+    value_start INTEGER NOT NULL,
+    value_end   INTEGER NOT NULL,
+    PRIMARY KEY (file_id, ordinal)
+);
+
+-- The [[links]] and #tags in the value of the first header field of each key: "notes whose Tags has x".
+CREATE TABLE header_items (
+    file_id   INTEGER NOT NULL REFERENCES files (id) ON DELETE CASCADE,
+    key_key   TEXT NOT NULL,                -- lookup key of the field's key
+    kind      TEXT NOT NULL CHECK (kind IN ('link', 'tag')),
+    value_key TEXT NOT NULL                 -- lookup key of the link target or tag name
+);
+CREATE INDEX header_items_file ON header_items (file_id);
+CREATE INDEX header_items_value ON header_items (key_key, value_key);
+
+-- <!-- vault:name --> block markers (ParsedNote.markers).
+CREATE TABLE markers (
+    file_id  INTEGER NOT NULL REFERENCES files (id) ON DELETE CASCADE,
+    ordinal  INTEGER NOT NULL,
+    name     TEXT NOT NULL,
+    closing  INTEGER NOT NULL,
+    line     INTEGER NOT NULL,
+    content  INTEGER NOT NULL,
+    PRIMARY KEY (file_id, ordinal)
+);
+
+CREATE TABLE external_links (
+    file_id  INTEGER NOT NULL REFERENCES files (id) ON DELETE CASCADE,
+    ordinal  INTEGER NOT NULL,
+    raw      TEXT NOT NULL,
+    url      TEXT NOT NULL,
+    display  TEXT NOT NULL,
+    is_embed INTEGER NOT NULL,
+    line     INTEGER NOT NULL,
+    PRIMARY KEY (file_id, ordinal)
 );
 
 CREATE TABLE properties (
@@ -145,9 +199,11 @@ CREATE TABLE links (
     matched_by      TEXT,                   -- 'self' | 'path' | 'name' | 'alias'
     candidates      TEXT NOT NULL,          -- JSON array of paths when ambiguous
     subpath_status  TEXT,                   -- NULL | 'found' | 'missing' | 'not_checked'
+    field_kind      TEXT,                   -- NULL | 'header' | 'inline': the field value it sits in (model.field_kinds)
     UNIQUE (source_id, ordinal)
 );
 CREATE INDEX links_target ON links (target_id);
+CREATE INDEX links_source ON links (source_id, ordinal);
 CREATE INDEX links_target_key ON links (target_key);
 CREATE INDEX links_target_name_key ON links (target_name_key);
 
@@ -192,7 +248,8 @@ class IndexNeedsRebuild(RuntimeError):
     """A partial update was asked for, but the index must first be rebuilt with `vault index`."""
 
 
-_NOTE_CHILD_TABLES = ("notes", "properties", "aliases", "tags", "headings", "blocks", "postings", "field_lengths")
+_NOTE_CHILD_TABLES = ("notes", "properties", "aliases", "tags", "headings", "blocks", "postings", "field_lengths",
+                      "fields", "header_items", "external_links", "markers")
 
 
 def default_db_path(vault_root: str | Path) -> Path:
@@ -504,10 +561,35 @@ class VaultIndex:
     def _write_note(self, file_id: int, note: ParsedNote, text: str) -> None:
         conn = self.conn
         body = "\n".join(text.split("\n")[note.body_start_line - 1 :])
+        block = split_frontmatter(text)
         conn.execute(
-            "INSERT INTO notes (file_id, has_frontmatter, frontmatter_error, body_start_line, body_chars, line_count) VALUES (?, ?, ?, ?, ?, ?)",
+            """INSERT INTO notes (file_id, has_frontmatter, frontmatter_error, body_start_line, body_chars, line_count,
+                                  last_line, frontmatter_block) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             (file_id, note.has_frontmatter, note.frontmatter_error, note.body_start_line,
-             sum(1 for char in body if not char.isspace()), text.count("\n") + 1 if text else 0),
+             sum(1 for char in body if not char.isspace()), text.count("\n") + 1 if text else 0,
+             note.last_line, text[:block.end_offset] if block.present else None),
+        )
+        conn.executemany(
+            "INSERT INTO fields (file_id, ordinal, kind, key, value, line, value_start, value_end) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            [(file_id, index, kind, f.key, f.value, f.line, f.value_start, f.value_end)
+             for index, (kind, f) in enumerate([("header", f) for f in note.header_fields]
+                                                + [("inline", f) for f in note.inline_fields])],
+        )
+        first_fields = {}
+        for f in note.header_fields:  # a format reads the first field of a key (TypedVault._find_metadata)
+            first_fields.setdefault(lookup_key(f.key), f)
+        conn.executemany(
+            "INSERT INTO header_items (file_id, key_key, kind, value_key) VALUES (?, ?, ?, ?)",
+            [(file_id, key, kind, lookup_key(value)) for key, f in first_fields.items()
+             for kind, value in [("link", link.target) for link in f.links] + [("tag", tag) for tag in f.tags]],
+        )
+        conn.executemany(
+            "INSERT INTO markers (file_id, ordinal, name, closing, line, content) VALUES (?, ?, ?, ?, ?, ?)",
+            [(file_id, index, m.name, m.closing, m.line, m.content) for index, m in enumerate(note.markers)],
+        )
+        conn.executemany(
+            "INSERT INTO external_links (file_id, ordinal, raw, url, display, is_embed, line) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            [(file_id, index, e.raw, e.url, e.display, e.is_embed, e.line) for index, e in enumerate(note.external_links)],
         )
         conn.executemany(
             "INSERT INTO properties (file_id, key, value_json) VALUES (?, ?, ?)",
@@ -530,14 +612,16 @@ class VaultIndex:
             [(file_id, block.id, block.line) for block in note.block_ids],
         )
         links = sorted(note.links + note.embeds, key=lambda link: link.start)
+        kinds = field_kinds(note)
         conn.executemany(
             """INSERT INTO links (source_id, ordinal, syntax, is_embed, raw, target, heading_path, block_id, display,
-                                  line, start_offset, end_offset, target_key, target_name_key, status, candidates)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'unresolved', '[]')""",
+                                  line, start_offset, end_offset, target_key, target_name_key, status, candidates, field_kind)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'unresolved', '[]', ?)""",
             [
                 (file_id, index, link.syntax, link.is_embed, link.raw, link.target,
                  json.dumps(list(link.heading_path), ensure_ascii=False), link.block_id, link.display,
-                 link.line, link.start, link.end, lookup_key(link.target), _target_name_key(link.target))
+                 link.line, link.start, link.end, lookup_key(link.target), _target_name_key(link.target),
+                 kinds.get(link.start))
                 for index, link in enumerate(links)
             ],
         )

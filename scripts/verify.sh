@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Run every check of vaultengine + the vault CLI + vault-tui, and stop at the first failure.
 #
-#   scripts/verify.sh            everything (about 8 minutes)
+#   scripts/verify.sh            everything (about 11 minutes)
 #   scripts/verify.sh --quick    skip the two long test suites (pytest, npm test): CLI, API and app end to end only
 #
 # Needs the installs from docs/install.md: `uv sync` and `cd tui && npm ci`. What each step proves: docs/verify.md.
@@ -166,6 +166,232 @@ expect "$out" "  checked 1 note changed since the last index" "✗ 3 violations 
 json=$($VAULT check "$sample" --format brain --changed --json || true)
 expect "$json" '"ok": false' '"mode": "changed"'
 
+step "The core format, a baseline, the pipeline (vault check -f core --baseline, vault pipeline, vault note)"
+core="$scratch/core-vault"
+cp -Rp tests/fixtures/vault "$core"
+before=$(snapshot "$core")
+run_status 1 $VAULT check "$core" -f core
+expect "$out" "  checked 180 notes" "✗ 144 violations in 123 notes" "      83  too-few-links" "      43  missing-key"
+run_status 2 $VAULT check "$core" -f core --baseline
+expect "$out" "error: no baseline for format 'core'" "--update-baseline"
+unchanged "$core" "$before" "check and check --baseline without a baseline"
+run_status 0 $VAULT check "$core" -f core --update-baseline
+expect "$out" "Recorded a baseline of 144 violations: $core/.vaultengine/baseline-core.json"
+run_status 0 $VAULT check "$core" -f core --baseline
+expect "$out" "✓ no new violations in 180 notes checked (144 known violations in the baseline not shown)"
+mv "$core/20_ZETTLEKASTEN/reward.md" "$core/20_ZETTLEKASTEN/reward-signal.md"
+run_status 0 $VAULT check "$core" -f core --baseline
+expect "$out" "followed a renamed note (same text): 20_ZETTLEKASTEN/reward.md → 20_ZETTLEKASTEN/reward-signal.md"
+printf '%s\n' "Created: 09-11-2026 21:20" "Tags: [[rl-environment-design]]" "" "# No Source" "See [[kl-penalty-in-rlhf]]." \
+	>"$core/20_ZETTLEKASTEN/no-source.md"
+printf '%s\n' "Created: 09-11-2026 21:20" "Tags: [[rl-environment-design]]" "" "# Thin" "See [[no-source]]." \
+	>"$core/50_MOC/topics/thin.md"
+mkdir "$core/10_SOURCES/old" && printf 'x\n' >"$core/10_SOURCES/old/filed-away.md"
+run_status 1 $VAULT check "$core" -f core --baseline
+expect "$out" "✗ 3 new violations in 3 notes (144 known violations in the baseline not shown)" \
+	"      1  too-few-links        links to 0 source notes; a zettel needs at least 1" \
+	"      1  too-few-links        links to 1 zettel note; a page needs at least 3" \
+	"      1  untyped-note         no type matches this note, and every note in 10_SOURCES/ needs one"
+reject "$out" "missing-key"
+run_status 0 $VAULT check "$core" -f core --update-baseline
+expect "$out" "Recorded a baseline of 147 violations (it had 144)"
+run_status 0 $VAULT pipeline "$core" -f core
+expect "$out" "    compiled                3" "    extracted              12" "    ingested               13" \
+	"    in a page               6" "    on no source note      82   78 cite source notes that are not in the vault, 4 cite nothing" \
+	"Zettel notes no page includes (104)"
+run_status 0 $VAULT note "$core" "2412.14093 - Alignment Faking in Large Language Models" -f core
+expect "$out" "  stage      compiled" "      50_MOC/topics/emergent-misalignment-from-reward-hacking.md  (via alignment-faking-empirical)"
+run_status 1 $VAULT new "$core" -f core --type zettel --title "Graders Fail Inaction" --set "Tags=[[x]]"
+expect "$out" "too-few-links        links to 0 source notes"
+run_status 0 $VAULT new "$core" -f core --type zettel --title "Graders Fail Inaction" --set "Tags=[[x]]" --body "From [[RLHF]]."
+expect "$(cat "$core/20_ZETTLEKASTEN/graders-fail-inaction.md")" "Created: " "# Graders Fail Inaction" "From [[RLHF]]."
+
+step "Pages (vault page new, refresh, check)"
+pv="$scratch/page-vault"
+cp -Rp tests/fixtures/vault "$pv"
+ZS="[[cot-monitor-beats-action-monitor]] [[cot-monitorability-vs-faithfulness]] [[obfuscated-reward-hacking]] [[monitorability-tax]] [[reward-hacking-as-specification-gaming]]"
+before=$(snapshot "$pv")
+run_status 0 $VAULT page new "$pv" "Monitoring Reasoning" -f core --from "$ZS"
+expect "$out" "# Monitoring Reasoning" "<!-- vault:zettels -->" "### ai-safety" \
+	"- [[2503.11926 - Monitoring Reasoning Models (CoT Obfuscation)]] (cot-monitor-beats-action-monitor" \
+	"Not written: add --write to write it."
+unchanged "$pv" "$before" "vault page new without --write"
+run_status 0 $VAULT page new "$pv" "Monitoring Reasoning" -f core --from "$ZS" --write
+expect "$out" "+ 50_MOC/monitoring-reasoning.md" "+ 50_MOC/index.md" "+ 50_MOC/log.md" "check    no new violations"
+expect "$(cat "$pv/50_MOC/index.md")" "- [[monitoring-reasoning]]: Monitoring Reasoning (5 zettels, 1 source)"
+expect "$(cat "$pv/50_MOC/log.md")" "page new [[monitoring-reasoning]] (5 zettels, 1 source)"
+run_status 1 $VAULT check "$pv" -f core
+expect "$out" "✗ 144 violations in 123 notes"
+run_status 1 $VAULT page check "$pv" monitoring-reasoning -f core
+expect "$out" "✗ behind: 2 zettels with at least two of its tags or links in common, not on it" \
+	"20_ZETTLEKASTEN/reward-hacking-as-eval-false-positive.md   tags ai-safety · links obfuscated-reward-hacking"
+reject "$out" "block out of date" "changed since the last refresh"
+printf '\nMy own text, kept byte for byte.\n' >>"$pv/50_MOC/monitoring-reasoning.md"
+sed -i 's/^The monitorability tax is the cost you pay/The monitorability tax is the capability you give up/' "$pv/20_ZETTLEKASTEN/monitorability-tax.md"
+run_status 1 $VAULT page check "$pv" monitoring-reasoning -f core
+expect "$out" "✗ zettels block out of date" "changed       20_ZETTLEKASTEN/monitorability-tax.md"
+run_status 0 $VAULT page refresh "$pv" monitoring-reasoning -f core --write
+expect "$out" "rebuilt the zettels block (5 zettels)" "state    .vaultengine/pages.json"
+expect "$(tail -2 "$pv/50_MOC/monitoring-reasoning.md")" "My own text, kept byte for byte."
+run_status 1 $VAULT page check "$pv" monitoring-reasoning -f core
+reject "$out" "block out of date" "changed since the last refresh"
+before=$(snapshot "$pv")
+run_status 0 $VAULT page exclude "$pv" monitoring-reasoning model-awareness-of-intent-violation-while-cheating -f core
+unchanged "$pv" "$before" "vault page exclude without --write"
+run_status 0 $VAULT page exclude "$pv" monitoring-reasoning model-awareness-of-intent-violation-while-cheating -f core --write
+expect "$out" "Recorded in the engine state (page exclude)" "1 excluded"
+mkdir -p "$pv/50_MOC/topics" && mv "$pv/50_MOC/monitoring-reasoning.md" "$pv/50_MOC/topics/cot-monitoring.md"
+run_status 1 $VAULT page check "$pv" cot-monitoring -f core
+expect "$out" "= renamed from 50_MOC/monitoring-reasoning.md: its record followed it" "= 1 zettel excluded from it"
+reject "$out" "no record of its zettels" "model-awareness-of-intent-violation-while-cheating"
+
+step "Pages and the pipeline from the index (vault index; reads parse only what changed)"
+$VAULT index "$pv" >/dev/null
+run_status 1 $VAULT page check "$pv" cot-monitoring -f core
+reject "$out" "no usable index"
+expect "$out" "= renamed from 50_MOC/monitoring-reasoning.md"
+echo "An edit after the index." >>"$pv/20_ZETTLEKASTEN/reward-hacking-as-eval-false-positive.md"
+with_index=$($VAULT pipeline "$pv" -f core --json 2>&1)
+mv "$pv/.vaultengine/index.sqlite" "$scratch/index.sqlite.kept"
+without_index=$($VAULT pipeline "$pv" -f core --json 2>/dev/null)
+mv "$scratch/index.sqlite.kept" "$pv/.vaultengine/index.sqlite"
+[[ $with_index == "$without_index" ]] || fail "vault pipeline from the index differs from reading every file"
+ok "vault pipeline from a stale index equals reading every file"
+
+step "Findings and ideas (vault findings, vault idea new, vault idea set)"
+fv="$scratch/findings-vault"
+cp -Rp tests/fixtures/vault "$fv"
+$VAULT index "$fv" >/dev/null
+before=$(snapshot "$fv")
+run_status 0 $VAULT findings "$fv" -f core --limit 1
+expect "$out" "missing-note: a note many notes link to that does not exist (72)" \
+	"missing-32eacad6a1  [[reward-model-overoptimization-hump]] does not exist; 12 notes link to it" \
+	"name-5553fbc478  [[on-policy-vs-off-policy-learning]] is probably [[on-policy-versus-off-policy-learning]]" \
+	"link-5ec0974343  [[in-context-scheming-capability]] and [[sandbagging-strategic-underperformance]]"
+run_status 0 $VAULT idea new "$fv" --from link-5ec0974343 -f core
+expect "$out" "- id: link-5ec0974343" "Status: #open" "Not written: add --write to write it."
+unchanged "$fv" "$before" "vault findings and vault idea new without --write"
+run_status 0 $VAULT idea new "$fv" --from link-5ec0974343 -f core --write
+expect "$out" "+ 50_MOC/ideas/in-context-scheming-capability and sandbagging-strategic-underperformance.md" "check    no new violations"
+run_status 1 $VAULT check "$fv" -f core
+expect "$out" "✗ 144 violations in 123 notes"
+run_status 1 $VAULT new "$fv" -f core --type idea --title "Just a thought" --set "Tags=[[x]]"
+expect "$out" "missing-block        no finding block"
+run_status 0 $VAULT idea set "$fv" "in-context-scheming-capability and sandbagging-strategic-underperformance" done -f core --write
+run_status 1 $VAULT idea set "$fv" "in-context-scheming-capability and sandbagging-strategic-underperformance" parked -f core --write
+expect "$out" "Status: #parked is not an allowed value (open, dropped, done)"
+run_status 0 $VAULT findings "$fv" -f core --id link-5ec0974343
+expect "$out" "link-5ec0974343"
+
+step "Move, merge and the queue (vault merge, vault move, vault next)"
+mv_vault="$scratch/move-vault"
+cp -Rp tests/fixtures/vault "$mv_vault"
+$VAULT index "$mv_vault" >/dev/null
+before=$(snapshot "$mv_vault")
+run_status 0 $VAULT merge "$mv_vault" on-policy-versus-off-policy-learning on-policy-vs-off-policy-learning -f core
+expect "$out" "Would merge: links to [[on-policy-vs-off-policy-learning]] (no note) -> 20_ZETTLEKASTEN/on-policy-versus-off-policy-learning.md" \
+	"links    5 links rewritten in 5 notes" "check    no new violations" "Not written: add --write to write it."
+unchanged "$mv_vault" "$before" "vault merge without --write"
+run_status 0 $VAULT merge "$mv_vault" on-policy-versus-off-policy-learning on-policy-vs-off-policy-learning -f core --write
+expect "$out" "Did merge:" "index    updated 5 notes"
+expect "$($VAULT health "$mv_vault")" "unresolved links                      1310   across 611 missing targets" \
+	"ambiguous links                          0" "missing heading/block targets            0"
+run_status 0 $VAULT move "$mv_vault" kl-penalty-in-rlhf kl-penalty-in-rlhf-renamed -f core --write
+expect "$out" "rename 20_ZETTLEKASTEN/kl-penalty-in-rlhf.md -> 20_ZETTLEKASTEN/kl-penalty-in-rlhf-renamed.md" "check    no new violations"
+expect "$($VAULT health "$mv_vault")" "unresolved links                      1310" "ambiguous links                          0"
+run_status 1 $VAULT move "$mv_vault" kl-penalty-in-rlhf-renamed 20_ZETTLEKASTEN/drafts/ -f core --write
+expect "$out" "untyped-note"
+run_status 0 $VAULT next "$mv_vault" -f core
+expect "$out" " 1. write    write [[transcript-spotting-heuristics-for-reward-hacking]]" "run  vault new" "By kind (listed / all):"
+run_status 0 $VAULT note "$mv_vault" kl-penalty-in-rlhf-renamed -f core
+expect "$out" "trust      "
+# A merge drops the links that would point at the note they are in (here a list item holding only [[B]] in A).
+run_status 0 $VAULT merge "$mv_vault" enterprise-agent-evaluation-challenges pass-hat-k-reliability-metric -f core
+expect "$out" "self     1 link would point at the note it is in: dropped" \
+	"20_ZETTLEKASTEN/enterprise-agent-evaluation-challenges.md:31  [[pass-hat-k-reliability-metric]] -> line removed"
+run_status 0 $VAULT merge "$mv_vault" enterprise-agent-evaluation-challenges pass-hat-k-reliability-metric -f core --write
+survivor=$(cat "$mv_vault/20_ZETTLEKASTEN/enterprise-agent-evaluation-challenges.md")
+expect "$survivor" "## Merged from pass-hat-k-reliability-metric"
+reject "$survivor" "[[pass-hat-k-reliability-metric]]" "[[enterprise-agent-evaluation-challenges]]"
+expect "$($VAULT health "$mv_vault")" "ambiguous links                          0" "missing heading/block targets            0"
+
+step "Findings scale, and are the pair-by-pair implementation's (tests/fixtures/findings/sample_reference.json)"
+$PY -m pytest -q tests/test_vaultengine_findings.py -k SameAsPairByPair
+
+step "The reading workflow of docs/workflow.md (ingest, new, note, pipeline, page, findings, idea, next): its commands"
+wf="$scratch/wf-vault"
+cp -Rp tests/fixtures/vault "$wf"
+run_status 0 $VAULT index "$wf"
+run_status 0 $VAULT check "$wf" -f core --update-baseline
+expect "$out" "Recorded a baseline of 144 violations"
+printf '%s\n' '---' 'title: Verifier Gaming in Agentic RL' 'url: https://example.org/verifier-gaming' '---' \
+	'Agents trained against automatic verifiers learn to satisfy the verifier rather than the task. The paper' \
+	'collects 40 cases across coding and web environments and sorts them into three kinds: tests the agent can' \
+	'edit, graders that read only the final message, and rubrics scored by a model that can be flattered.' '' \
+	'A do-nothing baseline catches most of them: if an agent that takes no action scores above zero, the' \
+	'grader is checking the wrong thing.' >"$scratch/paper.md"
+run_status 1 $VAULT ingest "$wf" "$scratch/paper.md" -f core --as source --dry-run
+expect "$out" "2  missing-value        'Tags' is empty"
+T="[[reward-hacking]] [[evaluation-methodology]]"
+run_status 0 $VAULT ingest "$wf" "$scratch/paper.md" -f core --as source --set "Tags=$T" --dry-run
+expect "$out" "+Source: https://example.org/verifier-gaming" "Dry run: nothing was written."
+run_status 0 $VAULT ingest "$wf" "$scratch/paper.md" -f core --as source --set "Tags=$T"
+expect "$out" "+ 10_SOURCES/Verifier Gaming in Agentic RL.md" "check    no new violations" "index    updated 1 note"
+run_status 1 $VAULT new "$wf" -f core --type zettel --title "Graders should see the final state" --set "Tags=[[reward-hacking]]" \
+	--body "Check what the agent left, not what it said." --dry-run
+expect "$out" "too-few-links        links to 0 source notes; a zettel needs at least 1"
+run_status 0 $VAULT new "$wf" -f core --type zettel --title "A do-nothing agent is the cheapest grader test" --set "Tags=$T" \
+	--body "If an agent that takes no action scores above zero, the grader checks the wrong thing. From [[Verifier Gaming in Agentic RL]]."
+expect "$out" "+ 20_ZETTLEKASTEN/a-do-nothing-agent-is-the-cheapest-grader-test.md"
+run_status 0 $VAULT new "$wf" -f core --type zettel --title "Editable tests are a reward channel" --set "Tags=$T" \
+	--body "When the agent can write to the test files, passing the tests stops meaning the task is done. From [[Verifier Gaming in Agentic RL]]."
+run_status 0 $VAULT new "$wf" -f core --type zettel --title "Final-message graders reward confident summaries" --set "Tags=$T" \
+	--body "A grader that reads only the last message pays for claims, not for the state the agent left. From [[Verifier Gaming in Agentic RL]]."
+run_status 0 $VAULT note "$wf" "Verifier Gaming in Agentic RL" -f core
+expect "$out" "stage      extracted" "zettels    3 zettels"
+run_status 0 $VAULT pipeline "$wf" -f core --limit 3
+expect "$out" "    extracted              13   a zettel links to it, no page uses those yet" "Zettel notes no page includes (107)"
+Z="[[a-do-nothing-agent-is-the-cheapest-grader-test]] [[editable-tests-are-a-reward-channel]] [[final-message-graders-reward-confident-summaries]]"
+before=$(snapshot "$wf")
+run_status 0 $VAULT page new "$wf" "Grader gaming" --from "$Z" -f core
+expect "$out" "Would write 3 notes (page new):" "Not written: add --write to write it."
+unchanged "$wf" "$before" "vault page new without --write"
+run_status 0 $VAULT page new "$wf" "Grader gaming" --from "$Z" -f core --write
+expect "$out" "+ 50_MOC/grader-gaming.md" "check    no new violations"
+run_status 1 $VAULT page check "$wf" grader-gaming -f core
+expect "$out" "20_ZETTLEKASTEN/reward-hacking-as-eval-false-positive.md   tags reward-hacking, evaluation-methodology"
+# Your paragraph under the title links the zettel the page is behind on (docs/workflow.md, step 4).
+$PY - "$wf/50_MOC/grader-gaming.md" <<'PYEOF'
+import sys
+path = sys.argv[1]
+text = open(path, encoding="utf-8").read()
+para = ("Every grader here checks a proxy the agent can reach, so a pass is a false positive of the eval:\n"
+        "[[reward-hacking-as-eval-false-positive]].\n")
+open(path, "w", encoding="utf-8").write(text.replace("# Grader gaming\n", "# Grader gaming\n\n" + para, 1))
+PYEOF
+run_status 1 $VAULT page check "$wf" grader-gaming -f core
+expect "$out" "✗ zettels block out of date" "✗ behind: 7 zettels"
+run_status 0 $VAULT page refresh "$wf" grader-gaming -f core --write
+expect "$out" "rebuilt the zettels and sources blocks (4 zettels)"
+run_status 0 $VAULT page exclude "$wf" grader-gaming environment-and-eval-are-the-same-object eval-precision-vs-eval-validity \
+	grader-failure-routing llm-judge-position-bias measurement-correction-inflates-apparent-agent-progress \
+	model-awareness-of-intent-violation-while-cheating ostensible-positives-from-low-entropy-answer-spaces -f core --write
+expect "$out" "50_MOC/grader-gaming.md: 4 zettels recorded, 7 excluded"
+run_status 0 $VAULT page check "$wf" grader-gaming -f core
+expect "$out" "✓ ready to write: blocks up to date, zettels as recorded, nothing behind, in the index, no violations"
+run_status 0 $VAULT findings "$wf" -f core --method link --limit 2
+expect "$out" "link-e0e1ed4ecd  [[a-do-nothing-agent-is-the-cheapest-grader-test]] and [[final-message-graders-reward-confident-summaries]]" \
+	"cited together by: grader-gaming"
+run_status 0 $VAULT idea new "$wf" --from link-e0e1ed4ecd --title "Graders that never look at the state" -f core
+expect "$out" "- id: link-e0e1ed4ecd" "Not written: add --write to write it."
+run_status 0 $VAULT idea new "$wf" --from link-e0e1ed4ecd --title "Graders that never look at the state" -f core --write
+expect "$out" "+ 50_MOC/ideas/Graders that never look at the state.md"
+run_status 0 $VAULT next "$wf" -f core --limit 3
+expect "$out" "1. write    write [[transcript-spotting-heuristics-for-reward-hacking]]" \
+	"idea        1 / 1    open ideas nothing builds on"
+run_status 0 $VAULT check "$wf" -f core --baseline
+expect "$out" "✓ no new violations in 188 notes checked (144 known violations in the baseline not shown)"
+
 step "Fix: dry run first, then apply (vault fix)"
 before=$(snapshot "$sample")
 run_status 0 $VAULT fix "$sample" --format brain --dry-run
@@ -272,6 +498,28 @@ expect "$(grep '^supported-by::' "$fresh/$D/$CLM.md")" "[[$EVD]]"
 rpc=$(printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"vault.check"}' | $VAULT serve "$fresh" 2>/dev/null)
 expect "$rpc" '"error":{"code":-32003'
 
+step "JSON-RPC reading-workflow methods (vault serve --format core)"
+core_rpc="$scratch/core-rpc-vault"
+cp -Rp tests/fixtures/vault "$core_rpc"
+$VAULT index "$core_rpc" >/dev/null
+before=$(snapshot "$core_rpc")
+rpc=$(printf '%s\n' \
+	'{"jsonrpc":"2.0","id":1,"method":"vault.check","params":{"baseline":true}}' \
+	'{"jsonrpc":"2.0","id":2,"method":"vault.pipeline","params":{"limit":1}}' \
+	'{"jsonrpc":"2.0","id":3,"method":"findings.list","params":{"methods":["link"],"limit":1}}' \
+	'{"jsonrpc":"2.0","id":4,"method":"note.merge","params":{"survivor":"enterprise-agent-evaluation-challenges","other":"pass-hat-k-reliability-metric","dry_run":true}}' \
+	'{"jsonrpc":"2.0","id":5,"method":"page.check","params":{}}' \
+	'{"jsonrpc":"2.0","id":6,"method":"vault.next","params":{"limit":1}}' |
+	$VAULT serve "$core_rpc" --format core 2>/dev/null)
+expect "$rpc" '"id":1,"error":{"code":-32007' '"stages":{"ingested":13,"extracted":12,"compiled":3}' \
+	'"total":13,"by_method":{"link":13}' '"action":"line removed"' '"managed":0' '"id":6,"result":{"format":{"name":"core"'
+unchanged "$core_rpc" "$before" "reads and dry runs over JSON-RPC"
+rpc=$(printf '%s\n' \
+	'{"jsonrpc":"2.0","id":1,"method":"vault.check","params":{"update_baseline":true,"limit":1}}' \
+	'{"jsonrpc":"2.0","id":2,"method":"vault.check","params":{"baseline":true}}' |
+	$VAULT serve "$core_rpc" --format core 2>/dev/null)
+expect "$rpc" '"recorded_now":true' '"id":2,"result":{"format":{"name":"core"' '"ok":true'
+
 if [[ $QUICK == 0 ]]; then
 	step "App: generated types, unit, frame and integration tests (npm test)"
 	(cd tui && npm test)
@@ -280,7 +528,7 @@ fi
 step "App: type check"
 (cd tui && npm run typecheck)
 
-step "App: end to end in a real pseudo-terminal (/health; /check, /coverage, /link, /check changed)"
+step "App: end to end in a real pseudo-terminal (/health; /check, /coverage, /link, /check changed; /pipeline, /findings, /merge, /check baseline, /next)"
 (cd tui && npm run test:e2e)
 
 printf '\n\033[32mALL CHECKS PASSED\033[0m\n'

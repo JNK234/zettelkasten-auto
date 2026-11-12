@@ -92,9 +92,9 @@ class Relatedness:
 
     def __init__(self, conn: sqlite3.Connection) -> None:
         self.conn = conn
-        self.graph: Graph = build_graph(conn)
-        self.searcher = _Searcher(conn, fuzzy=False)
-        self.n_notes = self.searcher.n_notes
+        self._graph: Graph | None = None
+        self._searcher: _Searcher | None = None
+        self.n_notes = conn.execute("SELECT COUNT(*) FROM files WHERE kind = 'note'").fetchone()[0]
         self.paths = {row[0]: row[1] for row in conn.execute("SELECT id, path FROM files WHERE kind = 'note'")}
         self._profiles: dict[int, dict[str, float]] = {}
         self.df = dict(conn.execute("SELECT term, df FROM terms"))
@@ -116,6 +116,19 @@ class Relatedness:
             for file_id, texts in headings.items()
         }
 
+    @property
+    def graph(self) -> Graph:
+        """The link graph, built on first use (term profiles and link suggestions do not need it)."""
+        if self._graph is None:
+            self._graph = build_graph(self.conn)
+        return self._graph
+
+    @property
+    def searcher(self) -> _Searcher:
+        if self._searcher is None:
+            self._searcher = _Searcher(self.conn, fuzzy=False)
+        return self._searcher
+
     # -- seeds --
 
     def term_profile(self, file_id: int) -> dict[str, float]:
@@ -127,10 +140,25 @@ class Relatedness:
         """Term profiles of every note, read from the index in one pass (and cached)."""
         missing = set(self.paths) - set(self._profiles)
         if missing:
+            # The same sums as ``_add``, without a method call per row.
             weighted: dict[int, Counter[str]] = defaultdict(Counter)
-            for file_id, term, name, tf in self.conn.execute("SELECT file_id, term, field, tf FROM postings WHERE field != 'tags'"):
-                if file_id in missing:
-                    self._add(weighted[file_id], file_id, term, name, tf)
+            cursor = self.conn.cursor()
+            cursor.row_factory = None
+            field_weights = FIELD_WEIGHTS
+            templates = self.template_terms
+            empty: Counter[str] = Counter()
+            # Only terms ``_score`` keeps (2 <= df <= N/2) are read, term by term: a profile's terms come in another
+            # order than one note's rows would give, which nothing sees (profiles are used through ``_top``, which
+            # sorts them), and each term's fields are summed in the same order, so the weights are the same.
+            rows = cursor.execute("SELECT p.file_id, p.term, p.field, p.tf FROM terms t CROSS JOIN postings p ON p.term = t.term "
+                                  "WHERE p.field != 'tags' AND t.df >= 2 AND t.df <= ?", (self.n_notes / 2,))
+            for file_id, term, name, tf in rows:
+                if file_id not in missing:
+                    continue
+                if name == "headings":
+                    tf -= templates.get(file_id, empty)[term]
+                if tf > 0:
+                    weighted[file_id][term] += field_weights[name] * tf
             for file_id in missing:
                 self._profiles[file_id] = self._score(weighted.get(file_id, Counter()))
         return {f: self._profiles[f] for f in self.paths}

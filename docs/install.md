@@ -18,6 +18,8 @@ source .venv/bin/activate        # puts `vault` on PATH
 cd tui && npm ci && npm run build && npm link && cd ..   # puts `vault-tui` on PATH
 ```
 
+Or all of it in one go, with the offline fallback below built in: `source scripts/setup.sh` (it also activates the venv).
+
 `uv sync` also installs `torch`/`sentence-transformers` for the zettel tool's embeddings (several GB on Linux, about 5 minutes).
 The engine, CLI and app don't need them. 
 Offline or behind a proxy: `npm ci` builds `node-pty` with node-gyp, which downloads the Node.js headers from nodejs.org.

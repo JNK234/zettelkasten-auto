@@ -22,6 +22,9 @@ Issue codes:
   relation-target-type                   a relation pointing at a note of the wrong type
   missing-mirror                         A supports B but B lacks ``supported-by:: [[A]]``
                                          (reported on B, the note to edit; ``related`` is A)
+  too-few-links                          fewer links to notes of a type than the type's ``min_links``
+  untyped-note                           a note inside a ``typed_folders`` folder that no type matches
+  missing-block                          a required ``<!-- vault:NAME -->`` block that is absent, broken or empty
 
 Every issue has a line. For something missing, it is the line where it belongs:
 the heading a missing heading should precede (or the last line), the relation
@@ -39,7 +42,7 @@ from typing import Any, Literal
 
 from vaultengine.formats.spec import FormatSpec, MetadataKey, NoteType, relation_key
 from vaultengine.graph import LinkGraph
-from vaultengine.model import HeaderField, Heading, Link, ParsedNote
+from vaultengine.model import HeaderField, Heading, Link, ParsedNote, field_kinds  # noqa: F401 (re-exported)
 from vaultengine.resolver import ResolvedLink
 from vaultengine.vault import Vault, link_name, lookup_key
 
@@ -138,6 +141,27 @@ class RoledLink:
         }
 
 
+def violation_keys(issue: Issue) -> list[tuple[str, ...]]:
+    """What a violation is about, without line numbers (edits move lines) and without counts
+    that change as a note improves: the write gate and ``vault check --baseline`` compare
+    violations by these keys. A violation has several keys when it is about several things
+    (one per missing heading), so it is new if any of them is."""
+    detail = issue.detail or {}
+    if issue.code == "missing-heading":
+        return [(issue.path, issue.code, name) for name in detail.get("headings", [])]
+    if issue.code == "missing-mirror":
+        return [(issue.path, issue.code, detail["relation"], detail["source"])]
+    if issue.code == "heading-order":
+        return [(issue.path, issue.code)]
+    if issue.code == "too-few-links":
+        return [(issue.path, issue.code, detail["type"])]
+    if issue.code == "untyped-note":
+        return [(issue.path, issue.code)]
+    if issue.code == "missing-block":
+        return [(issue.path, issue.code, detail["block"])]
+    return [(issue.path, issue.code, issue.message)]
+
+
 def _section_chain(headings: list[Heading], line: int) -> list[Heading]:
     """Headings enclosing ``line``, innermost first. A link on a heading line belongs to that heading."""
     stack: list[Heading] = []
@@ -150,54 +174,160 @@ def _section_chain(headings: list[Heading], line: int) -> list[Heading]:
     return stack[::-1]
 
 
+_PHASES = ("relations", "note", "mirror", "untyped", "min_links")
+
+
 class TypedVault:
+    """A vault seen through a format. Everything is worked out per note, on first use, so asking
+    about one note reads only what that note's rules need; asking for every issue reads every note.
+    The results are the same either way.
+
+    ``graph`` gives each note's resolved links (``outgoing``), the notes linking to a note
+    (``backlink_sources``), and for both whether each link sits in a header or inline field
+    (``outgoing_fields``, ``incoming_fields``): ``LinkGraph`` from parsed notes, or an
+    index-backed graph (``vaultengine.formats.indexed``) that reads the SQLite index instead.
+    """
+
     def __init__(self, spec: FormatSpec, vault: Vault, graph: LinkGraph | None = None) -> None:
         self.spec = spec
         self.vault = vault
         self.graph = graph or LinkGraph(vault)
-        self._edges: dict[tuple[str, int], ResolvedLink] = {
-            (edge.source, edge.link.start): edge for edge in self.graph.edges
-        }
-        self._types: dict[str, NoteType | None] = {path: spec.type_for(path) for path in vault.notes}
-        self._heading_levels = self._usual_heading_levels()
-        self._issues: dict[str, list[Issue]] = defaultdict(list)
+        self._types: dict[str, NoteType | None] = {}
+        self._heading_levels_cache: dict[tuple[str, int], int] | None = None
+        self._phases: dict[str, dict[str, list[Issue]]] = defaultdict(lambda: {name: [] for name in _PHASES})
+        self._done: dict[str, set[str]] = defaultdict(set)
+        self._sink: list[str] = []
         self._declared: dict[str, list[RelationEdge]] = defaultdict(list)
         self._mirrors: dict[str, list[RelationEdge]] = defaultdict(list)
         self._metadata: dict[str, dict[str, MetadataValue]] = {}
-        for path in sorted(vault.notes):
-            self._read_note(path)
-        self._link_mirrors()
+        self._edge_maps: dict[str, dict[int, ResolvedLink]] = {}
+        self._note_links: dict[str, list[str]] = {}
+        self._linked_from: dict[str, list[str]] = {}
+        self._mirror_sources = any(r.inverse is not None for r in spec.relations.values())
 
     # ----- lookups ---------------------------------------------------------------
 
+    def _type(self, path: str) -> NoteType | None:
+        if path not in self._types:
+            self._types[path] = self.spec.type_for(path) if path in self.vault.notes else None
+        return self._types[path]
+
     def type_of(self, path: str) -> str | None:
-        note_type = self._types.get(path)
+        note_type = self._type(path)
         return note_type.name if note_type else None
 
     def notes_of_type(self, name: str) -> list[str]:
-        return sorted(path for path, note_type in self._types.items() if note_type and note_type.name == name)
+        return sorted(path for path in self.vault.notes if self.type_of(path) == name)
 
     @property
     def untyped(self) -> list[str]:
-        return sorted(path for path, note_type in self._types.items() if note_type is None)
+        """Notes no type matches, except those in ignored folders."""
+        return sorted(path for path in self.vault.notes if self._type(path) is None and not self.is_ignored(path))
+
+    @property
+    def ignored(self) -> list[str]:
+        """Notes in the format's ``ignored_folders``: no type, no violations."""
+        return sorted(path for path in self.vault.notes if self.is_ignored(path))
+
+    def is_ignored(self, path: str) -> bool:
+        if not self.spec.ignored_folders:
+            return False
+        known = self.__dict__.setdefault("_ignored", {})  # path -> answer: it depends on the path and the format only
+        if path not in known:
+            known[path] = self.spec.is_ignored(path)
+        return known[path]
+
+    # ----- who links to whom -------------------------------------------------------------
+
+    def _metadata_links(self, path: str) -> bool:
+        """Whether links in the note's header fields are metadata values (they file the note, not cite)."""
+        note_type = self._type(path)
+        return note_type is not None and note_type.metadata_source != "frontmatter"
+
+    def note_links(self, path: str) -> list[str]:
+        """The distinct notes ``path`` links to, in order of first link.
+
+        Links and embeds anywhere in the note count, relation fields included. Not
+        counted: links in metadata values (``Tags: [[x]]``: they file the note, they do
+        not cite), links that match no note or several, links to attachments, self-links.
+        This is the one definition of "links to" behind ``min_links``, `vault pipeline`
+        and `vault note`.
+        """
+        if path not in self._note_links:
+            metadata = self._metadata_links(path)
+            targets: list[str] = []
+            for target, status, kind in self.graph.outgoing_fields(path):
+                if (status != "resolved" or target is None or target == path or target not in self.vault.notes
+                        or target in targets or (kind == "header" and metadata)):
+                    continue
+                targets.append(target)
+            self._note_links[path] = targets
+        return list(self._note_links[path])
+
+    def linked_from(self, path: str) -> list[str]:
+        """The distinct notes whose ``note_links`` include ``path``, sorted by path."""
+        if path not in self._linked_from:
+            found = set()
+            if path in self.vault.notes:
+                for source, kind in self.graph.incoming_fields(path):
+                    if source != path and source in self.vault.notes and not (kind == "header" and self._metadata_links(source)):
+                        found.add(source)
+            self._linked_from[path] = sorted(found)
+        return list(self._linked_from[path])
+
+    def section_role(self, path: str, line: int) -> str | None:
+        """The link role of the innermost section around ``line`` that has one (for text
+        such as an external URL, which is not a note link)."""
+        note_type = self._type(path)
+        roles = (note_type.link_roles if note_type else ()) + self.spec.link_roles
+        chain = _section_chain(self.vault.notes[path].headings, line)
+        return next((name for heading in chain for name, pattern in roles if pattern.matches(heading.text)), None)
 
     def metadata(self, path: str) -> dict[str, MetadataValue]:
         """Declared metadata keys found in the note, by the key name used in the format."""
+        self._ensure(path, "note")
         return dict(self._metadata.get(path, {}))
 
     def relations(self, path: str, mirrors: bool = True) -> list[RelationEdge]:
         """Relations of ``path``: the ones it declares, then the ones implied by mirror pairs."""
+        self._ensure(path, "relations")
+        if mirrors:
+            self._ensure(path, "mirror")
         return list(self._declared.get(path, [])) + (list(self._mirrors.get(path, [])) if mirrors else [])
 
     def issues(self, path: str | None = None) -> list[Issue]:
         """Issues of one note, or of all notes, ordered by path and line."""
-        paths = [path] if path is not None else sorted(self._issues)
-        return [issue for key in paths for issue in sorted(self._issues.get(key, []), key=lambda i: i.line)]
+        paths = [path] if path is not None else sorted(self.vault.notes)
+        if path is None:
+            self.prefetch(paths)
+        result = []
+        for key in paths:
+            for phase in _PHASES:
+                self._ensure(key, phase)
+            if key in self._phases:
+                found = [issue for phase in _PHASES for issue in self._phases[key][phase]]
+                result.extend(sorted(found, key=lambda i: i.line))
+        return result
+
+    def prefetch(self, paths: list[str]) -> None:
+        """Read what ``paths`` need in a few batches when the vault is index-backed (a no-op otherwise)."""
+        if hasattr(self.vault.notes, "prefetch"):
+            self.vault.notes.prefetch(paths)
+        if hasattr(self.graph, "prefetch_rows"):
+            self.graph.prefetch_rows(paths)
+        if hasattr(self.graph, "prefetch"):
+            self.graph.prefetch()
+
+    def _edges_of(self, path: str) -> dict[int, ResolvedLink]:
+        if path not in self._edge_maps:
+            self._edge_maps[path] = {edge.link.start: edge for edge in self.graph.outgoing(path)}
+        return self._edge_maps[path]
 
     def links(self, path: str) -> list[RoledLink]:
         """Every link and embed of the note, in order, with its role."""
         note = self.vault.notes[path]
-        note_type = self._types.get(path)
+        note_type = self._type(path)
+        edges = self._edges_of(path)
         spans: list[tuple[int, int, str | None, str]] = []
         for field in note.inline_fields:
             relation = self.spec.relation(field.key)
@@ -211,7 +341,7 @@ class TypedVault:
 
         result = []
         for link in sorted(note.links + note.embeds, key=lambda item: item.start):
-            edge = self._edges[(path, link.start)]
+            edge = edges[link.start]
             chain = _section_chain(note.headings, link.line)
             section = chain[0].text if chain else None
             span = next((s for s in spans if s[0] <= link.start and link.end <= s[1]), None)
@@ -222,19 +352,59 @@ class TypedVault:
             result.append(RoledLink(edge, role, section, "section" if role else None))
         return result
 
+    # ----- working out one note, one phase at a time --------------------------------------------
+
+    def _ensure(self, path: str, phase: str) -> None:
+        """Compute ``phase`` for ``path`` once (and what it needs). Issues go to that phase's list,
+        and ``issues()`` concatenates the phases in a fixed order, so the result does not depend on
+        the order notes were asked about."""
+        if phase in self._done[path]:
+            return
+        self._done[path].add(phase)
+        needs = {"note": ("relations",), "mirror": ("relations",)}.get(phase, ())
+        for first in needs:
+            self._ensure(path, first)
+        self._sink.append(phase)
+        try:
+            if phase == "relations":
+                if not self.is_ignored(path):  # outside the format: not even its fields are read
+                    self._read_relations(path, self.vault.notes[path], self._type(path))
+            elif phase == "note":
+                self._read_note(path)
+            elif phase == "mirror":
+                self._mirror_phase(path)
+            elif phase == "untyped":
+                self._check_untyped(path)
+            elif phase == "min_links":
+                self._check_min_links(path)
+        finally:
+            self._sink.pop()
+
+    def _ensure_all(self) -> None:
+        for path in sorted(self.vault.notes):
+            for phase in _PHASES:
+                self._ensure(path, phase)
+
     # ----- reading one note ------------------------------------------------------------
 
     def _issue(self, path: str, code: str, message: str, line: int, related: str | None = None,
                detail: dict[str, Any] | None = None) -> None:
-        self._issues[path].append(Issue(path, code, message, line, related, detail))
+        self._phases[path][self._sink[-1]].append(Issue(path, code, message, line, related, detail))
 
     # ----- placement (shared by the checks and `vault fix`) ----------------------------------
+
+    @property
+    def _heading_levels(self) -> dict[tuple[str, int], int]:
+        if self._heading_levels_cache is None:
+            self._heading_levels_cache = self._usual_heading_levels()
+        return self._heading_levels_cache
 
     def _usual_heading_levels(self) -> dict[tuple[str, int], int]:
         """(type, index of required heading) -> the level that heading has in most notes of the type."""
         counts: dict[tuple[str, int], Counter[int]] = defaultdict(Counter)
-        for path, note_type in self._types.items():
-            if note_type is None:
+        for path in sorted(self.vault.notes):
+            note_type = self._type(path)
+            if note_type is None or not note_type.headings:
                 continue
             for index, pattern in enumerate(note_type.headings):
                 heading = next((h for h in self.vault.notes[path].headings if pattern.matches(h.text)), None)
@@ -253,7 +423,7 @@ class TypedVault:
         if none follows, at the end of the note. Its level is the one the heading
         has in most notes of the type, else the level of its neighbours, else 2.
         """
-        note_type = self._types.get(path)
+        note_type = self._type(path)
         if note_type is None:
             return []
         note = self.vault.notes[path]
@@ -291,7 +461,7 @@ class TypedVault:
             return RelationAnchor("append", same[-1].line, empty_value=not same[-1].value)
         if fields:
             return RelationAnchor("after", fields[-1].line)
-        note_type = self._types.get(path)
+        note_type = self._type(path)
         if note_type is not None and note_type.relations_heading is not None:
             heading = next((h for h in note.headings if note_type.relations_heading.matches(h.text)), None)
             if heading is not None:
@@ -302,9 +472,11 @@ class TypedVault:
         return note.header_fields[0].line if note.header_fields else note.body_start_line
 
     def _read_note(self, path: str) -> None:
+        """Headings, metadata and required relations (after ``_read_relations``)."""
+        if self.is_ignored(path):
+            return
         note = self.vault.notes[path]
-        note_type = self._types[path]
-        self._read_relations(path, note, note_type)
+        note_type = self._type(path)
         if note_type is None:
             return
         self._check_headings(path, note, note_type)
@@ -314,6 +486,8 @@ class TypedVault:
             if value is not None:
                 self._metadata[path][key.name] = value
             self._check_metadata(path, key, value)
+        for block in note_type.required_blocks:
+            self._check_block(path, note, block)
         declared = {edge.relation for edge in self._declared.get(path, [])}
         for name in note_type.relations_required:
             if name not in declared:
@@ -322,6 +496,20 @@ class TypedVault:
                     path, "missing-relation", f"missing relation field `{name}::` (required for {note_type.name})",
                     anchor.line if anchor else self._header_line(note),
                 )
+
+    def _check_block(self, path: str, note: ParsedNote, name: str) -> None:
+        """A required ``<!-- vault:NAME -->`` … ``<!-- /vault:NAME -->`` block: there, well-formed, not empty."""
+        opens = [m for m in note.markers if m.name == name and not m.closing]
+        closes = [m for m in note.markers if m.name == name and m.closing]
+        shape = f"<!-- vault:{name} --> … <!-- /vault:{name} -->"
+        if not opens and not closes:
+            self._issue(path, "missing-block", f"no {name} block ({shape})", self._header_line(note), detail={"block": name})
+        elif len(opens) != 1 or len(closes) != 1 or closes[0].line < opens[0].line:
+            self._issue(path, "missing-block",
+                        f"the {name} block's markers are not one opening followed by one closing ({shape})",
+                        (opens or closes)[0].line, detail={"block": name})
+        elif not any(m.content for m in note.markers if opens[0].line <= m.line < closes[0].line):
+            self._issue(path, "missing-block", f"the {name} block is empty", opens[0].line, detail={"block": name})
 
     def _check_headings(self, path: str, note: ParsedNote, note_type: NoteType) -> None:
         found: list[tuple[str, Heading]] = []
@@ -366,8 +554,9 @@ class TypedVault:
             leftover = _outside_links(field.value, field.value_start, field.links)
             if leftover:
                 self._issue(path, "bad-relation", f"`{field.key}::` has text that is not a link: {' '.join(leftover)!r}", field.line)
+            edges = self._edges_of(path)
             for link in field.links:
-                edge = self._edges[(path, link.start)]
+                edge = edges[link.start]
                 self._declared[path].append(
                     RelationEdge(path, relation.name, link.target, edge.target_path, edge.status, field.line)
                 )
@@ -380,6 +569,64 @@ class TypedVault:
                         f"`{field.key}::` {link.raw} matches {len(edge.candidates)} files: {', '.join(edge.candidates)}",
                         field.line, detail={"target": link.target},
                     )
+
+    # ----- structure: every note in a typed folder has a type; links to other types ------------
+
+    def _check_untyped(self, path: str) -> None:
+        if self._type(path) is not None:
+            return
+        folder = self.spec.typed_folder_of(path)
+        if folder is None:
+            return
+        prefix = lookup_key(folder) + "/"
+        homes = [
+            f"{t.name} ({m.describe()})" for t in self.spec.types for m in t.match
+            if m.folder is not None and (lookup_key(m.folder) + "/").startswith(prefix)
+        ]
+        where = f"; types in {folder}/: {', '.join(homes)}" if homes else ""
+        self._issue(path, "untyped-note", f"no type matches this note, and every note in {folder}/ needs one{where}", 1,
+                    detail={"folder": folder})
+
+    def link_counts(self, path: str, type_name: str) -> tuple[list[str], list[RoledLink]]:
+        """The distinct notes of ``type_name`` that ``path`` links to, and its links that match no
+        note or several (which count for nothing).
+
+        Links and embeds anywhere in the note count, relation fields included; links in
+        metadata values (``Tags: [[x]]``) do not: they file the note, they do not cite.
+        """
+        return self._link_targets(path, type_name), self._unresolved_links(path)
+
+    def _link_targets(self, path: str, type_name: str) -> list[str]:
+        return [target for target in self.note_links(path) if self.type_of(target) == type_name]
+
+    def _unresolved_links(self, path: str) -> list[RoledLink]:
+        return [link for link in self.links(path) if link.via != "metadata" and link.edge.status != "resolved"]
+
+    def _check_min_links(self, path: str) -> None:
+        note_type = self._type(path)
+        if note_type is None or not note_type.min_links:
+            return
+        note = self.vault.notes[path]
+        for minimum in note_type.min_links:
+            targets = self._link_targets(path, minimum.type)
+            if len(targets) >= minimum.count:
+                continue
+            unresolved = self._unresolved_links(path)  # only a note that falls short says why: the roles cost more
+            message = (f"links to {len(targets)} {minimum.type} {'note' if len(targets) == 1 else 'notes'}; "
+                       f"a {note_type.name} needs at least {minimum.count}")
+            notes = []
+            for status, what in (("unresolved", "no note"), ("ambiguous", "several notes")):
+                links = [link for link in unresolved if link.edge.status == status]
+                if links:
+                    shown = ", ".join(link.edge.link.raw for link in links[:2])
+                    more = f" +{len(links) - 2}" if len(links) > 2 else ""
+                    notes.append(f"{len(links)} {'link matches' if len(links) == 1 else 'links match'} {what}: {shown}{more}")
+            if notes:
+                message += f" ({'; '.join(notes)})"
+            self._issue(
+                path, "too-few-links", message, self._header_line(note),
+                detail={"type": minimum.type, "found": len(targets), "min": minimum.count, "targets": targets},
+            )
 
     # ----- metadata -------------------------------------------------------------------
 
@@ -427,14 +674,23 @@ class TypedVault:
 
     # ----- mirrors ---------------------------------------------------------------------
 
-    def _link_mirrors(self) -> None:
-        declared = {
-            (edge.source, edge.relation, edge.target_path)
-            for edges in self._declared.values() for edge in edges if edge.target_path
-        }
-        implied: set[tuple[str, str, str]] = set()
-        for source in sorted(self._declared):
-            for edge in self._declared[source]:
+    def _relation_sources(self, path: str) -> list[str]:
+        """Notes whose relation fields may point at ``path`` (so it may owe them a mirror): the
+        notes with a resolved link to it inside a ``key::`` field. None when no relation has an
+        inverse (then nothing is ever mirrored)."""
+        if not self._mirror_sources:
+            return []
+        return sorted({source for source, kind in self.graph.incoming_fields(path) if kind == "inline" and source != path})
+
+    def _mirror_phase(self, path: str) -> None:
+        """Mirror issues of one note, in the order a pass over every relation source (sorted)
+        would produce them: ``relation-target-type`` for its own relation links, and
+        ``missing-mirror`` for relations of other notes that point at it."""
+        declared_by_path = None
+        implied: set[tuple[str, str]] = set()
+        for source in sorted({path, *self._relation_sources(path)}):
+            self._ensure(source, "relations")
+            for edge in self._declared.get(source, []):
                 relation = self.spec.relations[edge.relation]
                 target = edge.target_path
                 if edge.status != "resolved" or target is None or target == source:
@@ -442,28 +698,31 @@ class TypedVault:
                 if relation.targets and target in self.vault.notes:
                     target_type = self.type_of(target)
                     if target_type not in relation.targets:
-                        self._issue(
-                            source, "relation-target-type",
-                            f"`{edge.relation}::` [[{edge.target}]] is a {target_type or 'note of no type'}; "
-                            f"expected {' or '.join(relation.targets)}",
-                            edge.line,
-                        )
+                        if source == path:
+                            self._issue(
+                                source, "relation-target-type",
+                                f"`{edge.relation}::` [[{edge.target}]] is a {target_type or 'note of no type'}; "
+                                f"expected {' or '.join(relation.targets)}",
+                                edge.line,
+                            )
                         continue  # the link is wrong; asking the target to mirror it would be noise
-                if relation.inverse is None or target not in self.vault.notes:
+                if relation.inverse is None or target not in self.vault.notes or target != path:
                     continue
-                mirror = (target, relation.inverse, source)
-                if mirror in declared or mirror in implied:
+                if declared_by_path is None:
+                    self._ensure(path, "relations")
+                    declared_by_path = {(e.relation, e.target_path) for e in self._declared.get(path, []) if e.target_path}
+                if (relation.inverse, source) in declared_by_path or (relation.inverse, source) in implied:
                     continue
-                implied.add(mirror)
+                implied.add((relation.inverse, source))
                 name = self.link_text(source)
-                self._mirrors[target].append(
-                    RelationEdge(target, relation.inverse, name, source, "resolved", None, "mirror", source)
+                self._mirrors[path].append(
+                    RelationEdge(path, relation.inverse, name, source, "resolved", None, "mirror", source)
                 )
-                anchor = self.relation_anchor(target, relation.inverse)
+                anchor = self.relation_anchor(path, relation.inverse)
                 self._issue(
-                    target, "missing-mirror",
+                    path, "missing-mirror",
                     f"missing `{relation.inverse}:: [[{name}]]` (mirror of `{edge.relation}::` in {source}:{edge.line})",
-                    anchor.line if anchor else self._header_line(self.vault.notes[target]),
+                    anchor.line if anchor else self._header_line(self.vault.notes[path]),
                     related=source,
                     detail={"relation": relation.inverse, "link": name, "source": source, "source_line": edge.line},
                 )
@@ -492,6 +751,7 @@ class TypedVault:
 
     def report(self, examples: int = 3, only_type: str | None = None) -> dict[str, Any]:
         """Summary of the whole vault; with ``only_type``, types and issues of that type only."""
+        self._ensure_all()
         issues = self.issues()
         if only_type is not None:
             members = set(self.notes_of_type(only_type))
@@ -509,7 +769,7 @@ class TypedVault:
                 "match": " or ".join(m.describe() for m in note_type.match),
                 "notes": len(paths),
                 "clean": len(clean),
-                "issues": sum(len(self._issues.get(path, [])) for path in paths),
+                "issues": sum(len(self.issues(path)) for path in paths),
                 "examples": (clean + [p for p in paths if p not in clean])[:examples],
             })
 
@@ -541,8 +801,9 @@ class TypedVault:
             "format": {"name": self.spec.name, "path": self.spec.path},
             "only_type": only_type,
             "notes": len(self.vault.notes),
-            "typed": len(self.vault.notes) - len(self.untyped),
+            "typed": len(self.vault.notes) - len(self.untyped) - len(self.ignored),
             "untyped": self.untyped,
+            "ignored": len(self.ignored),
             "types": types,
             "issues": {
                 "total": len(issues),

@@ -27,6 +27,7 @@ FORMAT_NOT_CONFIGURED = -32003
 WRITE_REJECTED = -32004
 WRITE_FAILED = -32005
 INVALID_QUERY = -32006
+NO_BASELINE = -32007
 
 ERROR_MESSAGES = {
     PARSE_ERROR: "Parse error",
@@ -40,6 +41,7 @@ ERROR_MESSAGES = {
     WRITE_REJECTED: "Write rejected",
     WRITE_FAILED: "Write failed",
     INVALID_QUERY: "Invalid query",
+    NO_BASELINE: "No baseline recorded",
 }
 
 RequestId = Union[StrictInt, StrictStr, None]
@@ -362,7 +364,7 @@ class NoteGetResult(Result):
 ViolationCode = Literal[
     "missing-heading", "heading-order", "missing-key", "missing-value", "bad-value", "missing-relation",
     "unexpected-relation", "unknown-field", "bad-relation", "unresolved-target", "ambiguous-target",
-    "relation-target-type", "missing-mirror",
+    "relation-target-type", "missing-mirror", "too-few-links", "untyped-note", "missing-block",
 ]
 WriteStatus = Literal["written", "refused", "dry-run", "unchanged"]
 FixKind = Literal["missing-mirror", "missing-heading"]
@@ -388,21 +390,23 @@ class CodeCount(Result):
 
 class WrittenFile(Result):
     path: str
-    action: Literal["create", "modify"]
+    action: Literal["create", "modify", "delete"] = Field(description="delete: a moved note's old path, a merged note.")
     changes: list[str] = Field(description="What was done, for people: 'line 11: added [[X]] to `supported-by::`'.")
     diff: str = Field(description="Unified diff of the file (against /dev/null for a new file).")
     content: str | None = Field(description="The whole new file, for action 'create'; null otherwise.")
 
 
 class IndexSync(Result):
-    status: Literal["updated", "no-index", "needs-rebuild"]
+    status: Literal["updated", "no-index", "needs-rebuild", "unchanged"] = Field(
+        description="unchanged: the write changed no note, only the engine's state (e.g. page.exclude).")
     synced: list[str] = Field(description="Written notes now up to date in the index.")
     pending: list[str] = Field(description="Written notes left 'changed' for vault.check changed=true.")
     reason: str | None = None
 
 
 class WriteResult(Result):
-    operation: Literal["new", "link", "set", "fix", "ingest"]
+    operation: Literal["new", "link", "set", "fix", "ingest", "page new", "page refresh", "page exclude", "idea new",
+                       "idea set", "move", "merge"]
     status: WriteStatus = Field(description="written; refused (would add violations, nothing written); dry-run; unchanged.")
     dry_run: bool
     written: bool
@@ -424,6 +428,16 @@ class WriteParams(Params):
 class VaultCheckParams(Params):
     changed: bool = Field(False, description="Only notes added or changed since the last index.build, plus violations they cause elsewhere.")
     limit: int | None = Field(None, ge=1, description="Max notes listed (null = all). The summary is never limited.")
+    baseline: bool = Field(False, description="Only violations not in the recorded baseline are listed and make ok false "
+                           "(`vault check --baseline`); error -32007 when none is recorded.")
+    update_baseline: bool = Field(False, description="Record the whole vault's violations as the baseline, replacing the old "
+                                  "one (`--update-baseline`; the only write of a check). Nothing is new afterwards.")
+
+    @model_validator(mode="after")
+    def _one_baseline_mode(self) -> "VaultCheckParams":
+        if self.baseline and self.update_baseline:
+            raise ValueError("baseline compares with the baseline, update_baseline records it; give one")
+        return self
 
 
 class CheckScope(Result):
@@ -450,12 +464,41 @@ class CheckedNote(Result):
     violations: list[Violation]
 
 
+class BaselineFixed(Result):
+    path: str
+    line: int | None
+    code: str | None
+    message: str | None
+
+
+class BaselineRename(Result):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    from_: str = Field(alias="from", description="The baselined path, gone now.")
+    to: str = Field(description="The note it became (its baselined violations follow it).")
+    similarity: float
+    how: Literal["same text", "similar text"]
+
+
+class BaselineSummary(Result):
+    path: str = Field(description="The baseline file (.vaultengine/baseline-<format>.json).")
+    recorded_at: str | None
+    recorded_now: bool = Field(description="True for update_baseline: it was just recorded.")
+    previous: int | None = Field(description="Violations in the baseline it replaced (update_baseline), if any.")
+    violations: int = Field(description="Violations in the baseline.")
+    new: int = Field(description="Violations not in it: these are listed, and make ok false.")
+    known: int = Field(description="Violations in scope that it has: not listed.")
+    fixed: int = Field(description="Baselined violations found nowhere now.")
+    fixed_items: list[BaselineFixed]
+    renames: list[BaselineRename] = Field(description="Baselined notes followed to a new path (same or similar text).")
+
+
 class VaultCheckResult(Result):
     format: FormatRef
     scope: CheckScope
-    ok: bool
-    summary: CheckSummary
+    ok: bool = Field(description="No violations (with baseline: no new ones).")
+    summary: CheckSummary = Field(description="What is listed: with baseline, the new violations only.")
     notes: list[CheckedNote] = Field(description="Notes with violations, by path; violations by line.")
+    baseline: BaselineSummary | None = Field(description="Null unless baseline or update_baseline.")
     limit: int | None
 
 
@@ -864,6 +907,370 @@ class MentionsUnlinkedResult(Result):
     targets: list[MentionedNote] = Field(description="By number of mentioning notes.")
 
 
+# ----- the reading pipeline: vault.pipeline, note.facts ----------------------------------------------
+
+Stage = Literal["ingested", "extracted", "compiled"]
+
+
+class PipelineRoles(Result):
+    sources: list[str] = Field(description="Types whose notes are sources (ingested, extracted, compiled).")
+    extract: list[str] = Field(description="Types that extract from sources (zettels).")
+    compile: list[str] = Field(description="Types that compile extracts (pages).")
+
+
+class PipelineStages(Result):
+    ingested: int = Field(description="Sources no extract note links to.")
+    extracted: int = Field(description="Sources an extract note links to, that no compile note uses yet.")
+    compiled: int = Field(description="Sources a compile note reaches through an extract note.")
+
+
+class PageVia(Result):
+    path: str
+    via: list[str] = Field(description="The extract notes it goes through.")
+
+
+class SourceStage(Result):
+    path: str
+    stage: Stage
+    zettels: list[str] = Field(description="Extract notes linking to it.")
+    pages: list[PageVia] = Field(description="Compile notes linking to one of those.")
+
+
+class Citation(Result):
+    line: int
+    raw: str
+    role: str | None = None
+    status: str | None = None
+    target_path: str | None = None
+    target_type: str | None = None
+    url: str | None = Field(None, description="For reason url-only: the URL cited.")
+
+
+class UnsourcedNote(Result):
+    path: str
+    reason: Literal["missing", "not-a-source", "url-only", "none"]
+    citations: list[Citation]
+
+
+class Unsourced(Result):
+    total: int
+    by_reason: dict[str, int] = Field(description="missing, not-a-source, url-only, none.")
+    notes: list[UnsourcedNote]
+
+
+class PipelineExtract(Result):
+    total: int
+    in_a_compile_note: int
+    resting_on_a_source: int
+    unsourced: Unsourced
+
+
+class PipelineCompile(Result):
+    total: int
+    using_an_extract_note: int
+
+
+class PipelineGaps(Result):
+    not_extracted: list[str] = Field(description="Sources no extract note links to.")
+    not_compiled: list[str] = Field(description="Extract notes no compile note links to.")
+
+
+class VaultPipelineParams(Params):
+    limit: int | None = Field(None, ge=1, description="Max rows in each list (sources, unsourced notes, gaps); null = all. "
+                              "The counts are never limited.")
+
+
+class VaultPipelineResult(Result):
+    format: FormatRef
+    roles: PipelineRoles
+    stages: PipelineStages
+    sources: list[SourceStage] = Field(description="Compiled first, then extracted, then ingested.")
+    extract: PipelineExtract
+    compile: PipelineCompile
+    gaps: PipelineGaps
+    ignored: int = Field(description="Notes in ignored folders (no part in the pipeline).")
+    limit: int | None
+
+
+class NoteFactsParams(Params):
+    note: StrictStr = Field(min_length=1, description="Vault path or note name.")
+
+
+class RestingOn(Result):
+    path: str
+    direct: bool = Field(description="Linked directly (else only through the notes in via).")
+    via: list[str]
+
+
+class RestsOn(Result):
+    sources: list[RestingOn]
+    extract: list[RestingOn]
+
+
+class UsedBy(Result):
+    extract: list[RestingOn]
+    compile: list[RestingOn]
+
+
+class DescribedNote(Result):
+    path: str
+    type: str | None
+    ignored: bool
+
+
+class DanglingLink(Result):
+    line: int
+    raw: str
+    status: str
+
+
+class Trust(Result):
+    links_in: int = Field(description="Notes linking to it (index and log left out).")
+    pages: int = Field(description="Pages relying on it.")
+    ideas: int = Field(description="Ideas citing it.")
+    raw: float = Field(description="log2(1 + links_in) + pages + ideas.")
+    percentile: int = Field(description="Share of notes with a lower raw trust, 0-100.")
+
+
+class NoteFactsResult(Result):
+    format: FormatRef
+    path: str
+    type: str | None
+    ignored: bool
+    stage: Stage | None = Field(description="For sources and extract notes; null when an extract note rests on no source.")
+    modified: str | None = Field(description="The file's modification time (ISO 8601).")
+    rests_on: RestsOn
+    used_by: UsedBy
+    linked_from: list[DescribedNote]
+    links_to: list[DescribedNote]
+    links_to_nothing: list[DanglingLink] = Field(description="Links that match no note, or several.")
+    violations: list[Violation]
+    trust: Trust
+    roles: PipelineRoles
+
+
+# ----- pages: page.new, page.refresh, page.exclude, page.check --------------------------------------
+
+
+class StateChange(Result):
+    path: str = Field(description="An engine state file (.vaultengine/pages.json, a baseline).")
+    changes: list[str]
+
+
+class StatefulWriteResult(WriteResult):
+    state: list[StateChange] = Field(description="What the write records (or would) in the engine's state files.")
+
+
+class NewNote(Result):
+    path: str
+    content: str
+
+
+class PageFrom(Result):
+    query: str
+    matched: int = Field(description="Notes the query matched.")
+    zettels: int = Field(description="Of them, zettels.")
+    taken: list[str] = Field(description="The best-ranked zettels taken (limit).")
+
+
+class PageNewParams(WriteParams):
+    title: StrictStr = Field(min_length=1)
+    zettels: list[StrictStr] | None = Field(None, description="Zettels by vault path or name.")
+    queries: list[StrictStr] | None = Field(None, description="Search queries: the best-ranked zettels of each (needs the index).")
+    limit: int = Field(10, ge=1, description="Zettels taken from each query.")
+    tags: StrictStr | None = Field(None, description="The page's Tags value (default: the tags its zettels share).")
+    folder: StrictStr | None = Field(None, description="Its folder (default: the page type's folder).")
+
+    @model_validator(mode="after")
+    def _some_zettels(self) -> "PageNewParams":
+        if not self.zettels and not self.queries:
+            raise ValueError("give zettels, queries or both")
+        return self
+
+
+class PageNewResult(StatefulWriteResult):
+    page: NewNote
+    from_: list[PageFrom] = Field(alias="from", description="Per query: what it matched and took.")
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+
+class PageRefreshParams(WriteParams):
+    page: StrictStr = Field(min_length=1, description="Vault path or name.")
+
+
+class PageExcludeParams(WriteParams):
+    page: StrictStr = Field(min_length=1)
+    zettels: list[StrictStr] = Field(min_length=1, description="Zettels not for this page (vault path or name).")
+    undo: bool = Field(False, description="Bring them back.")
+
+
+class PageCheckParams(Params):
+    page: StrictStr | None = Field(None, description="One page (vault path or name); null = every page.")
+
+
+class PageBlock(Result):
+    name: str
+    status: Literal["current", "out-of-date", "missing"]
+    removed: list[str] = Field(description="Lines in the block that the zettels no longer give.")
+    added: list[str] = Field(description="Lines the zettels give that the block lacks.")
+
+
+class PageZettelChange(Result):
+    path: str
+    status: Literal["not recorded", "deleted", "changed"]
+
+
+class BehindZettel(Result):
+    path: str
+    tags: list[str] = Field(description="Tags it shares with the page.")
+    links: list[str] = Field(description="Notes both it and the page's zettels link to.")
+
+
+class PageCheck(Result):
+    path: str
+    title: str
+    managed: bool = Field(description="Made by page.new (it has vault blocks).")
+    blocks: list[PageBlock]
+    changed: list[PageZettelChange] | None = Field(description="Zettels changed since the last refresh; null: none recorded.")
+    behind: list[BehindZettel] = Field(description="Zettels with 2+ tags or links in common with the page, not on it.")
+    excluded: list[str]
+    violations: list[Violation]
+    index: Literal["current", "out-of-date", "missing"] | None = Field(description="Its line in the index note.")
+    refreshed_at: str | None
+    renamed_from: str | None
+    ready: bool = Field(description="Blocks current, zettels as recorded, nothing behind, index line current, no violations.")
+    problems: list[str]
+
+
+class PageCheckResult(Result):
+    format: FormatRef
+    pages: list[PageCheck]
+    ready: bool = Field(description="Every managed page (or the one asked about) is ready.")
+    managed: int
+    ready_pages: int
+
+
+# ----- findings and ideas: findings.list, idea.new, idea.set ------------------------------------------
+
+FindingMethod = Literal["missing-note", "same-idea", "existing-name", "link"]
+
+
+class FindingsListParams(Params):
+    methods: list[FindingMethod] | None = Field(None, min_length=1, description="Only these methods.")
+    id: StrictStr | None = Field(None, description="Only this finding (error -32002 when there is none now).")
+    limit: int | None = Field(None, ge=1, description="Findings per method (null = all); total counts them all.")
+
+
+class FindingNote(Result):
+    name: str
+    path: str | None = Field(description="Null for a note that does not exist.")
+    linking_notes: int | None
+
+
+class Finding(Result):
+    id: str = Field(description="Stable: derived from the method and the notes (survives edits and new evidence).")
+    method: FindingMethod
+    title: str
+    notes: list[FindingNote]
+    evidence: list[str] = Field(description="Lines, for people.")
+    score: float = Field(description="Orders findings within a method.")
+    data: dict[str, Any] = Field(description="The evidence, machine-readable; keys depend on the method.")
+    about: str
+
+
+class IndexInfo(Result):
+    db: str
+    last_indexed_at: str | None
+    stale: bool
+    pending: PendingChanges
+
+
+class FindingsListResult(Result):
+    index: IndexInfo
+    total: int = Field(description="Findings (of the methods asked), before limit.")
+    by_method: dict[str, int]
+    thresholds: dict[str, dict[str, Any]] = Field(description="Per method: the vault's percentile, its floor, the value used.")
+    findings: list[Finding]
+    limit: int | None
+
+
+class IdeaNewParams(WriteParams):
+    finding: StrictStr = Field(min_length=1, description="A finding id from findings.list.")
+    title: StrictStr | None = Field(None, description="Default: from the finding.")
+    tags: StrictStr | None = Field(None, description="Default: the tags the finding's notes share.")
+
+
+class IdeaNewResult(StatefulWriteResult):
+    finding: Finding
+    idea: NewNote
+
+
+class IdeaSetParams(WriteParams):
+    idea: StrictStr = Field(min_length=1, description="Vault path or name.")
+    status: StrictStr = Field(min_length=1, description="One of the format's statuses (open, dropped, done), with or without '#'.")
+
+
+# ----- note.move, note.merge ------------------------------------------------------------------------
+
+
+class NoteMoveParams(WriteParams):
+    note: StrictStr = Field(min_length=1, description="Vault path or name.")
+    to: StrictStr = Field(description="A folder (ending in /, or existing), a new name, or a new vault path.")
+
+
+class NoteMergeParams(WriteParams):
+    survivor: StrictStr = Field(min_length=1, description="A, the note that stays (vault path or name).")
+    other: StrictStr = Field(min_length=1, description="B, merged into A and removed; or a name links use with no note.")
+
+
+class SelfLink(Result):
+    path: str
+    line: int
+    link: str = Field(description="As it was written.")
+    action: Literal["line removed", "unlinked", "same-note link", "removed"]
+    result: str = Field(description="What replaces it ('' when removed).")
+
+
+class RelocationResult(StatefulWriteResult):
+    moved: dict[str, str] = Field(description="Old path -> new path (a merged note -> its survivor).")
+    rewritten: list[str] = Field(description="'path:line  old -> new' for every link re-spelled.")
+    now_resolving: list[str] = Field(description="Links that matched no note and reach the moved note now.")
+    self_links: list[SelfLink] = Field(description="Links a merge would point at the note they are in: dropped.")
+
+
+# ----- vault.next --------------------------------------------------------------------------------------
+
+
+class VaultNextParams(Params):
+    limit: int | None = Field(10, ge=1, description="Items listed (null = all); total and counts are never limited.")
+
+
+class NextItem(Result):
+    kind: Literal["refresh", "behind", "merge", "write", "extract", "page", "idea"]
+    subject: str = Field(description="A note path, or a missing note's name.")
+    title: str
+    why: str
+    command: str = Field(description="The vault command that resolves it.")
+    trust: int = Field(description="Percentile of how much the vault relies on the subject.")
+    raw: float
+    key: str
+    id: str = Field(description="Stable id of the item.")
+
+
+class KindCount(Result):
+    listed: int = Field(description="In the queue (items of some kinds below the median trust are left out).")
+    all: int
+    zettels_in_no_page: int | None = None
+
+
+class VaultNextResult(Result):
+    format: FormatRef
+    total: int
+    counts: dict[str, KindCount]
+    items: list[NextItem] = Field(description="Most trusted first.")
+    limit: int | None
+
+
 # ----- registry ------------------------------------------------------------------
 
 
@@ -901,5 +1308,26 @@ METHODS: dict[str, MethodSpec] = {
                    NotesSuggestParams, NotesSuggestResult),
         MethodSpec("mentions.unlinked", "Plain-text mentions of note titles and aliases that are not links yet.",
                    MentionsUnlinkedParams, MentionsUnlinkedResult),
+        MethodSpec("vault.pipeline", "Each source's stage (ingested, extracted, compiled) and the gaps (`vault pipeline`).",
+                   VaultPipelineParams, VaultPipelineResult),
+        MethodSpec("note.facts", "What the engine knows about one note: stage, what it rests on, what uses it, trust "
+                   "(`vault note`).", NoteFactsParams, NoteFactsResult),
+        MethodSpec("page.new", "A page from zettels, with its generated blocks, index and log lines (`vault page new`).",
+                   PageNewParams, PageNewResult),
+        MethodSpec("page.refresh", "Rebuild a page's blocks from the zettels it links now, and record them.",
+                   PageRefreshParams, StatefulWriteResult),
+        MethodSpec("page.exclude", "Record that zettels are not for a page, so it is not behind on them.",
+                   PageExcludeParams, StatefulWriteResult),
+        MethodSpec("page.check", "What needs attention on a page, or every page; whether it is ready.", PageCheckParams, PageCheckResult),
+        MethodSpec("findings.list", "What the engine discovered, each with a stable id and its evidence (`vault findings`).",
+                   FindingsListParams, FindingsListResult),
+        MethodSpec("idea.new", "An idea note from a finding (`vault idea new`).", IdeaNewParams, IdeaNewResult),
+        MethodSpec("idea.set", "Set an idea's status (`vault idea set`).", IdeaSetParams, StatefulWriteResult),
+        MethodSpec("note.move", "Move or rename a note; every link that reached it still does (`vault move`).",
+                   NoteMoveParams, RelocationResult),
+        MethodSpec("note.merge", "Merge note B into A: links to B reach A; self-links dropped (`vault merge`).",
+                   NoteMergeParams, RelocationResult),
+        MethodSpec("vault.next", "One queue of what needs doing, most trusted first, each with its command (`vault next`).",
+                   VaultNextParams, VaultNextResult),
     )
 }

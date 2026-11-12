@@ -13,7 +13,7 @@ for unexpected failures (including a result that does not match its own model).
 Server errors: -32001 index not built, -32002 note not found, -32003 format not
 configured (serve --format), -32004 write rejected (bad arguments, name taken;
 nothing written), -32005 write failed (rolled back, or a file changed meanwhile),
--32006 invalid query (data: query, start, end, hint).
+-32006 invalid query (data: query, start, end, hint), -32007 no baseline recorded (vault.check baseline=true).
 A write that would add violations is not an error: its result has status "refused". A request's "id"
 is echoed in its error response when it is a valid id, otherwise null.
 """
@@ -38,6 +38,7 @@ from vaultengine.rpc.models import (
     JSONRPC_VERSION,
     METHOD_NOT_FOUND,
     METHODS,
+    NO_BASELINE,
     NOTE_NOT_FOUND,
     PARSE_ERROR,
     WRITE_FAILED,
@@ -45,8 +46,8 @@ from vaultengine.rpc.models import (
     Request,
 )
 from vaultengine.service import (
-    FormatNotConfigured, IndexNotBuilt, InvalidQuery, NoteNotFound, ServiceError, VaultService, WriteFailedError,
-    WriteRejected,
+    FormatNotConfigured, IndexNotBuilt, InvalidQuery, NoBaseline, NoteNotFound, ServiceError, VaultService,
+    WriteFailedError, WriteRejected,
 )
 
 _SERVICE_ERROR_CODES: dict[type[ServiceError], int] = {
@@ -56,6 +57,7 @@ _SERVICE_ERROR_CODES: dict[type[ServiceError], int] = {
     WriteRejected: WRITE_REJECTED,
     WriteFailedError: WRITE_FAILED,
     InvalidQuery: INVALID_QUERY,
+    NoBaseline: NO_BASELINE,
 }
 
 
@@ -96,7 +98,8 @@ class RpcServer:
             "health.report": lambda p: service.health(limit=p.limit),
             "notes.pick": lambda p: service.pick(p.query, limit=p.limit),
             "note.get": lambda p: service.note(p.path),
-            "vault.check": lambda p: service.check(changed=p.changed, limit=p.limit),
+            "vault.check": lambda p: service.check(changed=p.changed, limit=p.limit, baseline=p.baseline,
+                                                   update_baseline=p.update_baseline),
             "vault.fix": lambda p: service.fix(dry_run=p.dry_run, only=p.only),
             "vault.coverage": lambda p: service.coverage(limit=p.limit),
             "note.new": lambda p: service.new(
@@ -117,6 +120,19 @@ class RpcServer:
             "links.suggest": lambda p: service.suggest_links(limit=p.limit, note=p.note, path=p.path),
             "notes.suggest": lambda p: service.suggest_notes(limit=p.limit, min_links=p.min_links),
             "mentions.unlinked": lambda p: service.unlinked(note=p.note, min_words=p.min_words, limit=p.limit, per_note=p.per_note),
+            "vault.pipeline": lambda p: service.pipeline(limit=p.limit),
+            "note.facts": lambda p: service.note_facts(p.note),
+            "page.new": lambda p: service.page_new(p.title, zettels=p.zettels, queries=p.queries, limit=p.limit, tags=p.tags,
+                                                   folder=p.folder, dry_run=p.dry_run),
+            "page.refresh": lambda p: service.page_refresh(p.page, dry_run=p.dry_run),
+            "page.exclude": lambda p: service.page_exclude(p.page, p.zettels, undo=p.undo, dry_run=p.dry_run),
+            "page.check": lambda p: service.page_check(p.page),
+            "findings.list": lambda p: service.findings(methods=p.methods, id=p.id, limit=p.limit),
+            "idea.new": lambda p: service.idea_new(p.finding, title=p.title, tags=p.tags, dry_run=p.dry_run),
+            "idea.set": lambda p: service.idea_set(p.idea, p.status, dry_run=p.dry_run),
+            "note.move": lambda p: service.move(p.note, p.to, dry_run=p.dry_run),
+            "note.merge": lambda p: service.merge(p.survivor, p.other, dry_run=p.dry_run),
+            "vault.next": lambda p: service.next(limit=p.limit),
         }
         if set(self._handlers) != set(METHODS):
             raise RuntimeError(f"handlers and METHODS disagree: {set(self._handlers) ^ set(METHODS)}")
@@ -167,7 +183,7 @@ class RpcServer:
         except Exception as exc:  # noqa: BLE001 - reported to the client, logged to stderr
             traceback.print_exc(file=sys.stderr)
             return _error(request.id, INTERNAL_ERROR, data={"type": type(exc).__name__, "message": str(exc)})
-        return {"jsonrpc": JSONRPC_VERSION, "id": request.id, "result": validated.model_dump(mode="json")}
+        return {"jsonrpc": JSONRPC_VERSION, "id": request.id, "result": validated.model_dump(mode="json", by_alias=True)}
 
 
 def serve_stdio(service: VaultService, stdin: BinaryIO | None = None, stdout: BinaryIO | None = None) -> int:

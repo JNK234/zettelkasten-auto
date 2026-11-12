@@ -9,6 +9,9 @@
     do not exist;
   - ``not-a-source``: its citations resolve, but to notes that are not sources;
   - ``none``: nothing it links to could be a citation.
+
+Notes in the format's ``ignored_folders`` are outside it: their links do not make a
+source linked. ``citation_gap`` (the reasons above) is shared with `vault pipeline`.
 """
 
 from __future__ import annotations
@@ -16,7 +19,25 @@ from __future__ import annotations
 from collections import Counter
 from typing import Any
 
-from vaultengine.formats.typed import TypedVault
+from vaultengine.formats.typed import RoledLink, TypedVault
+
+
+def citation_gap(typed: TypedVault, path: str, roles: set[str], links: list[RoledLink] | None = None
+                 ) -> tuple[str, list[RoledLink]]:
+    """Why a note that cites no source cites none: ``missing`` (citations whose targets do
+    not exist), ``not-a-source`` (they resolve to notes that are not sources) or ``none``;
+    with the citations that show it."""
+    links = typed.links(path) if links is None else links
+    citations = [l for l in links if l.role in roles]
+    missing = [l for l in citations if l.edge.status != "resolved"]
+    elsewhere = [l for l in citations if l.edge.status == "resolved"]
+    return ("missing" if missing else "not-a-source" if elsewhere else "none"), (missing or elsewhere)
+
+
+def citation_dict(typed: TypedVault, link: RoledLink) -> dict[str, Any]:
+    return {"line": link.edge.link.line, "raw": link.edge.link.raw, "role": link.role, "status": link.edge.status,
+            "target_path": link.edge.target_path,
+            "target_type": typed.type_of(link.edge.target_path) if link.edge.target_path else None}
 
 
 def coverage(typed: TypedVault) -> dict[str, Any]:
@@ -30,7 +51,7 @@ def coverage(typed: TypedVault) -> dict[str, Any]:
     unlinked = []
     linked = 0
     for path in sources:
-        incoming = typed.graph.backlink_sources(path)
+        incoming = [p for p in typed.graph.backlink_sources(path) if not typed.is_ignored(p)]
         if incoming:
             linked += 1
         else:
@@ -48,21 +69,13 @@ def coverage(typed: TypedVault) -> dict[str, Any]:
             counts["cites"] += 1
             cited_by.update({l.edge.target_path for l in cites})
             continue
-        citations = [l for l in links if l.role in roles]
-        missing = [l for l in citations if l.edge.status != "resolved"]
-        elsewhere = [l for l in citations if l.edge.status == "resolved"]
-        reason = "missing" if missing else "not-a-source" if elsewhere else "none"
+        reason, shown = citation_gap(typed, path, roles, links)
         counts[reason] += 1
-        shown = missing or elsewhere
         without.append({
             "path": path,
             "type": typed.type_of(path),
             "reason": reason,
-            "citations": [
-                {"line": l.edge.link.line, "raw": l.edge.link.raw, "role": l.role, "status": l.edge.status,
-                 "target_path": l.edge.target_path, "target_type": typed.type_of(l.edge.target_path) if l.edge.target_path else None}
-                for l in shown
-            ],
+            "citations": [citation_dict(typed, l) for l in shown],
         })
     return {
         "format": {"name": typed.spec.name, "path": typed.spec.path},

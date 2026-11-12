@@ -1,4 +1,5 @@
 import {Box, Text} from 'ink';
+import type {ReactNode} from 'react';
 import type {WriteResult, WrittenFile} from '../../rpc/schema.js';
 import {formatNumber, plural, splitPath, theme} from '../theme.js';
 import {DiffBlock, FileContent} from './Diff.js';
@@ -11,7 +12,17 @@ const WHAT: Record<WriteResult['operation'], string> = {
 	set: 'change',
 	fix: 'fix',
 	ingest: 'ingest',
+	'page new': 'page',
+	'page refresh': 'refresh',
+	'page exclude': 'exclusion',
+	'idea new': 'idea',
+	'idea set': 'status change',
+	move: 'move',
+	merge: 'merge',
 };
+
+/** What a write records in the engine's state files (.vaultengine/pages.json, a baseline). */
+export type StateChange = {path: string; changes: string[]};
 
 function headline(result: WriteResult): {title: string; detail?: string} {
 	const created = result.files.find((file) => file.action === 'create');
@@ -22,7 +33,9 @@ function headline(result: WriteResult): {title: string; detail?: string} {
 		}
 
 		case 'dry-run': {
-			return {title: `Dry run: would write ${count}`, detail: 'nothing was written'};
+			return result.files.length === 0
+				? {title: `Dry run: would record it in the engine state`, detail: 'nothing was written'}
+				: {title: `Dry run: would write ${count}`, detail: 'nothing was written'};
 		}
 
 		case 'unchanged': {
@@ -30,6 +43,10 @@ function headline(result: WriteResult): {title: string; detail?: string} {
 		}
 
 		default: {
+			if (result.files.length === 0) {
+				return {title: 'Recorded in the engine state', detail: result.operation};
+			}
+
 			return created && result.files.length === 1
 				? {title: `Created ${splitPath(created.path).title}`, detail: splitPath(created.path).folder}
 				: {title: `Wrote ${count}`, detail: result.operation};
@@ -37,12 +54,16 @@ function headline(result: WriteResult): {title: string; detail?: string} {
 	}
 }
 
+const MARK = {create: '+ ', modify: '~ ', delete: '- '} as const;
+const MARK_COLOR = {create: theme.ok, modify: theme.warn, delete: theme.error} as const;
+
 export function FileChange({file, maxLines}: {file: WrittenFile; maxLines?: number}) {
 	return (
 		<Box flexDirection="column" marginTop={1}>
 			<Text>
-				<Text color={file.action === 'create' ? theme.ok : theme.warn}>{file.action === 'create' ? '+ ' : '~ '}</Text>
+				<Text color={MARK_COLOR[file.action]}>{MARK[file.action]}</Text>
 				<NotePath path={file.path} />
+				{file.action === 'delete' ? <Text color={theme.error}>  deleted</Text> : null}
 			</Text>
 			<Box flexDirection="column" paddingLeft={2}>
 				{file.changes.map((change) => (
@@ -50,13 +71,26 @@ export function FileChange({file, maxLines}: {file: WrittenFile; maxLines?: numb
 						{change}
 					</Text>
 				))}
-				{file.action === 'create' && file.content !== null ? (
+				{file.action === 'delete' ? null : file.action === 'create' && file.content !== null ? (
 					<FileContent content={file.content} maxLines={maxLines} />
 				) : (
 					<DiffBlock diff={file.diff} maxLines={maxLines} />
 				)}
 			</Box>
 		</Box>
+	);
+}
+
+/** "state  .vaultengine/pages.json: 50_MOC/x.md: 3 zettels recorded" */
+export function StateLines({state}: {state: StateChange[]}) {
+	return (
+		<>
+			{state.map((change) => (
+				<Text key={change.path} dimColor>
+					state {change.path}: {change.changes.join('; ')}
+				</Text>
+			))}
+		</>
 	);
 }
 
@@ -97,7 +131,19 @@ export function CheckLines({result}: {result: WriteResult}) {
 	);
 }
 
-export function WriteView({result, maxFiles = 6, maxLines = 40}: {result: WriteResult; maxFiles?: number; maxLines?: number}) {
+export type WriteViewProps = {
+	result: WriteResult & {state?: StateChange[]};
+	maxFiles?: number;
+	maxLines?: number;
+	/** Shown after a dry run: how to write it. */
+	writeHint?: string;
+	/** Lines after the check lines (what a move rewrote, …). */
+	extra?: ReactNode;
+	/** Groups after the body (self-links dropped, …). */
+	after?: ReactNode;
+};
+
+export function WriteView({result, maxFiles = 6, maxLines = 40, writeHint = 'run it again without --dry-run to write', extra, after}: WriteViewProps) {
 	const {title, detail} = headline(result);
 	const refused = result.status === 'refused';
 	const files = result.files.slice(0, maxFiles);
@@ -112,13 +158,16 @@ export function WriteView({result, maxFiles = 6, maxLines = 40}: {result: WriteR
 			</Text>
 			<Body>
 				<CheckLines result={result} />
-				{result.status === 'dry-run' ? <Text dimColor>run it again without --dry-run to write</Text> : null}
+				{extra}
+				{result.state ? <StateLines state={result.state} /> : null}
+				{result.status === 'dry-run' ? <Text dimColor>{writeHint}</Text> : null}
 			</Body>
 			{refused ? (
 				<Group title="Violations it would add">
 					<ViolationsByNote notes={groupByNote(result.new_violations)} />
 				</Group>
 			) : null}
+			{after}
 			{files.length > 0 ? (
 				<Box flexDirection="column" paddingLeft={5}>
 					{refused ? (
@@ -127,7 +176,7 @@ export function WriteView({result, maxFiles = 6, maxLines = 40}: {result: WriteR
 						</Box>
 					) : null}
 					{files.map((file) => (
-						<FileChange key={file.path} file={file} maxLines={maxLines} />
+						<FileChange key={`${file.action} ${file.path}`} file={file} maxLines={maxLines} />
 					))}
 					{result.files.length > files.length ? (
 						<Box marginTop={1}>
@@ -139,4 +188,3 @@ export function WriteView({result, maxFiles = 6, maxLines = 40}: {result: WriteR
 		</Box>
 	);
 }
-

@@ -14,10 +14,16 @@ export function Headline({title, detail}: {title: string; detail?: string}) {
 }
 
 export function Body({children}: {children: ReactNode}) {
+	// The prefix must not shrink: shrinking it by a fraction of a column let the text round up to one column
+	// more than the terminal has, so a full line overflowed by one.
 	return (
 		<Box>
-			<Text dimColor>{'  ⎿  '}</Text>
-			<Box flexDirection="column">{children}</Box>
+			<Box flexShrink={0}>
+				<Text dimColor>{'  ⎿  '}</Text>
+			</Box>
+			<Box flexDirection="column" flexShrink={1}>
+				{children}
+			</Box>
 		</Box>
 	);
 }

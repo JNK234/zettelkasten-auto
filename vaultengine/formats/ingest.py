@@ -350,8 +350,12 @@ def plan_ingest(typed: TypedVault, document: Document, type_name: str, *, folder
     if spec is None:
         raise WriteError(f"type {type_name!r} has no `ingest:` block in the format, so vault ingest cannot fill it")
     now = now or dt.datetime.now()
-    body_index = next(i for i, p in enumerate(note_type.headings) if p.pattern == spec.body_heading)
-    body = fit_body(document.body, document.title, typed.usual_heading_level(note_type.name, body_index), document.warnings)
+    if spec.body_heading is not None:
+        body_index = next(i for i, p in enumerate(note_type.headings) if p.pattern == spec.body_heading)
+        top = typed.usual_heading_level(note_type.name, body_index)
+    else:
+        top = 1  # right after the note's title: the document's headings start at level 2
+    body = fit_body(document.body, document.title, top, document.warnings)
 
     candidates = find_candidates(typed, note_type, document, body)
     if found is not None:
@@ -367,10 +371,13 @@ def plan_ingest(typed: TypedVault, document: Document, type_name: str, *, folder
         given.setdefault(spec.hash_key, f"sha256:{document.sha256}")
     if spec.date_key:
         given.setdefault(spec.date_key, "{now}")
-    sections = {spec.body_heading: "\n" + body}  # a blank line under the heading, as in the vault's notes
+    if spec.url_key and document.url and not any(k.lower() == spec.url_key.lower() for k in given):
+        given[spec.url_key] = document.url
+    sections = {spec.body_heading: "\n" + body} if spec.body_heading else {}  # a blank line under the heading
     if spec.references_heading:
         label = document.title.replace("[", "\\[").replace("]", "\\]")
         sections[spec.references_heading] = "\n" + (f"1. [{label}]({document.url})" if document.url else f"1. {label}")
-    plan = plan_new(typed, type_name, document.title, folder=folder, values=given, sections=sections, now=now)
+    plan = plan_new(typed, type_name, document.title, folder=folder, values=given, sections=sections, now=now,
+                    body_text=None if spec.body_heading else body)
     plan.operation = "ingest"
     return plan

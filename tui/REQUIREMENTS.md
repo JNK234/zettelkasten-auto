@@ -22,6 +22,7 @@ output stays in the transcript. This POC is the shell that later tools plug into
 | R12 | **`o`** in the list or the preview opens the note in Obsidian: `obsidian://open?vault=<vault folder name>&file=<path>` | frame tests, e2e (with `VAULT_TUI_OPENER`) |
 | R13 | **`/related`, `/suggest`, `/unlinked`** (engine `note.related`, `links.suggest` + `notes.suggest`, `mentions.unlinked`) | frame tests, integration test |
 | R14 | Interactive output is part of the command contract: a command returns transcript output or an `InteractiveView` that has the keys until it is closed | `registry.ts`, frame tests |
+| R15 | **The reading pipeline** with `--format core`: `/pipeline`, `/page new\|check\|refresh\|exclude`, `/findings`, `/idea new\|set`, `/move`, `/merge`, `/next`, `/check baseline` (engine `vault.pipeline`, `page.*`, `findings.list`, `idea.*`, `note.move`, `note.merge`, `vault.next`, `vault.check baseline`). Writes are a dry run unless the command ends with `write`; a merge lists the self-links it drops | frame tests (`test/pipeline.test.tsx`), e2e (`test/e2e/pipeline.pty.test.ts`) |
 
 ## Out of scope (later)
 

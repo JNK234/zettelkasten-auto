@@ -86,18 +86,21 @@ class SectionPattern:
 
 @dataclass(frozen=True)
 class Match:
-    """A note matches when it is inside ``folder`` (at any depth) and its file name
-    without ``.md`` matches the glob ``name``. Either may be left out; both compare
-    case-insensitively."""
+    """A note matches when it is inside ``folder`` (at any depth, or directly in it
+    with ``subfolders=False``) and its file name without ``.md`` matches the glob
+    ``name``. Either may be left out; both compare case-insensitively."""
 
     folder: str | None = None
     name: str | None = None
+    subfolders: bool = True
 
     def matches(self, path: str) -> bool:
         key = lookup_key(path)
         if self.folder is not None:
             folder = lookup_key(self.folder).strip("/")
             if folder and not key.startswith(folder + "/"):
+                return False
+            if not self.subfolders and "/" in key[len(folder) + 1 if folder else 0:]:
                 return False
         if self.name is not None:
             base = key.rsplit("/", 1)[-1]
@@ -109,7 +112,7 @@ class Match:
     def describe(self) -> str:
         parts = []
         if self.folder is not None:
-            parts.append(f"in {self.folder}/")
+            parts.append(f"in {self.folder}/" if self.subfolders else f"directly in {self.folder}/")
         if self.name is not None:
             parts.append(f"named {self.name!r}")
         return " and ".join(parts)
@@ -160,16 +163,18 @@ class NewNote:
 class IngestSpec:
     """How `vault ingest --as <type>` lays out a converted document.
 
-    ``body_heading``: the required heading the document goes under;
+    ``body_heading``: the required heading the document goes under (None: right after the title);
     ``references_heading``: where "1. [title](url)" goes; ``provenance``: metadata
-    keys for the original file name, its SHA-256 and the time of ingestion.
+    keys for the original file name, its SHA-256 and the time of ingestion; ``url_key``: a
+    metadata key the document's URL fills, unless a value is given for it.
     """
 
-    body_heading: str
+    body_heading: str | None = None
     references_heading: str | None = None
     file_key: str | None = None
     hash_key: str | None = None
     date_key: str | None = None
+    url_key: str | None = None
 
 
 @dataclass(frozen=True)
@@ -181,6 +186,49 @@ class Coverage:
     sources: tuple[str, ...] = ()
     citing: tuple[str, ...] = ()
     citation_roles: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class LinkMinimum:
+    """A note of the type must link to at least ``count`` distinct notes of type ``type``
+    (resolved links and embeds anywhere in the body; links in metadata values such as
+    ``Tags:`` do not count)."""
+
+    type: str
+    count: int
+
+
+@dataclass(frozen=True)
+class PipelineSpec:
+    """What `vault pipeline` reports on. A note of a ``sources`` type is *ingested*;
+    *extracted* once a note of an ``extract`` type links to it; *compiled* once a note
+    of a ``compile`` type links to one of those. Worked out from the links every time."""
+
+    sources: tuple[str, ...]
+    extract: tuple[str, ...]
+    compile: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class PagesSpec:
+    """What `vault page` keeps in step besides the page: an index note with one line per page
+    (between ``<!-- vault:pages -->`` markers) and a log note it appends a line to on every
+    page write. Pages, their zettels and sources are the ``pipeline`` roles."""
+
+    index: str
+    log: str
+    tags: str  # the metadata key that holds a note's tags (groups zettels, finds zettels a page is behind on)
+
+
+@dataclass(frozen=True)
+class IdeasSpec:
+    """What `vault idea` writes: notes of ``type``, made from a finding written into the ``block``
+    (a block the type requires), with their state in the tags key ``status``."""
+
+    type: str
+    status: str
+    block: str
+    tags: str  # the type's tags (or links) key, filled from the finding's notes
 
 
 @dataclass(frozen=True)
@@ -200,6 +248,8 @@ class NoteType:
     new: NewNote = NewNote()
     title_section: SectionPattern | None = None  # first link text under it is also a title (duplicates)
     ingest: IngestSpec | None = None
+    min_links: tuple[LinkMinimum, ...] = ()
+    required_blocks: tuple[str, ...] = ()  # <!-- vault:NAME --> … <!-- /vault:NAME --> blocks a note must have
 
     def matches(self, path: str) -> bool:
         return any(m.matches(path) for m in self.match)
@@ -217,17 +267,40 @@ class FormatSpec:
     description: str | None = None
     path: str | None = None
     coverage: Coverage | None = None
+    typed_folders: tuple[str, ...] = ()  # every note inside these (at any depth) must have a type
+    ignored_folders: tuple[str, ...] = ()  # notes inside these are outside the format: no type, no violations
+    pipeline: PipelineSpec | None = None
+    pages: PagesSpec | None = None
+    ideas: IdeasSpec | None = None
+
+    def is_ignored(self, path: str) -> bool:
+        key = lookup_key(path)
+        prefixes = self.__dict__.get("_ignored_prefixes")
+        if prefixes is None:
+            prefixes = tuple(lookup_key(folder) + "/" for folder in self.ignored_folders)
+            object.__setattr__(self, "_ignored_prefixes", prefixes)  # the spec is frozen: computed once
+        return key.startswith(prefixes) if prefixes else False
 
     def type_named(self, name: str) -> NoteType | None:
         return next((t for t in self.types if t.name == name), None)
 
     def type_for(self, path: str) -> NoteType | None:
-        """The first type (in file order) whose ``match`` fits the path."""
+        """The first type (in file order) whose ``match`` fits the path; None in an ignored folder."""
+        if self.ignored_folders and self.is_ignored(path):
+            return None
         return next((t for t in self.types if t.matches(path)), None)
 
     def relation(self, key: str) -> Relation | None:
         """The relation a field key names (case-insensitive, spaces count as '-')."""
         return self.relations.get(relation_key(key))
+
+    def typed_folder_of(self, path: str) -> str | None:
+        """The ``typed_folders`` entry ``path`` is inside (the first one listed), or None
+        (also for a note in an ignored folder)."""
+        if self.ignored_folders and self.is_ignored(path):
+            return None
+        key = lookup_key(path)
+        return next((f for f in self.typed_folders if key.startswith(lookup_key(f) + "/")), None)
 
 
 def relation_key(key: str) -> str:
@@ -350,7 +423,8 @@ class _Parser:
             raise FormatError("the file is empty")
         data = self._mapping(
             data, "top level",
-            ("format", "name", "description", "metadata_source", "relations", "link_roles", "types", "coverage"),
+            ("format", "name", "description", "metadata_source", "relations", "link_roles", "typed_folders",
+             "ignored_folders", "types", "coverage", "pipeline", "pages", "ideas"),
             required=("format", "types"),
         )
         if data["format"] != FORMAT_VERSION:
@@ -368,10 +442,94 @@ class _Parser:
             for target in relation.targets:
                 if target not in type_names:
                     raise FormatError(f"relations.{relation.name}.targets: unknown type {target!r}")
+        for note_type in types:
+            for minimum in note_type.min_links:
+                if minimum.type not in type_names:
+                    raise FormatError(f"types.{note_type.name}.min_links: unknown type {minimum.type!r}")
+        typed_folders = self._folders(data.get("typed_folders", []), "typed_folders")
+        ignored_folders = self._folders(data.get("ignored_folders", []), "ignored_folders")
+        pipeline = self._pipeline(data["pipeline"], type_names) if "pipeline" in data else None
         name = self._str(data["name"], "name") if "name" in data else Path(self.source).stem
         description = self._str(data["description"], "description") if "description" in data else None
         coverage = self._coverage(data["coverage"], type_names, relations, roles, types) if "coverage" in data else None
-        return FormatSpec(name, types, relations, roles, description, self.source, coverage)
+        spec = FormatSpec(name, types, relations, roles, description, self.source, coverage, typed_folders,
+                          ignored_folders, pipeline)
+        pages = self._pages(data["pages"], spec) if "pages" in data else None
+        ideas = self._ideas(data["ideas"], spec) if "ideas" in data else None
+        return FormatSpec(name, types, relations, roles, description, self.source, coverage, typed_folders,
+                          ignored_folders, pipeline, pages, ideas)
+
+    def _ideas(self, data: Any, spec: "FormatSpec") -> IdeasSpec:
+        where = "ideas"
+        data = self._mapping(data, where, ("type", "status", "block", "tags"), required=("type", "status", "block", "tags"))
+        type_name = self._str(data["type"], f"{where}.type")
+        note_type = spec.type_named(type_name)
+        if note_type is None:
+            raise FormatError(f"{where}.type: unknown type {type_name!r}")
+        block = self._str(data["block"], f"{where}.block")
+        if block not in note_type.required_blocks:
+            raise FormatError(f"{where}.block: {type_name} must require it (types.{type_name}.required_blocks: [{block}])")
+        status = self._str(data["status"], f"{where}.status")
+        key = next((k for k in note_type.metadata if lookup_key(k.name) == lookup_key(status)), None)
+        if key is None or key.kinds != ("tags",) or key.multiple or not key.values:
+            raise FormatError(f"{where}.status: {status!r} must be a metadata key of {type_name} holding one #tag "
+                              "from a list of values")
+        tags = self._str(data["tags"], f"{where}.tags")
+        tags_key = next((k for k in note_type.metadata if lookup_key(k.name) == lookup_key(tags)), None)
+        if tags_key is None or not set(tags_key.kinds) & {"tags", "links"}:
+            raise FormatError(f"{where}.tags: {tags!r} is not a tags or links metadata key of {type_name}")
+        return IdeasSpec(type_name, key.name, block, tags_key.name)
+
+    def _pages(self, data: Any, spec: "FormatSpec") -> PagesSpec:
+        where = "pages"
+        data = self._mapping(data, where, ("index", "log", "tags"), required=("index", "log", "tags"))
+        if spec.pipeline is None:
+            raise FormatError(f"{where}: needs a `pipeline:` block (pages are its compile types)")
+        paths = {}
+        for key in ("index", "log"):
+            path = self._str(data[key], f"{where}.{key}").strip("/")
+            if not path.lower().endswith(".md") or path.startswith(".") or "/." in path:
+                raise FormatError(f"{where}.{key}: expected a note path ending in .md, got {path!r}")
+            note_type = spec.type_for(path)
+            if note_type is not None and note_type.name in spec.pipeline.compile:
+                raise FormatError(f"{where}.{key}: {path} would be a {note_type.name}; give it a type of its own")
+            paths[key] = path
+        if lookup_key(paths["index"]) == lookup_key(paths["log"]):
+            raise FormatError(f"{where}: index and log must be different notes")
+        tags = self._str(data["tags"], f"{where}.tags")
+        for type_name in spec.pipeline.extract + spec.pipeline.compile:
+            keys = {lookup_key(k.name): k for k in spec.type_named(type_name).metadata}
+            key = keys.get(lookup_key(tags))
+            if key is None or not set(key.kinds) & {"tags", "links"}:
+                raise FormatError(f"{where}.tags: {tags!r} is not a tags or links metadata key of {type_name}")
+        return PagesSpec(paths["index"], paths["log"], tags)
+
+    def _folders(self, data: Any, where: str) -> tuple[str, ...]:
+        folders: list[str] = []
+        for index, raw in enumerate(self._str_list(data, where)):
+            folder = raw.strip("/")
+            if not folder:
+                raise FormatError(f"{where}[{index}]: expected a folder, got {raw!r}")
+            if lookup_key(folder) in {lookup_key(f) for f in folders}:
+                raise FormatError(f"{where}[{index}]: {folder!r} is listed twice")
+            folders.append(folder)
+        return tuple(folders)
+
+    def _pipeline(self, data: Any, type_names: set[str]) -> PipelineSpec:
+        where = "pipeline"
+        data = self._mapping(data, where, ("sources", "extract", "compile"), required=("sources", "extract", "compile"))
+        found: dict[str, tuple[str, ...]] = {}
+        for key in ("sources", "extract", "compile"):
+            names = self._str_list(data[key], f"{where}.{key}")
+            for index, name in enumerate(names):
+                if name not in type_names:
+                    raise FormatError(f"{where}.{key}[{index}]: unknown type {name!r}")
+            found[key] = names
+        for a, b in (("sources", "extract"), ("sources", "compile"), ("extract", "compile")):
+            shared = set(found[a]) & set(found[b])
+            if shared:
+                raise FormatError(f"{where}: {', '.join(sorted(shared))!r} cannot be in both {a} and {b}")
+        return PipelineSpec(found["sources"], found["extract"], found["compile"])
 
     def _coverage(self, data: Any, type_names: set[str], relations: dict[str, Relation],
                   roles: tuple, types: tuple[NoteType, ...]) -> Coverage:
@@ -440,7 +598,7 @@ class _Parser:
         body = self._mapping(
             body, where,
             ("description", "match", "headings", "ordered_headings", "metadata", "metadata_source", "relations",
-             "relations_heading", "link_roles", "new", "title_section", "ingest"),
+             "relations_heading", "link_roles", "new", "title_section", "ingest", "min_links", "required_blocks"),
             required=("match",),
         )
         matches = body["match"]
@@ -486,13 +644,36 @@ class _Parser:
                 if "title_section" in body else None
             ),
             ingest=self._ingest(body.get("ingest"), f"{where}.ingest", headings, metadata),
+            min_links=self._min_links(body.get("min_links"), f"{where}.min_links"),
+            required_blocks=tuple(
+                self._block_name(name, f"{where}.required_blocks[{i}]")
+                for i, name in enumerate(self._str_list(body.get("required_blocks", []), f"{where}.required_blocks"))
+            ),
         )
+
+    def _block_name(self, value: str, where: str) -> str:
+        if not re.fullmatch(r"[\w-]+", value):
+            raise FormatError(f"{where}: {value!r} is not a block name (letters, digits, '-' and '_')")
+        return value
+
+    def _min_links(self, data: Any, where: str) -> tuple[LinkMinimum, ...]:
+        """``{type: count}``; the type names are checked once every type is known."""
+        if data is None:
+            return ()
+        data = self._mapping(data, where, data.keys() if isinstance(data, dict) else ())
+        found = []
+        for type_name, count in data.items():
+            type_name = self._ident(type_name, where)
+            if isinstance(count, bool) or not isinstance(count, int) or count < 1:
+                raise FormatError(f"{where}.{type_name}: expected a whole number of at least 1, got {count!r}")
+            found.append(LinkMinimum(type_name, count))
+        return tuple(found)
 
     def _ingest(self, data: Any, where: str, headings: tuple[SectionPattern, ...],
                 metadata: tuple[MetadataKey, ...]) -> IngestSpec | None:
         if data is None:
             return None
-        data = self._mapping(data, where, ("body_heading", "references_heading", "provenance"), required=("body_heading",))
+        data = self._mapping(data or {}, where, ("body_heading", "references_heading", "provenance", "url"))
         names = {h.pattern for h in headings if not h.is_regex}
         found = {}
         for key in ("body_heading", "references_heading"):
@@ -511,7 +692,13 @@ class _Parser:
             if role == "date" and declared[key_name].kinds[0] not in ("datetime", "date"):
                 raise FormatError(f"{where}.provenance.date: {key_name!r} must be a datetime or date key")
             keys[role] = key_name
-        return IngestSpec(found["body_heading"], found.get("references_heading"), keys.get("file"), keys.get("hash"), keys.get("date"))
+        url_key = None
+        if "url" in data:
+            url_key = self._str(data["url"], f"{where}.url")
+            if url_key not in declared:
+                raise FormatError(f"{where}.url: {url_key!r} is not a metadata key of the type")
+        return IngestSpec(found.get("body_heading"), found.get("references_heading"), keys.get("file"), keys.get("hash"),
+                          keys.get("date"), url_key)
 
     def _new(self, data: Any, where: str, match: tuple[Match, ...], metadata: tuple[MetadataKey, ...]) -> NewNote:
         default_name = "{title}"
@@ -542,12 +729,15 @@ class _Parser:
         )
 
     def _match(self, data: Any, where: str) -> Match:
-        data = self._mapping(data, where, ("folder", "name"))
-        if not data:
+        data = self._mapping(data, where, ("folder", "name", "subfolders"))
+        if not data.keys() - {"subfolders"}:
             raise FormatError(f"{where}: give a folder, a name pattern, or both")
         folder = self._str(data["folder"], f"{where}.folder").strip("/") if "folder" in data else None
         name = self._str(data["name"], f"{where}.name") if "name" in data else None
-        return Match(folder, name)
+        subfolders = self._bool(data.get("subfolders", True), f"{where}.subfolders")
+        if not subfolders and folder is None:
+            raise FormatError(f"{where}.subfolders: only a match with a folder can leave out its subfolders")
+        return Match(folder, name, subfolders)
 
     def _relation_names(self, value: Any, where: str, relations: dict[str, Relation]) -> tuple[str, ...]:
         names = []

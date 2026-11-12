@@ -33,6 +33,7 @@ class Lines:
             self.real = 0
         self.append: dict[int, list[str]] = defaultdict(list)
         self.replace: dict[int, str] = {}
+        self.drop: set[int] = set()  # lines removed, with their line break
         self.before: dict[int, list[str]] = defaultdict(list)
         self.after: dict[int, list[str]] = defaultdict(list)
         self.at_end: list[str] = []
@@ -47,6 +48,9 @@ class Lines:
             content, end = self.content[index - 1], self.ends[index - 1]
             nl = end or self.newline
             out.extend(line + nl for line in self.before.get(index, []))
+            if index in self.drop:
+                out.extend(line + nl for line in self.after.get(index, []))
+                continue
             if index in self.replace:
                 content = self.replace[index]
             if index in self.append:
