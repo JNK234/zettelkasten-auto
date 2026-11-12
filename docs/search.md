@@ -465,7 +465,7 @@ What to keep in mind when reading the numbers (checked on the sample vault):
 
 Params, results and errors are defined once as Pydantic models (`vaultengine/rpc/models.py`); `vault rpc-schema`
 prints the JSON Schema they produce (`vaultengine/rpc/schema.json`, from which the app's TypeScript types are
-generated). Errors: the JSON-RPC codes, plus -32001 index not built, -32002 note not found, -32003/-32004/-32005 format and write errors (see [api.md](api.md)), -32006 invalid
+generated). Errors: the JSON-RPC codes, plus -32001 index not built, -32002 note not found, -32003/-32004/-32005/-32008 format, write and baseline errors, -32007 not available (see [api.md](api.md)), and -32006 invalid
 query, whose `data` says where the problem is (`start`/`end` offsets in the query) and how to fix it (`hint`).
 `note.related` and `links.suggest` answer without the embedding model too: their `text_signal` (`available`,
 `model_id`, `unavailable`, `uncached`) and `weights` say what the score was made of.
@@ -479,7 +479,7 @@ printf '%s\n' \
 ```
 ```
 {"jsonrpc":"2.0","id":1,"result":{"query":"klpen","total":3,"results":[{"path":"20_ZETTLEKASTEN/kl-penalty-in-rlhf.md","title":"kl-penalty-in-rlhf","matched_field":"title","matched_text":"kl-penalty-in-rlhf","score":141,"positions":[0,1,3,4,5]}]}}
-{"jsonrpc":"2.0","id":2,"error":{"code":-32601,"message":"Method not found","data":{"method":"notes.delete","available":["health.report","index.build","index.status","links.suggest","mentions.unlinked","note.get","note.preview","note.related","notes.pick","notes.suggest","search.query","vault.stats"]}}}
+{"jsonrpc":"2.0","id":2,"error":{"code":-32601,"message":"Method not found","data":{"method":"notes.delete","available":["findings.list","health.report","idea.new","idea.set","index.build","index.status","links.suggest","mentions.unlinked","note.facts","note.get","note.ingest","note.link","note.merge","note.move","note.new","note.preview","note.related","note.set","notes.pick","notes.suggest","page.check","page.exclude","page.new","page.refresh","search.query","vault.check","vault.coverage","vault.fix","vault.next","vault.pipeline","vault.stats"]}}}
 {"jsonrpc":"2.0","id":3,"error":{"code":-32600,"message":"Invalid Request","data":[{"loc":["jsonrpc"],"msg":"Input should be '2.0'","type":"literal_error"}]}}
 ```
 

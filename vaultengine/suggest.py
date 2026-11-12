@@ -158,23 +158,58 @@ class Suggestions:
 
 
 class Suggester:
-    def __init__(self, conn: sqlite3.Connection, engine: Relatedness | None = None) -> None:
+    """``engine``: the ``Relatedness`` to use for search and embeddings (default: one built on first use).
+    ``counts(source path, field kind)``: whether a link counts (default: every link). A format
+    passes its rule, under which links in metadata values (``Tags: [[x]]``) file a note, not link it."""
+
+    def __init__(self, conn: sqlite3.Connection, engine: Relatedness | None = None, counts=None) -> None:
         self.conn = conn
-        self.engine = engine or Relatedness(conn)
-        self.key_terms = KeyTerms(conn, self.engine.n_notes)
+        self._engine: Relatedness | None = engine
+        self._key_terms: KeyTerms | None = None
         self.spellings: dict[str, Counter[str]] = defaultdict(Counter)
         self.linkers: dict[str, set[int]] = defaultdict(set)
         self.link_count: Counter[str] = Counter()
         rows = conn.execute(
-            """SELECT l.target_key, l.target, l.source_id FROM links l JOIN files f ON f.id = l.source_id
+            """SELECT l.target_key, l.target, l.source_id, f.path, l.field_kind FROM links l JOIN files f ON f.id = l.source_id
                WHERE l.status = 'unresolved' AND f.kind = 'note' AND l.target != ''"""
         )
-        for key, target, source in rows:
+        for key, target, source, source_path, field_kind in rows:
+            if counts is not None and not counts(source_path, field_kind):
+                continue
             if "." in target.rsplit("/", 1)[-1] and not target.lower().endswith(".md") and not re.search(r"\d\.\d", target):
                 continue  # a missing attachment (image.png), not a note
             self.spellings[key][target] += 1
             self.linkers[key].add(source)
             self.link_count[key] += 1
+
+    @property
+    def engine(self) -> Relatedness:
+        """Search and embeddings, built on first use (costly on a large vault; names and counts do not need it)."""
+        if self._engine is None:
+            self._engine = Relatedness(self.conn)
+        return self._engine
+
+    @engine.setter
+    def engine(self, engine: Relatedness) -> None:
+        """A caller that already has one (the JSON-RPC server keeps it between calls)."""
+        self._engine = engine
+
+    @property
+    def key_terms(self) -> KeyTerms:
+        """Distinctive terms of the linking notes (``about``), loaded on first use."""
+        if self._key_terms is None:
+            n_notes = self._engine.n_notes if self._engine is not None else len(self.paths)
+            self._key_terms = KeyTerms(self.conn, n_notes)
+        return self._key_terms
+
+    @property
+    def paths(self) -> dict[int, str]:
+        """Note file id -> path."""
+        if self._engine is not None:
+            return self._engine.paths
+        if not hasattr(self, "_paths"):
+            self._paths = {row[0]: row[1] for row in self.conn.execute("SELECT id, path FROM files WHERE kind = 'note'")}
+        return self._paths
 
     def name(self, key: str) -> str:
         return self.spellings[key].most_common(1)[0][0]
@@ -194,7 +229,7 @@ class Suggester:
         for topics linked from hundreds of notes.
         """
         combined: Counter[str] = Counter()
-        for linker in sorted(self.linkers[key], key=lambda f: self.engine.paths[f])[:ABOUT_SAMPLE]:
+        for linker in sorted(self.linkers[key], key=lambda f: self.paths[f])[:ABOUT_SAMPLE]:
             for term, weight in self.key_terms.of(linker).items():
                 combined[term] += weight
         own = set(tokenize(self.name(key)))
@@ -202,7 +237,7 @@ class Suggester:
         return [term for term, _ in combined.most_common() if term not in own and term.isalpha()][:count]
 
     def folders(self, key: str) -> list[tuple[str, int]]:
-        counts = Counter(self.engine.paths[f].rsplit("/", 1)[0] if "/" in self.engine.paths[f] else "" for f in self.linkers[key])
+        counts = Counter(self.paths[f].rsplit("/", 1)[0] if "/" in self.paths[f] else "" for f in self.linkers[key])
         return sorted(counts.items(), key=lambda item: (-item[1], item[0]))
 
     def suggestions(self, limit: int | None = 15, min_links: int = 2) -> Suggestions:
@@ -247,7 +282,7 @@ class Suggester:
 
     def close_to_existing(self, min_links: int) -> list[tuple[str, int, str]]:
         titles: dict[int, set[frozenset[str]]] = defaultdict(set)
-        for file_id, path in self.engine.paths.items():
+        for file_id, path in self.paths.items():
             titles[file_id].add(name_words(link_name(path)))
         for file_id, alias in self.conn.execute("SELECT file_id, alias FROM aliases"):
             titles[file_id].add(name_words(alias))
@@ -265,7 +300,7 @@ class Suggester:
             matches = [file_id for file_id in candidates
                        if any(words <= n and len(words) >= EXISTING_COVERAGE * len(n) for n in titles[file_id])]
             if len(matches) == 1:
-                found.append((self.name(key), len(linkers), self.engine.paths[matches[0]]))
+                found.append((self.name(key), len(linkers), self.paths[matches[0]]))
         found.sort(key=lambda item: (-item[1], item[0]))
         return found
 

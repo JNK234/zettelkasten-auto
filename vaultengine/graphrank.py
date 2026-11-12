@@ -124,7 +124,7 @@ def link_rows(conn: sqlite3.Connection) -> list[tuple]:
     """Every link of a note (target not empty) as the row ``build_graph_from`` reads, in file and link order."""
     return conn.execute(
         """SELECT l.source_id, l.target_id, l.status, l.target_key, l.target, t.kind, l.line, s.path,
-                  l.field_source, l.field_key
+                  l.field_kind, l.field_key
            FROM links l JOIN files s ON s.id = l.source_id LEFT JOIN files t ON t.id = l.target_id
            WHERE s.kind = 'note' AND l.target != '' ORDER BY l.source_id, l.ordinal"""
     ).fetchall()

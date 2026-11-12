@@ -17,7 +17,7 @@ or with `$VAULT_TUI_OPENER` (any program taking the URL as its argument).
 | Input | Does |
 |---|---|
 | `/stats` `/health [limit]` `/note @note` `/note <search>` `/help` | commands |
-| `/check [changed] [all]` `/fix [apply] [mirrors\|headings] [all]` `/coverage [all]` | the format: violations by note, the safe repairs as diffs, sources and citations (need `--format`) |
+| `/check [changed] [all] [baseline]` `/fix [apply] [mirrors\|headings] [all]` `/coverage [all]` | the format: violations by note (`baseline`: only those not in the recorded baseline), the safe repairs as diffs, sources and citations (need `--format`) |
 | `/new <type> "<title>" [Key=Value]… [<relation> @note]…` `/link @A <relation> @B` `/ingest <file> [as <type>]` | safe writes; add `--dry-run` to see the diff only |
 | `/search <query>` | the query language of `vault search`; opens a result list |
 | in the list | ↑↓ PgUp/PgDn Home/End move · Enter preview · `o` open in Obsidian · Esc (or q) close |
@@ -26,6 +26,10 @@ or with `$VAULT_TUI_OPENER` (any program taking the URL as its argument).
 | `/explore [@note \| <name>] [--fresh]` | explore from a note (or where to start): a section per lens; opens the explore list |
 | in the explore list | ↑↓ move · Enter open (full evidence) · `k` keep · `d` dismiss · `c` clear · `l` link it (dry run, then `w`) · `p` pivot · `b` back · `r` again · `f` fresh · Esc close |
 | `/kept [lens]` `/map [record]` `/map since <date>` `/config` | what you kept; the map, a snapshot of it, what changed since; the engine settings |
+| `/pipeline [all]` `/next [all\|<n>]` | the reading pipeline with `--format core`: each source's stage and the gaps; one queue of what needs doing, most trusted first, with the command for each |
+| `/page new "<title>" @zettel… [from "<query>"]…` `/page check [@page]` `/page refresh @page` `/page exclude @page @zettel… [undo]` | pages made from zettels: a dry run shows the page (and its index and log lines); add `write` to write |
+| `/findings [<method>]… [all] [<id>]` `/idea new <id>` `/idea set @idea <status>` | what the engine discovered, each with a stable id; an idea from one; its status. Dry run first, `write` writes |
+| `/move @note <folder/\|name\|path>` `/merge @A @B` | every link keeps its target; a merge drops links that would point at the note they are in and lists them. Dry run first, `write` writes |
 | `/` | command suggestions (Tab completes, Enter runs) |
 | `@` | note picker (↑↓, Tab/Enter insert, Esc close) |
 | ↑ ↓ | history · ctrl+a/e/u/k edit · ctrl+c/ctrl+d quit |
@@ -42,7 +46,7 @@ src/commands/registry.ts    Command type + CommandRegistry (the extension point)
                             transcript output, or an InteractiveView that has the keys until closed
 src/commands/mentions.ts    @-mention parsing
 src/commands/builtin/       /help /stats /health /note /search /related /suggest /unlinked /explore /kept /map /config
-                            /check /fix /new /link /ingest /coverage
+                            /check /fix /new /link /ingest /coverage /pipeline /page /findings /idea /move /merge /next
 src/commands/args.ts        quote-aware argument splitting (words, "quoted", @mentions)
 src/system/open.ts          obsidian:// URLs and the system opener
 src/ui/                     App, Prompt (history, / suggestions, @ picker), StatusLine, views
@@ -54,9 +58,9 @@ src/ui/views/ExploreView.tsx the /explore list, result, link dry run (an Interac
 
 | Command | Runs | Ends with |
 |---|---|---|
-| `npm test` | generated-types check, unit tests, ink-testing-library frame tests (the App fed with responses recorded from the real server), integration tests against the real Python server | `Tests  103 passed (103)` |
+| `npm test` | generated-types check, unit tests, ink-testing-library frame tests (the App fed with responses recorded from the real server; `test/explore.test.tsx` for /explore /kept /map /config, `test/pipeline.test.tsx` for /pipeline /page /findings /idea /move /merge /next /check baseline), integration tests against the real Python server | `Tests  120 passed (120)` |
 | `npm run typecheck` | `tsc` over sources and tests | exit code 0 |
-| `npm run test:e2e` | builds, then launches `dist/cli.js` in a real pseudo-terminal with node-pty: the `/health` report; `/search` with move, preview, `o` and back; and with `--format brain` `/check`, `/coverage`, a `/link` that writes both notes and `/check changed`; an `/explore` session (`/map record`, keep, link it dry run then `w`, fresh, `/kept`, `/map since`) | `Tests  5 passed (5)` |
+| `npm run test:e2e` | builds, then launches `dist/cli.js` in a real pseudo-terminal with node-pty: the `/health` report; `/search` with move, preview, `o` and back; with `--format brain` `/check`, `/coverage`, a `/link` that writes both notes and `/check changed`; an `/explore` session (`/map record`, keep, link it dry run then `w`, fresh, `/kept`, `/map since`); with `--format core` `/pipeline`, `/findings link`, a `/merge` as a dry run then written (the self-link dropped on disk), `/check baseline`, `/next 3` | `Tests  6 passed (6)` |
 
 `node-pty` is a native module: on Linux `npm ci` compiles it (needs `build-essential` and `python3`);
 macOS uses a prebuilt binary. Only the end-to-end tests use it. Offline, node-gyp cannot download the Node.js headers;

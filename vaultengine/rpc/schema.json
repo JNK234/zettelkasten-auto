@@ -494,6 +494,186 @@
       "response": {
         "$ref": "#/$defs/ConfigShowResponse"
       }
+    },
+    "vault.pipeline": {
+      "summary": "Each source's stage (ingested, extracted, compiled) and the gaps (`vault pipeline`).",
+      "params": {
+        "$ref": "#/$defs/VaultPipelineParams"
+      },
+      "result": {
+        "$ref": "#/$defs/VaultPipelineResult"
+      },
+      "request": {
+        "$ref": "#/$defs/VaultPipelineRequest"
+      },
+      "response": {
+        "$ref": "#/$defs/VaultPipelineResponse"
+      }
+    },
+    "note.facts": {
+      "summary": "What the engine knows about one note: stage, what it rests on, what uses it, trust (`vault note`).",
+      "params": {
+        "$ref": "#/$defs/NoteFactsParams"
+      },
+      "result": {
+        "$ref": "#/$defs/NoteFactsResult"
+      },
+      "request": {
+        "$ref": "#/$defs/NoteFactsRequest"
+      },
+      "response": {
+        "$ref": "#/$defs/NoteFactsResponse"
+      }
+    },
+    "page.new": {
+      "summary": "A page from zettels, with its generated blocks, index and log lines (`vault page new`).",
+      "params": {
+        "$ref": "#/$defs/PageNewParams"
+      },
+      "result": {
+        "$ref": "#/$defs/PageNewResult"
+      },
+      "request": {
+        "$ref": "#/$defs/PageNewRequest"
+      },
+      "response": {
+        "$ref": "#/$defs/PageNewResponse"
+      }
+    },
+    "page.refresh": {
+      "summary": "Rebuild a page's blocks from the zettels it links now, and record them.",
+      "params": {
+        "$ref": "#/$defs/PageRefreshParams"
+      },
+      "result": {
+        "$ref": "#/$defs/StatefulWriteResult"
+      },
+      "request": {
+        "$ref": "#/$defs/PageRefreshRequest"
+      },
+      "response": {
+        "$ref": "#/$defs/PageRefreshResponse"
+      }
+    },
+    "page.exclude": {
+      "summary": "Record that zettels are not for a page, so it is not behind on them.",
+      "params": {
+        "$ref": "#/$defs/PageExcludeParams"
+      },
+      "result": {
+        "$ref": "#/$defs/StatefulWriteResult"
+      },
+      "request": {
+        "$ref": "#/$defs/PageExcludeRequest"
+      },
+      "response": {
+        "$ref": "#/$defs/PageExcludeResponse"
+      }
+    },
+    "page.check": {
+      "summary": "What needs attention on a page, or every page; whether it is ready.",
+      "params": {
+        "$ref": "#/$defs/PageCheckParams"
+      },
+      "result": {
+        "$ref": "#/$defs/PageCheckResult"
+      },
+      "request": {
+        "$ref": "#/$defs/PageCheckRequest"
+      },
+      "response": {
+        "$ref": "#/$defs/PageCheckResponse"
+      }
+    },
+    "findings.list": {
+      "summary": "What the engine discovered, each with a stable id and its evidence (`vault findings`).",
+      "params": {
+        "$ref": "#/$defs/FindingsListParams"
+      },
+      "result": {
+        "$ref": "#/$defs/FindingsListResult"
+      },
+      "request": {
+        "$ref": "#/$defs/FindingsListRequest"
+      },
+      "response": {
+        "$ref": "#/$defs/FindingsListResponse"
+      }
+    },
+    "idea.new": {
+      "summary": "An idea note from a finding (`vault idea new`).",
+      "params": {
+        "$ref": "#/$defs/IdeaNewParams"
+      },
+      "result": {
+        "$ref": "#/$defs/IdeaNewResult"
+      },
+      "request": {
+        "$ref": "#/$defs/IdeaNewRequest"
+      },
+      "response": {
+        "$ref": "#/$defs/IdeaNewResponse"
+      }
+    },
+    "idea.set": {
+      "summary": "Set an idea's status (`vault idea set`).",
+      "params": {
+        "$ref": "#/$defs/IdeaSetParams"
+      },
+      "result": {
+        "$ref": "#/$defs/StatefulWriteResult"
+      },
+      "request": {
+        "$ref": "#/$defs/IdeaSetRequest"
+      },
+      "response": {
+        "$ref": "#/$defs/IdeaSetResponse"
+      }
+    },
+    "note.move": {
+      "summary": "Move or rename a note; every link that reached it still does (`vault move`).",
+      "params": {
+        "$ref": "#/$defs/NoteMoveParams"
+      },
+      "result": {
+        "$ref": "#/$defs/RelocationResult"
+      },
+      "request": {
+        "$ref": "#/$defs/NoteMoveRequest"
+      },
+      "response": {
+        "$ref": "#/$defs/NoteMoveResponse"
+      }
+    },
+    "note.merge": {
+      "summary": "Merge note B into A: links to B reach A; self-links dropped (`vault merge`).",
+      "params": {
+        "$ref": "#/$defs/NoteMergeParams"
+      },
+      "result": {
+        "$ref": "#/$defs/RelocationResult"
+      },
+      "request": {
+        "$ref": "#/$defs/NoteMergeRequest"
+      },
+      "response": {
+        "$ref": "#/$defs/NoteMergeResponse"
+      }
+    },
+    "vault.next": {
+      "summary": "One queue of what needs doing, most trusted first, each with its command (`vault next`).",
+      "params": {
+        "$ref": "#/$defs/VaultNextParams"
+      },
+      "result": {
+        "$ref": "#/$defs/VaultNextResult"
+      },
+      "request": {
+        "$ref": "#/$defs/VaultNextRequest"
+      },
+      "response": {
+        "$ref": "#/$defs/VaultNextResponse"
+      }
     }
   },
   "x-errors": {
@@ -508,7 +688,8 @@
     "-32004": "Write rejected",
     "-32005": "Write failed",
     "-32006": "Invalid query",
-    "-32007": "Not available"
+    "-32007": "Not available",
+    "-32008": "No baseline recorded"
   },
   "$defs": {
     "AmbiguousLink": {
@@ -541,6 +722,210 @@
         "candidates"
       ],
       "title": "AmbiguousLink",
+      "type": "object"
+    },
+    "BaselineFixed": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "line": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Line"
+        },
+        "code": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Code"
+        },
+        "message": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Message"
+        }
+      },
+      "required": [
+        "path",
+        "line",
+        "code",
+        "message"
+      ],
+      "title": "BaselineFixed",
+      "type": "object"
+    },
+    "BaselineRename": {
+      "additionalProperties": false,
+      "properties": {
+        "from": {
+          "description": "The baselined path, gone now.",
+          "title": "From",
+          "type": "string"
+        },
+        "to": {
+          "description": "The note it became (its baselined violations follow it).",
+          "title": "To",
+          "type": "string"
+        },
+        "similarity": {
+          "title": "Similarity",
+          "type": "number"
+        },
+        "how": {
+          "enum": [
+            "same text",
+            "similar text"
+          ],
+          "title": "How",
+          "type": "string"
+        }
+      },
+      "required": [
+        "from",
+        "to",
+        "similarity",
+        "how"
+      ],
+      "title": "BaselineRename",
+      "type": "object"
+    },
+    "BaselineSummary": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "description": "The baseline file (.vaultengine/baseline-<format>.json).",
+          "title": "Path",
+          "type": "string"
+        },
+        "recorded_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Recorded At"
+        },
+        "recorded_now": {
+          "description": "True for update_baseline: it was just recorded.",
+          "title": "Recorded Now",
+          "type": "boolean"
+        },
+        "previous": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Violations in the baseline it replaced (update_baseline), if any.",
+          "title": "Previous"
+        },
+        "violations": {
+          "description": "Violations in the baseline.",
+          "title": "Violations",
+          "type": "integer"
+        },
+        "new": {
+          "description": "Violations not in it: these are listed, and make ok false.",
+          "title": "New",
+          "type": "integer"
+        },
+        "known": {
+          "description": "Violations in scope that it has: not listed.",
+          "title": "Known",
+          "type": "integer"
+        },
+        "fixed": {
+          "description": "Baselined violations found nowhere now.",
+          "title": "Fixed",
+          "type": "integer"
+        },
+        "fixed_items": {
+          "items": {
+            "$ref": "#/$defs/BaselineFixed"
+          },
+          "title": "Fixed Items",
+          "type": "array"
+        },
+        "renames": {
+          "description": "Baselined notes followed to a new path (same or similar text).",
+          "items": {
+            "$ref": "#/$defs/BaselineRename"
+          },
+          "title": "Renames",
+          "type": "array"
+        }
+      },
+      "required": [
+        "path",
+        "recorded_at",
+        "recorded_now",
+        "previous",
+        "violations",
+        "new",
+        "known",
+        "fixed",
+        "fixed_items",
+        "renames"
+      ],
+      "title": "BaselineSummary",
+      "type": "object"
+    },
+    "BehindZettel": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "tags": {
+          "description": "Tags it shares with the page.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Tags",
+          "type": "array"
+        },
+        "links": {
+          "description": "Notes both it and the page's zettels link to.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Links",
+          "type": "array"
+        }
+      },
+      "required": [
+        "path",
+        "tags",
+        "links"
+      ],
+      "title": "BehindZettel",
       "type": "object"
     },
     "BlockItem": {
@@ -822,6 +1207,86 @@
         "violations"
       ],
       "title": "CheckedNote",
+      "type": "object"
+    },
+    "Citation": {
+      "additionalProperties": false,
+      "properties": {
+        "line": {
+          "title": "Line",
+          "type": "integer"
+        },
+        "raw": {
+          "title": "Raw",
+          "type": "string"
+        },
+        "role": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Role"
+        },
+        "status": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Status"
+        },
+        "target_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Target Path"
+        },
+        "target_type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Target Type"
+        },
+        "url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "For reason url-only: the URL cited.",
+          "title": "Url"
+        }
+      },
+      "required": [
+        "line",
+        "raw"
+      ],
+      "title": "Citation",
       "type": "object"
     },
     "CitingNote": {
@@ -1357,6 +1822,30 @@
       "title": "CoverageSources",
       "type": "object"
     },
+    "DanglingLink": {
+      "additionalProperties": false,
+      "properties": {
+        "line": {
+          "title": "Line",
+          "type": "integer"
+        },
+        "raw": {
+          "title": "Raw",
+          "type": "string"
+        },
+        "status": {
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "line",
+        "raw",
+        "status"
+      ],
+      "title": "DanglingLink",
+      "type": "object"
+    },
     "DeepenBackbone": {
       "additionalProperties": false,
       "properties": {
@@ -1807,6 +2296,37 @@
         "below_cutoff"
       ],
       "title": "DeepenPairs",
+      "type": "object"
+    },
+    "DescribedNote": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Type"
+        },
+        "ignored": {
+          "title": "Ignored",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "path",
+        "type",
+        "ignored"
+      ],
+      "title": "DescribedNote",
       "type": "object"
     },
     "DirectEvidence": {
@@ -2792,7 +3312,14 @@
             "fix",
             "ingest",
             "link-it",
-            "unlink"
+            "unlink",
+            "page new",
+            "page refresh",
+            "page exclude",
+            "idea new",
+            "idea set",
+            "move",
+            "merge"
           ],
           "title": "Operation",
           "type": "string"
@@ -3607,7 +4134,14 @@
             "fix",
             "ingest",
             "link-it",
-            "unlink"
+            "unlink",
+            "page new",
+            "page refresh",
+            "page exclude",
+            "idea new",
+            "idea set",
+            "move",
+            "merge"
           ],
           "title": "Operation",
           "type": "string"
@@ -3755,6 +4289,300 @@
         "count"
       ],
       "title": "FieldCount",
+      "type": "object"
+    },
+    "Finding": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "Stable: derived from the method and the notes (survives edits and new evidence).",
+          "title": "Id",
+          "type": "string"
+        },
+        "method": {
+          "enum": [
+            "missing-note",
+            "same-idea",
+            "existing-name",
+            "link"
+          ],
+          "title": "Method",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "notes": {
+          "items": {
+            "$ref": "#/$defs/FindingNote"
+          },
+          "title": "Notes",
+          "type": "array"
+        },
+        "evidence": {
+          "description": "Lines, for people.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Evidence",
+          "type": "array"
+        },
+        "score": {
+          "description": "Orders findings within a method.",
+          "title": "Score",
+          "type": "number"
+        },
+        "data": {
+          "additionalProperties": true,
+          "description": "The evidence, machine-readable; keys depend on the method.",
+          "title": "Data",
+          "type": "object"
+        },
+        "about": {
+          "title": "About",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "method",
+        "title",
+        "notes",
+        "evidence",
+        "score",
+        "data",
+        "about"
+      ],
+      "title": "Finding",
+      "type": "object"
+    },
+    "FindingNote": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Null for a note that does not exist.",
+          "title": "Path"
+        },
+        "linking_notes": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Linking Notes"
+        }
+      },
+      "required": [
+        "name",
+        "path",
+        "linking_notes"
+      ],
+      "title": "FindingNote",
+      "type": "object"
+    },
+    "FindingsListParams": {
+      "additionalProperties": false,
+      "properties": {
+        "methods": {
+          "anyOf": [
+            {
+              "items": {
+                "enum": [
+                  "missing-note",
+                  "same-idea",
+                  "existing-name",
+                  "link"
+                ],
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Only these methods.",
+          "title": "Methods"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Only this finding (error -32002 when there is none now).",
+          "title": "Id"
+        },
+        "limit": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Findings per method (null = all); total counts them all.",
+          "title": "Limit"
+        }
+      },
+      "title": "FindingsListParams",
+      "type": "object"
+    },
+    "FindingsListRequest": {
+      "additionalProperties": false,
+      "description": "What the engine discovered, each with a stable id and its evidence (`vault findings`). Omit \"id\" to send a notification (no response).",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "method": {
+          "const": "findings.list",
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/FindingsListParams"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "method"
+      ],
+      "title": "FindingsListRequest",
+      "type": "object"
+    },
+    "FindingsListResponse": {
+      "additionalProperties": false,
+      "description": "Successful response to findings.list.",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Id"
+        },
+        "result": {
+          "$ref": "#/$defs/FindingsListResult"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "result"
+      ],
+      "title": "FindingsListResponse",
+      "type": "object"
+    },
+    "FindingsListResult": {
+      "additionalProperties": false,
+      "properties": {
+        "index": {
+          "$ref": "#/$defs/IndexInfo"
+        },
+        "total": {
+          "description": "Findings (of the methods asked), before limit.",
+          "title": "Total",
+          "type": "integer"
+        },
+        "by_method": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "title": "By Method",
+          "type": "object"
+        },
+        "thresholds": {
+          "additionalProperties": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "description": "Per method: the vault's percentile, its floor, the value used.",
+          "title": "Thresholds",
+          "type": "object"
+        },
+        "findings": {
+          "items": {
+            "$ref": "#/$defs/Finding"
+          },
+          "title": "Findings",
+          "type": "array"
+        },
+        "limit": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Limit"
+        }
+      },
+      "required": [
+        "index",
+        "total",
+        "by_method",
+        "thresholds",
+        "findings",
+        "limit"
+      ],
+      "title": "FindingsListResult",
       "type": "object"
     },
     "FolderCount": {
@@ -4291,6 +5119,360 @@
       "title": "HiddenResult",
       "type": "object"
     },
+    "IdeaNewParams": {
+      "additionalProperties": false,
+      "properties": {
+        "dry_run": {
+          "default": false,
+          "description": "Check and return the diff; write nothing.",
+          "title": "Dry Run",
+          "type": "boolean"
+        },
+        "finding": {
+          "description": "A finding id from findings.list.",
+          "minLength": 1,
+          "title": "Finding",
+          "type": "string"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Default: from the finding.",
+          "title": "Title"
+        },
+        "tags": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Default: the tags the finding's notes share.",
+          "title": "Tags"
+        }
+      },
+      "required": [
+        "finding"
+      ],
+      "title": "IdeaNewParams",
+      "type": "object"
+    },
+    "IdeaNewRequest": {
+      "additionalProperties": false,
+      "description": "An idea note from a finding (`vault idea new`). Omit \"id\" to send a notification (no response).",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "method": {
+          "const": "idea.new",
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/IdeaNewParams"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "method",
+        "params"
+      ],
+      "title": "IdeaNewRequest",
+      "type": "object"
+    },
+    "IdeaNewResponse": {
+      "additionalProperties": false,
+      "description": "Successful response to idea.new.",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Id"
+        },
+        "result": {
+          "$ref": "#/$defs/IdeaNewResult"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "result"
+      ],
+      "title": "IdeaNewResponse",
+      "type": "object"
+    },
+    "IdeaNewResult": {
+      "additionalProperties": false,
+      "properties": {
+        "operation": {
+          "enum": [
+            "new",
+            "link",
+            "set",
+            "fix",
+            "ingest",
+            "link-it",
+            "unlink",
+            "page new",
+            "page refresh",
+            "page exclude",
+            "idea new",
+            "idea set",
+            "move",
+            "merge"
+          ],
+          "title": "Operation",
+          "type": "string"
+        },
+        "status": {
+          "description": "written; refused (would add violations, nothing written); dry-run; unchanged.",
+          "enum": [
+            "written",
+            "refused",
+            "dry-run",
+            "unchanged"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "dry_run": {
+          "title": "Dry Run",
+          "type": "boolean"
+        },
+        "written": {
+          "title": "Written",
+          "type": "boolean"
+        },
+        "files": {
+          "items": {
+            "$ref": "#/$defs/WrittenFile"
+          },
+          "title": "Files",
+          "type": "array"
+        },
+        "already": {
+          "description": "Parts of the request that were already so, e.g. an existing mirror.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Already",
+          "type": "array"
+        },
+        "new_violations": {
+          "description": "Why a write was refused: violations it would add.",
+          "items": {
+            "$ref": "#/$defs/Violation"
+          },
+          "title": "New Violations",
+          "type": "array"
+        },
+        "tolerated": {
+          "description": "Violations already in the notes written; they do not block a write.",
+          "items": {
+            "$ref": "#/$defs/Violation"
+          },
+          "title": "Tolerated",
+          "type": "array"
+        },
+        "index": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IndexSync"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Null unless written."
+        },
+        "recovered": {
+          "description": "Files restored from an interrupted earlier write.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Recovered",
+          "type": "array"
+        },
+        "state": {
+          "description": "What the write records (or would) in the engine's state files.",
+          "items": {
+            "$ref": "#/$defs/StateChange"
+          },
+          "title": "State",
+          "type": "array"
+        },
+        "finding": {
+          "$ref": "#/$defs/Finding"
+        },
+        "idea": {
+          "$ref": "#/$defs/NewNote"
+        }
+      },
+      "required": [
+        "operation",
+        "status",
+        "dry_run",
+        "written",
+        "files",
+        "already",
+        "new_violations",
+        "tolerated",
+        "index",
+        "recovered",
+        "state",
+        "finding",
+        "idea"
+      ],
+      "title": "IdeaNewResult",
+      "type": "object"
+    },
+    "IdeaSetParams": {
+      "additionalProperties": false,
+      "properties": {
+        "dry_run": {
+          "default": false,
+          "description": "Check and return the diff; write nothing.",
+          "title": "Dry Run",
+          "type": "boolean"
+        },
+        "idea": {
+          "description": "Vault path or name.",
+          "minLength": 1,
+          "title": "Idea",
+          "type": "string"
+        },
+        "status": {
+          "description": "One of the format's statuses (open, dropped, done), with or without '#'.",
+          "minLength": 1,
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "idea",
+        "status"
+      ],
+      "title": "IdeaSetParams",
+      "type": "object"
+    },
+    "IdeaSetRequest": {
+      "additionalProperties": false,
+      "description": "Set an idea's status (`vault idea set`). Omit \"id\" to send a notification (no response).",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "method": {
+          "const": "idea.set",
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/IdeaSetParams"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "method",
+        "params"
+      ],
+      "title": "IdeaSetRequest",
+      "type": "object"
+    },
+    "IdeaSetResponse": {
+      "additionalProperties": false,
+      "description": "Successful response to idea.set.",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Id"
+        },
+        "result": {
+          "$ref": "#/$defs/StatefulWriteResult"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "result"
+      ],
+      "title": "IdeaSetResponse",
+      "type": "object"
+    },
     "IncomingLink": {
       "additionalProperties": false,
       "properties": {
@@ -4567,6 +5749,41 @@
       "title": "IndexBuildResult",
       "type": "object"
     },
+    "IndexInfo": {
+      "additionalProperties": false,
+      "properties": {
+        "db": {
+          "title": "Db",
+          "type": "string"
+        },
+        "last_indexed_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Last Indexed At"
+        },
+        "stale": {
+          "title": "Stale",
+          "type": "boolean"
+        },
+        "pending": {
+          "$ref": "#/$defs/PendingChanges"
+        }
+      },
+      "required": [
+        "db",
+        "last_indexed_at",
+        "stale",
+        "pending"
+      ],
+      "title": "IndexInfo",
+      "type": "object"
+    },
     "IndexStatusParams": {
       "additionalProperties": false,
       "properties": {},
@@ -4763,10 +5980,12 @@
       "additionalProperties": false,
       "properties": {
         "status": {
+          "description": "unchanged: the write changed no note, only the engine's state (e.g. page.exclude).",
           "enum": [
             "updated",
             "no-index",
-            "needs-rebuild"
+            "needs-rebuild",
+            "unchanged"
           ],
           "title": "Status",
           "type": "string"
@@ -4987,6 +6206,38 @@
         "at"
       ],
       "title": "KeptItem",
+      "type": "object"
+    },
+    "KindCount": {
+      "additionalProperties": false,
+      "properties": {
+        "listed": {
+          "description": "In the queue (items of some kinds below the median trust are left out).",
+          "title": "Listed",
+          "type": "integer"
+        },
+        "all": {
+          "title": "All",
+          "type": "integer"
+        },
+        "zettels_in_no_page": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Zettels In No Page"
+        }
+      },
+      "required": [
+        "listed",
+        "all"
+      ],
+      "title": "KindCount",
       "type": "object"
     },
     "LeftOutTag": {
@@ -6763,6 +8014,92 @@
       "title": "NameCount",
       "type": "object"
     },
+    "NewNote": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "content": {
+          "title": "Content",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "content"
+      ],
+      "title": "NewNote",
+      "type": "object"
+    },
+    "NextItem": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "refresh",
+            "behind",
+            "merge",
+            "write",
+            "extract",
+            "page",
+            "idea"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "subject": {
+          "description": "A note path, or a missing note's name.",
+          "title": "Subject",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "why": {
+          "title": "Why",
+          "type": "string"
+        },
+        "command": {
+          "description": "The vault command that resolves it.",
+          "title": "Command",
+          "type": "string"
+        },
+        "trust": {
+          "description": "Percentile of how much the vault relies on the subject.",
+          "title": "Trust",
+          "type": "integer"
+        },
+        "raw": {
+          "title": "Raw",
+          "type": "number"
+        },
+        "key": {
+          "title": "Key",
+          "type": "string"
+        },
+        "id": {
+          "description": "Stable id of the item.",
+          "title": "Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "subject",
+        "title",
+        "why",
+        "command",
+        "trust",
+        "raw",
+        "key",
+        "id"
+      ],
+      "title": "NextItem",
+      "type": "object"
+    },
     "NoEvidence": {
       "additionalProperties": false,
       "properties": {},
@@ -6911,6 +8248,213 @@
         "lenses"
       ],
       "title": "NoteDeepenResult",
+      "type": "object"
+    },
+    "NoteFactsParams": {
+      "additionalProperties": false,
+      "properties": {
+        "note": {
+          "description": "Vault path or note name.",
+          "minLength": 1,
+          "title": "Note",
+          "type": "string"
+        }
+      },
+      "required": [
+        "note"
+      ],
+      "title": "NoteFactsParams",
+      "type": "object"
+    },
+    "NoteFactsRequest": {
+      "additionalProperties": false,
+      "description": "What the engine knows about one note: stage, what it rests on, what uses it, trust (`vault note`). Omit \"id\" to send a notification (no response).",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "method": {
+          "const": "note.facts",
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/NoteFactsParams"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "method",
+        "params"
+      ],
+      "title": "NoteFactsRequest",
+      "type": "object"
+    },
+    "NoteFactsResponse": {
+      "additionalProperties": false,
+      "description": "Successful response to note.facts.",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Id"
+        },
+        "result": {
+          "$ref": "#/$defs/NoteFactsResult"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "result"
+      ],
+      "title": "NoteFactsResponse",
+      "type": "object"
+    },
+    "NoteFactsResult": {
+      "additionalProperties": false,
+      "properties": {
+        "format": {
+          "$ref": "#/$defs/FormatRef"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Type"
+        },
+        "ignored": {
+          "title": "Ignored",
+          "type": "boolean"
+        },
+        "stage": {
+          "anyOf": [
+            {
+              "enum": [
+                "ingested",
+                "extracted",
+                "compiled"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "For sources and extract notes; null when an extract note rests on no source.",
+          "title": "Stage"
+        },
+        "modified": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The file's modification time (ISO 8601).",
+          "title": "Modified"
+        },
+        "rests_on": {
+          "$ref": "#/$defs/RestsOn"
+        },
+        "used_by": {
+          "$ref": "#/$defs/UsedBy"
+        },
+        "linked_from": {
+          "items": {
+            "$ref": "#/$defs/DescribedNote"
+          },
+          "title": "Linked From",
+          "type": "array"
+        },
+        "links_to": {
+          "items": {
+            "$ref": "#/$defs/DescribedNote"
+          },
+          "title": "Links To",
+          "type": "array"
+        },
+        "links_to_nothing": {
+          "description": "Links that match no note, or several.",
+          "items": {
+            "$ref": "#/$defs/DanglingLink"
+          },
+          "title": "Links To Nothing",
+          "type": "array"
+        },
+        "violations": {
+          "items": {
+            "$ref": "#/$defs/Violation"
+          },
+          "title": "Violations",
+          "type": "array"
+        },
+        "trust": {
+          "$ref": "#/$defs/Trust"
+        },
+        "roles": {
+          "$ref": "#/$defs/PipelineRoles"
+        }
+      },
+      "required": [
+        "format",
+        "path",
+        "type",
+        "ignored",
+        "stage",
+        "modified",
+        "rests_on",
+        "used_by",
+        "linked_from",
+        "links_to",
+        "links_to_nothing",
+        "violations",
+        "trust",
+        "roles"
+      ],
+      "title": "NoteFactsResult",
       "type": "object"
     },
     "NoteGetParams": {
@@ -7284,7 +8828,14 @@
             "fix",
             "ingest",
             "link-it",
-            "unlink"
+            "unlink",
+            "page new",
+            "page refresh",
+            "page exclude",
+            "idea new",
+            "idea set",
+            "move",
+            "merge"
           ],
           "title": "Operation",
           "type": "string"
@@ -7505,6 +9056,215 @@
         "result"
       ],
       "title": "NoteLinkResponse",
+      "type": "object"
+    },
+    "NoteMergeParams": {
+      "additionalProperties": false,
+      "properties": {
+        "dry_run": {
+          "default": false,
+          "description": "Check and return the diff; write nothing.",
+          "title": "Dry Run",
+          "type": "boolean"
+        },
+        "survivor": {
+          "description": "A, the note that stays (vault path or name).",
+          "minLength": 1,
+          "title": "Survivor",
+          "type": "string"
+        },
+        "other": {
+          "description": "B, merged into A and removed; or a name links use with no note.",
+          "minLength": 1,
+          "title": "Other",
+          "type": "string"
+        }
+      },
+      "required": [
+        "survivor",
+        "other"
+      ],
+      "title": "NoteMergeParams",
+      "type": "object"
+    },
+    "NoteMergeRequest": {
+      "additionalProperties": false,
+      "description": "Merge note B into A: links to B reach A; self-links dropped (`vault merge`). Omit \"id\" to send a notification (no response).",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "method": {
+          "const": "note.merge",
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/NoteMergeParams"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "method",
+        "params"
+      ],
+      "title": "NoteMergeRequest",
+      "type": "object"
+    },
+    "NoteMergeResponse": {
+      "additionalProperties": false,
+      "description": "Successful response to note.merge.",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Id"
+        },
+        "result": {
+          "$ref": "#/$defs/RelocationResult"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "result"
+      ],
+      "title": "NoteMergeResponse",
+      "type": "object"
+    },
+    "NoteMoveParams": {
+      "additionalProperties": false,
+      "properties": {
+        "dry_run": {
+          "default": false,
+          "description": "Check and return the diff; write nothing.",
+          "title": "Dry Run",
+          "type": "boolean"
+        },
+        "note": {
+          "description": "Vault path or name.",
+          "minLength": 1,
+          "title": "Note",
+          "type": "string"
+        },
+        "to": {
+          "description": "A folder (ending in /, or existing), a new name, or a new vault path.",
+          "title": "To",
+          "type": "string"
+        }
+      },
+      "required": [
+        "note",
+        "to"
+      ],
+      "title": "NoteMoveParams",
+      "type": "object"
+    },
+    "NoteMoveRequest": {
+      "additionalProperties": false,
+      "description": "Move or rename a note; every link that reached it still does (`vault move`). Omit \"id\" to send a notification (no response).",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "method": {
+          "const": "note.move",
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/NoteMoveParams"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "method",
+        "params"
+      ],
+      "title": "NoteMoveRequest",
+      "type": "object"
+    },
+    "NoteMoveResponse": {
+      "additionalProperties": false,
+      "description": "Successful response to note.move.",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Id"
+        },
+        "result": {
+          "$ref": "#/$defs/RelocationResult"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "result"
+      ],
+      "title": "NoteMoveResponse",
       "type": "object"
     },
     "NoteNewParams": {
@@ -8677,6 +10437,895 @@
       "title": "OutgoingLink",
       "type": "object"
     },
+    "PageBlock": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "current",
+            "out-of-date",
+            "missing"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "removed": {
+          "description": "Lines in the block that the zettels no longer give.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Removed",
+          "type": "array"
+        },
+        "added": {
+          "description": "Lines the zettels give that the block lacks.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Added",
+          "type": "array"
+        }
+      },
+      "required": [
+        "name",
+        "status",
+        "removed",
+        "added"
+      ],
+      "title": "PageBlock",
+      "type": "object"
+    },
+    "PageCheck": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "managed": {
+          "description": "Made by page.new (it has vault blocks).",
+          "title": "Managed",
+          "type": "boolean"
+        },
+        "blocks": {
+          "items": {
+            "$ref": "#/$defs/PageBlock"
+          },
+          "title": "Blocks",
+          "type": "array"
+        },
+        "changed": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/PageZettelChange"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Zettels changed since the last refresh; null: none recorded.",
+          "title": "Changed"
+        },
+        "behind": {
+          "description": "Zettels with 2+ tags or links in common with the page, not on it.",
+          "items": {
+            "$ref": "#/$defs/BehindZettel"
+          },
+          "title": "Behind",
+          "type": "array"
+        },
+        "excluded": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Excluded",
+          "type": "array"
+        },
+        "violations": {
+          "items": {
+            "$ref": "#/$defs/Violation"
+          },
+          "title": "Violations",
+          "type": "array"
+        },
+        "index": {
+          "anyOf": [
+            {
+              "enum": [
+                "current",
+                "out-of-date",
+                "missing"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Its line in the index note.",
+          "title": "Index"
+        },
+        "refreshed_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Refreshed At"
+        },
+        "renamed_from": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Renamed From"
+        },
+        "ready": {
+          "description": "Blocks current, zettels as recorded, nothing behind, index line current, no violations.",
+          "title": "Ready",
+          "type": "boolean"
+        },
+        "problems": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Problems",
+          "type": "array"
+        }
+      },
+      "required": [
+        "path",
+        "title",
+        "managed",
+        "blocks",
+        "changed",
+        "behind",
+        "excluded",
+        "violations",
+        "index",
+        "refreshed_at",
+        "renamed_from",
+        "ready",
+        "problems"
+      ],
+      "title": "PageCheck",
+      "type": "object"
+    },
+    "PageCheckParams": {
+      "additionalProperties": false,
+      "properties": {
+        "page": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "One page (vault path or name); null = every page.",
+          "title": "Page"
+        }
+      },
+      "title": "PageCheckParams",
+      "type": "object"
+    },
+    "PageCheckRequest": {
+      "additionalProperties": false,
+      "description": "What needs attention on a page, or every page; whether it is ready. Omit \"id\" to send a notification (no response).",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "method": {
+          "const": "page.check",
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/PageCheckParams"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "method"
+      ],
+      "title": "PageCheckRequest",
+      "type": "object"
+    },
+    "PageCheckResponse": {
+      "additionalProperties": false,
+      "description": "Successful response to page.check.",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Id"
+        },
+        "result": {
+          "$ref": "#/$defs/PageCheckResult"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "result"
+      ],
+      "title": "PageCheckResponse",
+      "type": "object"
+    },
+    "PageCheckResult": {
+      "additionalProperties": false,
+      "properties": {
+        "format": {
+          "$ref": "#/$defs/FormatRef"
+        },
+        "pages": {
+          "items": {
+            "$ref": "#/$defs/PageCheck"
+          },
+          "title": "Pages",
+          "type": "array"
+        },
+        "ready": {
+          "description": "Every managed page (or the one asked about) is ready.",
+          "title": "Ready",
+          "type": "boolean"
+        },
+        "managed": {
+          "title": "Managed",
+          "type": "integer"
+        },
+        "ready_pages": {
+          "title": "Ready Pages",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "format",
+        "pages",
+        "ready",
+        "managed",
+        "ready_pages"
+      ],
+      "title": "PageCheckResult",
+      "type": "object"
+    },
+    "PageExcludeParams": {
+      "additionalProperties": false,
+      "properties": {
+        "dry_run": {
+          "default": false,
+          "description": "Check and return the diff; write nothing.",
+          "title": "Dry Run",
+          "type": "boolean"
+        },
+        "page": {
+          "minLength": 1,
+          "title": "Page",
+          "type": "string"
+        },
+        "zettels": {
+          "description": "Zettels not for this page (vault path or name).",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Zettels",
+          "type": "array"
+        },
+        "undo": {
+          "default": false,
+          "description": "Bring them back.",
+          "title": "Undo",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "page",
+        "zettels"
+      ],
+      "title": "PageExcludeParams",
+      "type": "object"
+    },
+    "PageExcludeRequest": {
+      "additionalProperties": false,
+      "description": "Record that zettels are not for a page, so it is not behind on them. Omit \"id\" to send a notification (no response).",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "method": {
+          "const": "page.exclude",
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/PageExcludeParams"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "method",
+        "params"
+      ],
+      "title": "PageExcludeRequest",
+      "type": "object"
+    },
+    "PageExcludeResponse": {
+      "additionalProperties": false,
+      "description": "Successful response to page.exclude.",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Id"
+        },
+        "result": {
+          "$ref": "#/$defs/StatefulWriteResult"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "result"
+      ],
+      "title": "PageExcludeResponse",
+      "type": "object"
+    },
+    "PageFrom": {
+      "additionalProperties": false,
+      "properties": {
+        "query": {
+          "title": "Query",
+          "type": "string"
+        },
+        "matched": {
+          "description": "Notes the query matched.",
+          "title": "Matched",
+          "type": "integer"
+        },
+        "zettels": {
+          "description": "Of them, zettels.",
+          "title": "Zettels",
+          "type": "integer"
+        },
+        "taken": {
+          "description": "The best-ranked zettels taken (limit).",
+          "items": {
+            "type": "string"
+          },
+          "title": "Taken",
+          "type": "array"
+        }
+      },
+      "required": [
+        "query",
+        "matched",
+        "zettels",
+        "taken"
+      ],
+      "title": "PageFrom",
+      "type": "object"
+    },
+    "PageNewParams": {
+      "additionalProperties": false,
+      "properties": {
+        "dry_run": {
+          "default": false,
+          "description": "Check and return the diff; write nothing.",
+          "title": "Dry Run",
+          "type": "boolean"
+        },
+        "title": {
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "zettels": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Zettels by vault path or name.",
+          "title": "Zettels"
+        },
+        "queries": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Search queries: the best-ranked zettels of each (needs the index).",
+          "title": "Queries"
+        },
+        "limit": {
+          "default": 10,
+          "description": "Zettels taken from each query.",
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        },
+        "tags": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The page's Tags value (default: the tags its zettels share).",
+          "title": "Tags"
+        },
+        "folder": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Its folder (default: the page type's folder).",
+          "title": "Folder"
+        }
+      },
+      "required": [
+        "title"
+      ],
+      "title": "PageNewParams",
+      "type": "object"
+    },
+    "PageNewRequest": {
+      "additionalProperties": false,
+      "description": "A page from zettels, with its generated blocks, index and log lines (`vault page new`). Omit \"id\" to send a notification (no response).",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "method": {
+          "const": "page.new",
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/PageNewParams"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "method",
+        "params"
+      ],
+      "title": "PageNewRequest",
+      "type": "object"
+    },
+    "PageNewResponse": {
+      "additionalProperties": false,
+      "description": "Successful response to page.new.",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Id"
+        },
+        "result": {
+          "$ref": "#/$defs/PageNewResult"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "result"
+      ],
+      "title": "PageNewResponse",
+      "type": "object"
+    },
+    "PageNewResult": {
+      "additionalProperties": false,
+      "properties": {
+        "operation": {
+          "enum": [
+            "new",
+            "link",
+            "set",
+            "fix",
+            "ingest",
+            "link-it",
+            "unlink",
+            "page new",
+            "page refresh",
+            "page exclude",
+            "idea new",
+            "idea set",
+            "move",
+            "merge"
+          ],
+          "title": "Operation",
+          "type": "string"
+        },
+        "status": {
+          "description": "written; refused (would add violations, nothing written); dry-run; unchanged.",
+          "enum": [
+            "written",
+            "refused",
+            "dry-run",
+            "unchanged"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "dry_run": {
+          "title": "Dry Run",
+          "type": "boolean"
+        },
+        "written": {
+          "title": "Written",
+          "type": "boolean"
+        },
+        "files": {
+          "items": {
+            "$ref": "#/$defs/WrittenFile"
+          },
+          "title": "Files",
+          "type": "array"
+        },
+        "already": {
+          "description": "Parts of the request that were already so, e.g. an existing mirror.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Already",
+          "type": "array"
+        },
+        "new_violations": {
+          "description": "Why a write was refused: violations it would add.",
+          "items": {
+            "$ref": "#/$defs/Violation"
+          },
+          "title": "New Violations",
+          "type": "array"
+        },
+        "tolerated": {
+          "description": "Violations already in the notes written; they do not block a write.",
+          "items": {
+            "$ref": "#/$defs/Violation"
+          },
+          "title": "Tolerated",
+          "type": "array"
+        },
+        "index": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IndexSync"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Null unless written."
+        },
+        "recovered": {
+          "description": "Files restored from an interrupted earlier write.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Recovered",
+          "type": "array"
+        },
+        "state": {
+          "description": "What the write records (or would) in the engine's state files.",
+          "items": {
+            "$ref": "#/$defs/StateChange"
+          },
+          "title": "State",
+          "type": "array"
+        },
+        "page": {
+          "$ref": "#/$defs/NewNote"
+        },
+        "from": {
+          "description": "Per query: what it matched and took.",
+          "items": {
+            "$ref": "#/$defs/PageFrom"
+          },
+          "title": "From",
+          "type": "array"
+        }
+      },
+      "required": [
+        "operation",
+        "status",
+        "dry_run",
+        "written",
+        "files",
+        "already",
+        "new_violations",
+        "tolerated",
+        "index",
+        "recovered",
+        "state",
+        "page",
+        "from"
+      ],
+      "title": "PageNewResult",
+      "type": "object"
+    },
+    "PageRefreshParams": {
+      "additionalProperties": false,
+      "properties": {
+        "dry_run": {
+          "default": false,
+          "description": "Check and return the diff; write nothing.",
+          "title": "Dry Run",
+          "type": "boolean"
+        },
+        "page": {
+          "description": "Vault path or name.",
+          "minLength": 1,
+          "title": "Page",
+          "type": "string"
+        }
+      },
+      "required": [
+        "page"
+      ],
+      "title": "PageRefreshParams",
+      "type": "object"
+    },
+    "PageRefreshRequest": {
+      "additionalProperties": false,
+      "description": "Rebuild a page's blocks from the zettels it links now, and record them. Omit \"id\" to send a notification (no response).",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "method": {
+          "const": "page.refresh",
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/PageRefreshParams"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "method",
+        "params"
+      ],
+      "title": "PageRefreshRequest",
+      "type": "object"
+    },
+    "PageRefreshResponse": {
+      "additionalProperties": false,
+      "description": "Successful response to page.refresh.",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Id"
+        },
+        "result": {
+          "$ref": "#/$defs/StatefulWriteResult"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "result"
+      ],
+      "title": "PageRefreshResponse",
+      "type": "object"
+    },
+    "PageVia": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "via": {
+          "description": "The extract notes it goes through.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Via",
+          "type": "array"
+        }
+      },
+      "required": [
+        "path",
+        "via"
+      ],
+      "title": "PageVia",
+      "type": "object"
+    },
+    "PageZettelChange": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "not recorded",
+            "deleted",
+            "changed"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "status"
+      ],
+      "title": "PageZettelChange",
+      "type": "object"
+    },
     "PendingChanges": {
       "additionalProperties": false,
       "properties": {
@@ -8768,6 +11417,143 @@
         "positions"
       ],
       "title": "PickedNote",
+      "type": "object"
+    },
+    "PipelineCompile": {
+      "additionalProperties": false,
+      "properties": {
+        "total": {
+          "title": "Total",
+          "type": "integer"
+        },
+        "using_an_extract_note": {
+          "title": "Using An Extract Note",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "total",
+        "using_an_extract_note"
+      ],
+      "title": "PipelineCompile",
+      "type": "object"
+    },
+    "PipelineExtract": {
+      "additionalProperties": false,
+      "properties": {
+        "total": {
+          "title": "Total",
+          "type": "integer"
+        },
+        "in_a_compile_note": {
+          "title": "In A Compile Note",
+          "type": "integer"
+        },
+        "resting_on_a_source": {
+          "title": "Resting On A Source",
+          "type": "integer"
+        },
+        "unsourced": {
+          "$ref": "#/$defs/Unsourced"
+        }
+      },
+      "required": [
+        "total",
+        "in_a_compile_note",
+        "resting_on_a_source",
+        "unsourced"
+      ],
+      "title": "PipelineExtract",
+      "type": "object"
+    },
+    "PipelineGaps": {
+      "additionalProperties": false,
+      "properties": {
+        "not_extracted": {
+          "description": "Sources no extract note links to.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Not Extracted",
+          "type": "array"
+        },
+        "not_compiled": {
+          "description": "Extract notes no compile note links to.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Not Compiled",
+          "type": "array"
+        }
+      },
+      "required": [
+        "not_extracted",
+        "not_compiled"
+      ],
+      "title": "PipelineGaps",
+      "type": "object"
+    },
+    "PipelineRoles": {
+      "additionalProperties": false,
+      "properties": {
+        "sources": {
+          "description": "Types whose notes are sources (ingested, extracted, compiled).",
+          "items": {
+            "type": "string"
+          },
+          "title": "Sources",
+          "type": "array"
+        },
+        "extract": {
+          "description": "Types that extract from sources (zettels).",
+          "items": {
+            "type": "string"
+          },
+          "title": "Extract",
+          "type": "array"
+        },
+        "compile": {
+          "description": "Types that compile extracts (pages).",
+          "items": {
+            "type": "string"
+          },
+          "title": "Compile",
+          "type": "array"
+        }
+      },
+      "required": [
+        "sources",
+        "extract",
+        "compile"
+      ],
+      "title": "PipelineRoles",
+      "type": "object"
+    },
+    "PipelineStages": {
+      "additionalProperties": false,
+      "properties": {
+        "ingested": {
+          "description": "Sources no extract note links to.",
+          "title": "Ingested",
+          "type": "integer"
+        },
+        "extracted": {
+          "description": "Sources an extract note links to, that no compile note uses yet.",
+          "title": "Extracted",
+          "type": "integer"
+        },
+        "compiled": {
+          "description": "Sources a compile note reaches through an extract note.",
+          "title": "Compiled",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "ingested",
+        "extracted",
+        "compiled"
+      ],
+      "title": "PipelineStages",
       "type": "object"
     },
     "PlacedNote": {
@@ -9017,6 +11803,159 @@
       "title": "RelationRef",
       "type": "object"
     },
+    "RelocationResult": {
+      "additionalProperties": false,
+      "properties": {
+        "operation": {
+          "enum": [
+            "new",
+            "link",
+            "set",
+            "fix",
+            "ingest",
+            "link-it",
+            "unlink",
+            "page new",
+            "page refresh",
+            "page exclude",
+            "idea new",
+            "idea set",
+            "move",
+            "merge"
+          ],
+          "title": "Operation",
+          "type": "string"
+        },
+        "status": {
+          "description": "written; refused (would add violations, nothing written); dry-run; unchanged.",
+          "enum": [
+            "written",
+            "refused",
+            "dry-run",
+            "unchanged"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "dry_run": {
+          "title": "Dry Run",
+          "type": "boolean"
+        },
+        "written": {
+          "title": "Written",
+          "type": "boolean"
+        },
+        "files": {
+          "items": {
+            "$ref": "#/$defs/WrittenFile"
+          },
+          "title": "Files",
+          "type": "array"
+        },
+        "already": {
+          "description": "Parts of the request that were already so, e.g. an existing mirror.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Already",
+          "type": "array"
+        },
+        "new_violations": {
+          "description": "Why a write was refused: violations it would add.",
+          "items": {
+            "$ref": "#/$defs/Violation"
+          },
+          "title": "New Violations",
+          "type": "array"
+        },
+        "tolerated": {
+          "description": "Violations already in the notes written; they do not block a write.",
+          "items": {
+            "$ref": "#/$defs/Violation"
+          },
+          "title": "Tolerated",
+          "type": "array"
+        },
+        "index": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IndexSync"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Null unless written."
+        },
+        "recovered": {
+          "description": "Files restored from an interrupted earlier write.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Recovered",
+          "type": "array"
+        },
+        "state": {
+          "description": "What the write records (or would) in the engine's state files.",
+          "items": {
+            "$ref": "#/$defs/StateChange"
+          },
+          "title": "State",
+          "type": "array"
+        },
+        "moved": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Old path -> new path (a merged note -> its survivor).",
+          "title": "Moved",
+          "type": "object"
+        },
+        "rewritten": {
+          "description": "'path:line  old -> new' for every link re-spelled.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Rewritten",
+          "type": "array"
+        },
+        "now_resolving": {
+          "description": "Links that matched no note and reach the moved note now.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Now Resolving",
+          "type": "array"
+        },
+        "self_links": {
+          "description": "Links a merge would point at the note they are in: dropped.",
+          "items": {
+            "$ref": "#/$defs/SelfLink"
+          },
+          "title": "Self Links",
+          "type": "array"
+        }
+      },
+      "required": [
+        "operation",
+        "status",
+        "dry_run",
+        "written",
+        "files",
+        "already",
+        "new_violations",
+        "tolerated",
+        "index",
+        "recovered",
+        "state",
+        "moved",
+        "rewritten",
+        "now_resolving",
+        "self_links"
+      ],
+      "title": "RelocationResult",
+      "type": "object"
+    },
     "Request": {
       "description": "Any request this server accepts.",
       "anyOf": [
@@ -9112,6 +12051,42 @@
         },
         {
           "$ref": "#/$defs/ConfigShowRequest"
+        },
+        {
+          "$ref": "#/$defs/VaultPipelineRequest"
+        },
+        {
+          "$ref": "#/$defs/NoteFactsRequest"
+        },
+        {
+          "$ref": "#/$defs/PageNewRequest"
+        },
+        {
+          "$ref": "#/$defs/PageRefreshRequest"
+        },
+        {
+          "$ref": "#/$defs/PageExcludeRequest"
+        },
+        {
+          "$ref": "#/$defs/PageCheckRequest"
+        },
+        {
+          "$ref": "#/$defs/FindingsListRequest"
+        },
+        {
+          "$ref": "#/$defs/IdeaNewRequest"
+        },
+        {
+          "$ref": "#/$defs/IdeaSetRequest"
+        },
+        {
+          "$ref": "#/$defs/NoteMoveRequest"
+        },
+        {
+          "$ref": "#/$defs/NoteMergeRequest"
+        },
+        {
+          "$ref": "#/$defs/VaultNextRequest"
         }
       ]
     },
@@ -9212,9 +12187,98 @@
           "$ref": "#/$defs/ConfigShowResponse"
         },
         {
+          "$ref": "#/$defs/VaultPipelineResponse"
+        },
+        {
+          "$ref": "#/$defs/NoteFactsResponse"
+        },
+        {
+          "$ref": "#/$defs/PageNewResponse"
+        },
+        {
+          "$ref": "#/$defs/PageRefreshResponse"
+        },
+        {
+          "$ref": "#/$defs/PageExcludeResponse"
+        },
+        {
+          "$ref": "#/$defs/PageCheckResponse"
+        },
+        {
+          "$ref": "#/$defs/FindingsListResponse"
+        },
+        {
+          "$ref": "#/$defs/IdeaNewResponse"
+        },
+        {
+          "$ref": "#/$defs/IdeaSetResponse"
+        },
+        {
+          "$ref": "#/$defs/NoteMoveResponse"
+        },
+        {
+          "$ref": "#/$defs/NoteMergeResponse"
+        },
+        {
+          "$ref": "#/$defs/VaultNextResponse"
+        },
+        {
           "$ref": "#/$defs/ErrorResponse"
         }
       ]
+    },
+    "RestingOn": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "direct": {
+          "description": "Linked directly (else only through the notes in via).",
+          "title": "Direct",
+          "type": "boolean"
+        },
+        "via": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Via",
+          "type": "array"
+        }
+      },
+      "required": [
+        "path",
+        "direct",
+        "via"
+      ],
+      "title": "RestingOn",
+      "type": "object"
+    },
+    "RestsOn": {
+      "additionalProperties": false,
+      "properties": {
+        "sources": {
+          "items": {
+            "$ref": "#/$defs/RestingOn"
+          },
+          "title": "Sources",
+          "type": "array"
+        },
+        "extract": {
+          "items": {
+            "$ref": "#/$defs/RestingOn"
+          },
+          "title": "Extract",
+          "type": "array"
+        }
+      },
+      "required": [
+        "sources",
+        "extract"
+      ],
+      "title": "RestsOn",
+      "type": "object"
     },
     "RoleLens": {
       "additionalProperties": false,
@@ -9600,6 +12664,48 @@
       "title": "SearchQueryResult",
       "type": "object"
     },
+    "SelfLink": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "line": {
+          "title": "Line",
+          "type": "integer"
+        },
+        "link": {
+          "description": "As it was written.",
+          "title": "Link",
+          "type": "string"
+        },
+        "action": {
+          "enum": [
+            "line removed",
+            "unlinked",
+            "same-note link",
+            "removed"
+          ],
+          "title": "Action",
+          "type": "string"
+        },
+        "result": {
+          "description": "What replaces it ('' when removed).",
+          "title": "Result",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "line",
+        "link",
+        "action",
+        "result"
+      ],
+      "title": "SelfLink",
+      "type": "object"
+    },
     "SettingRow": {
       "additionalProperties": false,
       "properties": {
@@ -9880,7 +12986,10 @@
             "unresolved-target",
             "ambiguous-target",
             "relation-target-type",
-            "missing-mirror"
+            "missing-mirror",
+            "too-few-links",
+            "untyped-note",
+            "missing-block"
           ],
           "title": "Code",
           "type": "string"
@@ -9958,6 +13067,188 @@
         "truncated_end"
       ],
       "title": "Snippet",
+      "type": "object"
+    },
+    "SourceStage": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "stage": {
+          "enum": [
+            "ingested",
+            "extracted",
+            "compiled"
+          ],
+          "title": "Stage",
+          "type": "string"
+        },
+        "zettels": {
+          "description": "Extract notes linking to it.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Zettels",
+          "type": "array"
+        },
+        "pages": {
+          "description": "Compile notes linking to one of those.",
+          "items": {
+            "$ref": "#/$defs/PageVia"
+          },
+          "title": "Pages",
+          "type": "array"
+        }
+      },
+      "required": [
+        "path",
+        "stage",
+        "zettels",
+        "pages"
+      ],
+      "title": "SourceStage",
+      "type": "object"
+    },
+    "StateChange": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "description": "An engine state file (.vaultengine/pages.json, a baseline).",
+          "title": "Path",
+          "type": "string"
+        },
+        "changes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Changes",
+          "type": "array"
+        }
+      },
+      "required": [
+        "path",
+        "changes"
+      ],
+      "title": "StateChange",
+      "type": "object"
+    },
+    "StatefulWriteResult": {
+      "additionalProperties": false,
+      "properties": {
+        "operation": {
+          "enum": [
+            "new",
+            "link",
+            "set",
+            "fix",
+            "ingest",
+            "link-it",
+            "unlink",
+            "page new",
+            "page refresh",
+            "page exclude",
+            "idea new",
+            "idea set",
+            "move",
+            "merge"
+          ],
+          "title": "Operation",
+          "type": "string"
+        },
+        "status": {
+          "description": "written; refused (would add violations, nothing written); dry-run; unchanged.",
+          "enum": [
+            "written",
+            "refused",
+            "dry-run",
+            "unchanged"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "dry_run": {
+          "title": "Dry Run",
+          "type": "boolean"
+        },
+        "written": {
+          "title": "Written",
+          "type": "boolean"
+        },
+        "files": {
+          "items": {
+            "$ref": "#/$defs/WrittenFile"
+          },
+          "title": "Files",
+          "type": "array"
+        },
+        "already": {
+          "description": "Parts of the request that were already so, e.g. an existing mirror.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Already",
+          "type": "array"
+        },
+        "new_violations": {
+          "description": "Why a write was refused: violations it would add.",
+          "items": {
+            "$ref": "#/$defs/Violation"
+          },
+          "title": "New Violations",
+          "type": "array"
+        },
+        "tolerated": {
+          "description": "Violations already in the notes written; they do not block a write.",
+          "items": {
+            "$ref": "#/$defs/Violation"
+          },
+          "title": "Tolerated",
+          "type": "array"
+        },
+        "index": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IndexSync"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Null unless written."
+        },
+        "recovered": {
+          "description": "Files restored from an interrupted earlier write.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Recovered",
+          "type": "array"
+        },
+        "state": {
+          "description": "What the write records (or would) in the engine's state files.",
+          "items": {
+            "$ref": "#/$defs/StateChange"
+          },
+          "title": "State",
+          "type": "array"
+        }
+      },
+      "required": [
+        "operation",
+        "status",
+        "dry_run",
+        "written",
+        "files",
+        "already",
+        "new_violations",
+        "tolerated",
+        "index",
+        "recovered",
+        "state"
+      ],
+      "title": "StatefulWriteResult",
       "type": "object"
     },
     "SurpriseFound": {
@@ -10390,6 +13681,45 @@
       "title": "TextSignal",
       "type": "object"
     },
+    "Trust": {
+      "additionalProperties": false,
+      "properties": {
+        "links_in": {
+          "description": "Notes linking to it (index and log left out).",
+          "title": "Links In",
+          "type": "integer"
+        },
+        "pages": {
+          "description": "Pages relying on it.",
+          "title": "Pages",
+          "type": "integer"
+        },
+        "ideas": {
+          "description": "Ideas citing it.",
+          "title": "Ideas",
+          "type": "integer"
+        },
+        "raw": {
+          "description": "log2(1 + links_in) + pages + ideas.",
+          "title": "Raw",
+          "type": "number"
+        },
+        "percentile": {
+          "description": "Share of notes with a lower raw trust, 0-100.",
+          "title": "Percentile",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "links_in",
+        "pages",
+        "ideas",
+        "raw",
+        "percentile"
+      ],
+      "title": "Trust",
+      "type": "object"
+    },
     "Unavailable": {
       "additionalProperties": false,
       "properties": {
@@ -10523,6 +13853,70 @@
       "title": "UnresolvedTarget",
       "type": "object"
     },
+    "Unsourced": {
+      "additionalProperties": false,
+      "properties": {
+        "total": {
+          "title": "Total",
+          "type": "integer"
+        },
+        "by_reason": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "description": "missing, not-a-source, url-only, none.",
+          "title": "By Reason",
+          "type": "object"
+        },
+        "notes": {
+          "items": {
+            "$ref": "#/$defs/UnsourcedNote"
+          },
+          "title": "Notes",
+          "type": "array"
+        }
+      },
+      "required": [
+        "total",
+        "by_reason",
+        "notes"
+      ],
+      "title": "Unsourced",
+      "type": "object"
+    },
+    "UnsourcedNote": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "reason": {
+          "enum": [
+            "missing",
+            "not-a-source",
+            "url-only",
+            "none"
+          ],
+          "title": "Reason",
+          "type": "string"
+        },
+        "citations": {
+          "items": {
+            "$ref": "#/$defs/Citation"
+          },
+          "title": "Citations",
+          "type": "array"
+        }
+      },
+      "required": [
+        "path",
+        "reason",
+        "citations"
+      ],
+      "title": "UnsourcedNote",
+      "type": "object"
+    },
     "UnwrittenFound": {
       "additionalProperties": false,
       "properties": {
@@ -10651,6 +14045,31 @@
       "title": "UnwrittenResult",
       "type": "object"
     },
+    "UsedBy": {
+      "additionalProperties": false,
+      "properties": {
+        "extract": {
+          "items": {
+            "$ref": "#/$defs/RestingOn"
+          },
+          "title": "Extract",
+          "type": "array"
+        },
+        "compile": {
+          "items": {
+            "$ref": "#/$defs/RestingOn"
+          },
+          "title": "Compile",
+          "type": "array"
+        }
+      },
+      "required": [
+        "extract",
+        "compile"
+      ],
+      "title": "UsedBy",
+      "type": "object"
+    },
     "Variant": {
       "additionalProperties": false,
       "properties": {
@@ -10697,6 +14116,18 @@
           "default": null,
           "description": "Max notes listed (null = all). The summary is never limited.",
           "title": "Limit"
+        },
+        "baseline": {
+          "default": false,
+          "description": "Only violations not in the recorded baseline are listed and make ok false (`vault check --baseline`); error -32008 when none is recorded.",
+          "title": "Baseline",
+          "type": "boolean"
+        },
+        "update_baseline": {
+          "default": false,
+          "description": "Record the whole vault's violations as the baseline, replacing the old one (`--update-baseline`; the only write of a check). Nothing is new afterwards.",
+          "title": "Update Baseline",
+          "type": "boolean"
         }
       },
       "title": "VaultCheckParams",
@@ -10787,11 +14218,13 @@
           "$ref": "#/$defs/CheckScope"
         },
         "ok": {
+          "description": "No violations (with baseline: no new ones).",
           "title": "Ok",
           "type": "boolean"
         },
         "summary": {
-          "$ref": "#/$defs/CheckSummary"
+          "$ref": "#/$defs/CheckSummary",
+          "description": "What is listed: with baseline, the new violations only."
         },
         "notes": {
           "description": "Notes with violations, by path; violations by line.",
@@ -10800,6 +14233,17 @@
           },
           "title": "Notes",
           "type": "array"
+        },
+        "baseline": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BaselineSummary"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Null unless baseline or update_baseline."
         },
         "limit": {
           "anyOf": [
@@ -10819,6 +14263,7 @@
         "ok",
         "summary",
         "notes",
+        "baseline",
         "limit"
       ],
       "title": "VaultCheckResult",
@@ -11293,7 +14738,14 @@
             "fix",
             "ingest",
             "link-it",
-            "unlink"
+            "unlink",
+            "page new",
+            "page refresh",
+            "page exclude",
+            "idea new",
+            "idea set",
+            "move",
+            "merge"
           ],
           "title": "Operation",
           "type": "string"
@@ -11398,6 +14850,305 @@
         "remaining"
       ],
       "title": "VaultFixResult",
+      "type": "object"
+    },
+    "VaultNextParams": {
+      "additionalProperties": false,
+      "properties": {
+        "limit": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": 10,
+          "description": "Items listed (null = all); total and counts are never limited.",
+          "title": "Limit"
+        }
+      },
+      "title": "VaultNextParams",
+      "type": "object"
+    },
+    "VaultNextRequest": {
+      "additionalProperties": false,
+      "description": "One queue of what needs doing, most trusted first, each with its command (`vault next`). Omit \"id\" to send a notification (no response).",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "method": {
+          "const": "vault.next",
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/VaultNextParams"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "method"
+      ],
+      "title": "VaultNextRequest",
+      "type": "object"
+    },
+    "VaultNextResponse": {
+      "additionalProperties": false,
+      "description": "Successful response to vault.next.",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Id"
+        },
+        "result": {
+          "$ref": "#/$defs/VaultNextResult"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "result"
+      ],
+      "title": "VaultNextResponse",
+      "type": "object"
+    },
+    "VaultNextResult": {
+      "additionalProperties": false,
+      "properties": {
+        "format": {
+          "$ref": "#/$defs/FormatRef"
+        },
+        "total": {
+          "title": "Total",
+          "type": "integer"
+        },
+        "counts": {
+          "additionalProperties": {
+            "$ref": "#/$defs/KindCount"
+          },
+          "title": "Counts",
+          "type": "object"
+        },
+        "items": {
+          "description": "Most trusted first.",
+          "items": {
+            "$ref": "#/$defs/NextItem"
+          },
+          "title": "Items",
+          "type": "array"
+        },
+        "limit": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Limit"
+        }
+      },
+      "required": [
+        "format",
+        "total",
+        "counts",
+        "items",
+        "limit"
+      ],
+      "title": "VaultNextResult",
+      "type": "object"
+    },
+    "VaultPipelineParams": {
+      "additionalProperties": false,
+      "properties": {
+        "limit": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Max rows in each list (sources, unsourced notes, gaps); null = all. The counts are never limited.",
+          "title": "Limit"
+        }
+      },
+      "title": "VaultPipelineParams",
+      "type": "object"
+    },
+    "VaultPipelineRequest": {
+      "additionalProperties": false,
+      "description": "Each source's stage (ingested, extracted, compiled) and the gaps (`vault pipeline`). Omit \"id\" to send a notification (no response).",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "method": {
+          "const": "vault.pipeline",
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/VaultPipelineParams"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "method"
+      ],
+      "title": "VaultPipelineRequest",
+      "type": "object"
+    },
+    "VaultPipelineResponse": {
+      "additionalProperties": false,
+      "description": "Successful response to vault.pipeline.",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Id"
+        },
+        "result": {
+          "$ref": "#/$defs/VaultPipelineResult"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "result"
+      ],
+      "title": "VaultPipelineResponse",
+      "type": "object"
+    },
+    "VaultPipelineResult": {
+      "additionalProperties": false,
+      "properties": {
+        "format": {
+          "$ref": "#/$defs/FormatRef"
+        },
+        "roles": {
+          "$ref": "#/$defs/PipelineRoles"
+        },
+        "stages": {
+          "$ref": "#/$defs/PipelineStages"
+        },
+        "sources": {
+          "description": "Compiled first, then extracted, then ingested.",
+          "items": {
+            "$ref": "#/$defs/SourceStage"
+          },
+          "title": "Sources",
+          "type": "array"
+        },
+        "extract": {
+          "$ref": "#/$defs/PipelineExtract"
+        },
+        "compile": {
+          "$ref": "#/$defs/PipelineCompile"
+        },
+        "gaps": {
+          "$ref": "#/$defs/PipelineGaps"
+        },
+        "ignored": {
+          "description": "Notes in ignored folders (no part in the pipeline).",
+          "title": "Ignored",
+          "type": "integer"
+        },
+        "limit": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Limit"
+        }
+      },
+      "required": [
+        "format",
+        "roles",
+        "stages",
+        "sources",
+        "extract",
+        "compile",
+        "gaps",
+        "ignored",
+        "limit"
+      ],
+      "title": "VaultPipelineResult",
       "type": "object"
     },
     "VaultStatsParams": {
@@ -11603,7 +15354,10 @@
             "unresolved-target",
             "ambiguous-target",
             "relation-target-type",
-            "missing-mirror"
+            "missing-mirror",
+            "too-few-links",
+            "untyped-note",
+            "missing-block"
           ],
           "title": "Code",
           "type": "string"
@@ -11784,7 +15538,14 @@
             "fix",
             "ingest",
             "link-it",
-            "unlink"
+            "unlink",
+            "page new",
+            "page refresh",
+            "page exclude",
+            "idea new",
+            "idea set",
+            "move",
+            "merge"
           ],
           "title": "Operation",
           "type": "string"
@@ -11882,9 +15643,11 @@
           "type": "string"
         },
         "action": {
+          "description": "delete: a moved note's old path, a merged note.",
           "enum": [
             "create",
-            "modify"
+            "modify",
+            "delete"
           ],
           "title": "Action",
           "type": "string"

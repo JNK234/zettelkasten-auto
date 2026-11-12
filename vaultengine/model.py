@@ -112,6 +112,17 @@ class InlineField:
     tags: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True)
+class Marker:
+    """A ``<!-- vault:name -->`` line, or its closing ``<!-- /vault:name -->``, outside code: the
+    edges of a block the engine writes and keeps (a page's zettels, an idea's finding)."""
+
+    name: str
+    closing: bool
+    line: int
+    content: int = 0  # non-blank lines after it, up to the next marker line or the end of the note
+
+
 @dataclass
 class ParsedNote:
     path: str | None = None
@@ -129,6 +140,7 @@ class ParsedNote:
     block_ids: list[BlockId] = field(default_factory=list)
     header_fields: list[HeaderField] = field(default_factory=list)
     inline_fields: list[InlineField] = field(default_factory=list)
+    markers: list[Marker] = field(default_factory=list)
 
     @property
     def tag_names(self) -> list[str]:
@@ -145,3 +157,16 @@ class ParsedNote:
         data = asdict(self)
         data["tag_names"] = self.tag_names
         return data
+
+
+def field_kinds(note: ParsedNote) -> dict[int, str]:
+    """Link start offset -> 'inline' (inside a ``key:: value`` field) or 'header' (inside a
+    ``Key: value`` header field), for the note's links and embeds that sit in a field value.
+    Inline fields are tried first (a header block may contain inline field lines)."""
+    kinds: dict[int, str] = {}
+    for link in note.links + note.embeds:
+        if any(f.value_start <= link.start and link.end <= f.value_end for f in note.inline_fields):
+            kinds[link.start] = "inline"
+        elif any(f.value_start <= link.start and link.end <= f.value_end for f in note.header_fields):
+            kinds[link.start] = "header"
+    return kinds

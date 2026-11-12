@@ -350,14 +350,46 @@ class Relatedness:
     def __init__(self, conn: sqlite3.Connection, provider: Any = None, root: str | Path | None = None,
                  tag_rule=None, weights: dict[str, float] | None = None) -> None:
         self.conn = conn
-        self.graph: Graph = build_graph(conn, tag_rule)
-        self.searcher = _Searcher(conn, fuzzy=False)
-        self.n_notes = self.searcher.n_notes
+        self.tag_rule = tag_rule
+        self._graph: Graph | None = None
+        self._searcher: _Searcher | None = None
+        self._tag_sets: tuple[dict[int, set[str]], dict[str, float], Counter[str]] | None = None
+        self.n_notes = conn.execute("SELECT COUNT(*) FROM files WHERE kind = 'note'").fetchone()[0]
         self.paths = {row[0]: row[1] for row in conn.execute("SELECT id, path FROM files WHERE kind = 'note'")}
         self.text = TextSimilarity(conn, root, provider)
         self.weights = {**WEIGHTS, **(weights or {})}
-        self.note_tags, self.tag_idf, self.tag_notes = note_tag_sets(
-            conn.execute("SELECT file_id, name_key FROM tags").fetchall(), self.graph, self.n_notes)
+
+    @property
+    def graph(self) -> Graph:
+        """The link graph, built on first use (a caller that only needs paths or counts does not pay for it)."""
+        if self._graph is None:
+            self._graph = build_graph(self.conn, self.tag_rule)
+        return self._graph
+
+    @property
+    def note_tags(self) -> dict[int, set[str]]:
+        """note -> its tags, common ones left out (``note_tag_sets``; built with the graph, on first use)."""
+        return self._tags()[0]
+
+    @property
+    def tag_idf(self) -> dict[str, float]:
+        return self._tags()[1]
+
+    @property
+    def tag_notes(self) -> Counter[str]:
+        return self._tags()[2]
+
+    def _tags(self) -> tuple[dict[int, set[str]], dict[str, float], Counter[str]]:
+        if self._tag_sets is None:
+            self._tag_sets = note_tag_sets(
+                self.conn.execute("SELECT file_id, name_key FROM tags").fetchall(), self.graph, self.n_notes)
+        return self._tag_sets
+
+    @property
+    def searcher(self) -> _Searcher:
+        if self._searcher is None:
+            self._searcher = _Searcher(self.conn, fuzzy=False)
+        return self._searcher
 
     # -- seeds --
 

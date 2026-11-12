@@ -155,3 +155,84 @@ Enter on the hidden-link result:
 ```
 
 Searching, related notes, link suggestions and unlinked mentions in the app (`/search`, `/related`, `/suggest`, `/unlinked`): [Search and connections](search.md#in-the-terminal-app).
+
+## The reading workflow in the app
+
+With `--format core`, the steps of [the reading workflow](workflow.md) are commands too. Writes are a dry run unless the
+line ends with `write`:
+
+| Type | You should see |
+|---|---|
+| `/pipeline [all \| <rows>]` | each stage with what it means, the counts, sources by stage, sources not extracted yet, zettels in no page |
+| `/page new "Title" @zettel @zettel @zettel [from "<query>"]… [tags "…"] [write]` | the page it would write in a box, with the index and log notes and the engine state it records; `write` writes |
+| `/page check [@page]` | `✓ ready to write`, or each problem (blocks out of date, zettels changed, zettels it is behind on with the tags and links they share, the index line, violations) and the command that fixes it |
+| `/page refresh @page [write]`, `/page exclude @page @zettel… [undo] [write]` | the diff, or `⏺ Recorded in the engine state` for an exclusion |
+| `/findings [missing-note\|same-idea\|existing-name\|link]… [all \| <n>] [<id>]` | the thresholds, then per method each finding's id, title and evidence |
+| `/idea new <id> ["Title"] [write]`, `/idea set @idea open\|dropped\|done [write]` | the idea with its finding block; a status the format does not have is refused |
+| `/move @note <folder/ \| name \| path> [write]`, `/merge @A @B [write]` | the notes that change, `links: N links re-spelled`, and for a merge `Self-links dropped (N)`, each with what became of it |
+| `/next [all \| <n>]` | the queue, most trusted first: kind, title, trust, why, and the command to run |
+| `/check baseline` | only the violations not in the baseline (`✓ no new violations in 180 notes checked`) |
+
+On a fresh copy with a baseline (`vault check <vault> -f core --update-baseline`), captured from the running app:
+
+```
+> /pipeline 3
+⏺ Pipeline  core · 28 source notes
+  ⎿  compiled      3   a page links to a zettel that links to it
+     extracted    12   a zettel links to it, no page uses those yet
+     ingested     13   no zettel links to it
+     109 zettel notes: 5 in a page · 28 resting on a source · 81 on no source
+     on no source: 78 cite sources not in the vault, 3 cite nothing
+     3 page notes: 2 link to a zettel · 40 notes in ignored folders
+
+     Source notes by stage (zettels linking to it, pages using those)
+       compiled     5 z   1 p 2503.11926 - Monitoring Reasoning Models (CoT Obfuscation)  10_SOURCES
+       …
+     Not extracted yet (13)
+       2501.10970 - The Alternative Annotator Test for LLM-as-a-Judge  10_SOURCES
+       …
+     Zettels in no page (104)
+       a-bounty-list-is-a-map-of-what-cannot-be-verified  20_ZETTLEKASTEN
+       …
+
+> /merge @enterprise-agent-evaluation-challenges @pass-hat-k-reliability-metric
+⏺ Dry run: would write 4 notes  nothing was written
+  ⎿  ✓ check: no new violations  (already there, not blocking: 2 too-few-links)
+     = 20_ZETTLEKASTEN/pass-hat-k-reliability-metric.md merged into
+     20_ZETTLEKASTEN/enterprise-agent-evaluation-challenges.md
+     …
+     links: 2 links re-spelled in 2 notes, every link that reached it still does
+     state .vaultengine/baseline-core.json: baseline: moved notes followed
+     add write to the command to write it
+
+     Self-links dropped (1): they would point at the note they are in
+       L31 [[pass-hat-k-reliability-metric]] → line removed
+
+     ~ enterprise-agent-evaluation-challenges  20_ZETTLEKASTEN
+       merged
+       …
+       -- [[pass-hat-k-reliability-metric]]
+       …
+       +<!-- vault:merged -->
+       +## Merged from pass-hat-k-reliability-metric
+       …
+
+> /next 2
+⏺ Next  99 items, most trusted first
+  ⎿  1. write   write [[transcript-spotting-heuristics-for-reward-hacking]]   trust 97
+        why 6 notes link to it and it does not exist
+        run vault new /tmp/tui-vault -f /…/formats/core.yaml --type zettel --name …
+     …
+     By kind (listed / all)
+       refresh     0 / 0    pages out of date with their zettels
+       behind      0 / 0    zettels a page is behind on
+       merge       9 / 9    two names for one idea
+       write      72 / 72   missing notes many notes link to
+       extract    13 / 13   sources no zettel links to
+       page        5 / 9    zettels in no page that share a tag (104 zettels in no page); below the
+       median trust not listed
+       idea        0 / 0    open ideas nothing builds on
+```
+
+With a format that has no `pipeline:` block, these commands say which one has it:
+``Format 'brain' has no `pipeline:` block: start vault-tui with a format that has one, e.g. --format core (error -32003)``.

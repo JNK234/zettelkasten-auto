@@ -12,6 +12,7 @@ To re-record after an intended behaviour change (then review the diff):
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -34,8 +35,10 @@ SESSIONS = {
     "resolver_vault": FIXTURES / "resolver_vault",
     "sample_vault_format": FIXTURES / "vault",  # served with --format brain: check, fix, coverage, writes, ingest
     "sample_vault_explore": FIXTURES / "vault",  # served with --format brain: explore, marks, link it, map history
+    # served with --format core: the baseline, pipeline, note facts, pages, findings, ideas, move, merge, next
+    "sample_vault_core": FIXTURES / "vault",
 }
-SESSION_FORMATS = {"sample_vault_format": "brain", "sample_vault_explore": "brain"}
+SESSION_FORMATS = {"sample_vault_format": "brain", "sample_vault_explore": "brain", "sample_vault_core": "core"}
 REPO_ROOT = Path(__file__).parent.parent
 BRAIN_PATH = REPO_ROOT / "formats" / "brain.yaml"
 RECORD = os.environ.get("VAULTENGINE_RECORD") == "1"
@@ -46,14 +49,40 @@ def schema_validator(definition):
     return jsonschema.Draft202012Validator({"$defs": SCHEMA["$defs"], "$ref": f"#/$defs/{definition}"})
 
 
+_DATES = re.compile(r"\b(\d{2})-(\d{2})-(\d{4}) \d{2}:\d{2}\b"
+                    r"|\b(\d{4})-(\d{2})-(\d{2})(?:[T ]\d{2}:\d{2}(?::\d{2})?(?:[+-]\d{2}:\d{2}|Z)?)?\b")
+
+
+def _today() -> set[tuple[str, str, str]]:
+    import datetime as dt
+
+    return {(d.strftime("%Y"), d.strftime("%m"), d.strftime("%d"))
+            for d in (dt.datetime.now(), dt.datetime.now(dt.timezone.utc))}
+
+
+def _now_to_placeholder(text: str) -> str:
+    """Dates of today (a new note's Created line, a log line, a refresh time) become <NOW>; others stay."""
+    today = _today()
+
+    def swap(match: re.Match) -> str:
+        day, month, year = (match[1], match[2], match[3]) if match[1] else (match[6], match[5], match[4])
+        return "<NOW>" if (year, month, day) in today else match[0]
+
+    return _DATES.sub(swap, text)
+
+
+TIMESTAMP_KEYS = {"last_indexed_at", "recorded_at", "refreshed_at", "modified", "at", "snapshot", "computed_at"}
+
+
 def normalize(value, vault_root):
-    """Replace run-specific values (temp paths, timings, timestamps) with placeholders of the same type."""
+    """Replace run-specific values (temp paths, timings, timestamps) with placeholders of the same type.
+    Today's dates and times inside text (a new note's Created line, a log line, a diff) become <NOW>."""
     if isinstance(value, dict):
         out = {}
         for key, item in value.items():
             if key == "seconds" and isinstance(item, (int, float)):
                 out[key] = 0.0  # keeps the schema type (number)
-            elif key in ("last_indexed_at", "at", "snapshot", "computed_at") and isinstance(item, str):
+            elif key in TIMESTAMP_KEYS and isinstance(item, str):
                 out[key] = "<TIMESTAMP>"
             else:
                 out[key] = normalize(item, vault_root)
@@ -61,7 +90,7 @@ def normalize(value, vault_root):
     if isinstance(value, list):
         return [normalize(item, vault_root) for item in value]
     if isinstance(value, str):
-        return value.replace(vault_root, "<VAULT>").replace(str(REPO_ROOT), "<REPO>")
+        return _now_to_placeholder(value.replace(vault_root, "<VAULT>").replace(str(REPO_ROOT), "<REPO>"))
     return value
 
 
@@ -120,10 +149,12 @@ class RecordedSessionReplayTests(unittest.TestCase):
         from vaultengine.settings import load_settings
 
         name = path.stem
-        # The settings `vault serve <vault> [--format brain]` has: the vault (and format) from its flags.
-        flags = [("vault", str(vault.root), "<vault>")] + ([("format", SESSION_FORMATS[name], "--format")] if name in SESSION_FORMATS else [])
+        # The settings `vault serve <vault> [--format NAME]` has: the vault (and format) from its flags.
+        fmt = SESSION_FORMATS.get(name)
+        flags = [("vault", str(vault.root), "<vault>")] + ([("format", fmt, "--format")] if fmt else [])
         settings = load_settings(flags, env={k: v for k, v in os.environ.items() if not k.startswith("VAULTENGINE_")})
-        server = RpcServer(VaultService(vault.root, format_path=BRAIN_PATH if name in SESSION_FORMATS else None, settings=settings))
+        server = RpcServer(VaultService(vault.root, format_path=REPO_ROOT / "formats" / f"{fmt}.yaml" if fmt else None,
+                                        settings=settings))
         try:
             for exchange in exchanges:
                 reply = server.handle_text(wire_line(exchange))
@@ -143,6 +174,9 @@ class RecordedSessionReplayTests(unittest.TestCase):
 
     def test_replay_sample_vault_explore(self):
         self.replay("sample_vault_explore")
+
+    def test_replay_sample_vault_core(self):
+        self.replay("sample_vault_core")
 
 
 class RecordedSessionContentTests(unittest.TestCase):
@@ -181,7 +215,106 @@ class RecordedSessionContentTests(unittest.TestCase):
             responses = exchange["response"] if isinstance(exchange["response"], list) else [exchange["response"]]
             codes.update(r["error"]["code"] for r in filter(None, responses) if "error" in r)
         # -32005 (write failed, rolled back) needs a crash or a concurrent edit; see WriteFailedErrorTests.
-        self.assertEqual(codes, {-32700, -32600, -32601, -32602, -32001, -32002, -32003, -32004, -32006, -32007})
+        self.assertEqual(codes, {-32700, -32600, -32601, -32602, -32001, -32002, -32003, -32004, -32006, -32007, -32008})
+
+
+class CoreSessionContentTests(unittest.TestCase):
+    """What the sample_vault_core recording must show (served with --format core)."""
+
+    @classmethod
+    def setUpClass(cls):
+        _, exchanges = load_session("sample_vault_core")
+        cls.by_id = {e["request"]["id"]: (e["request"], e["response"]) for e in exchanges}
+
+    def result(self, number):
+        request, response = self.by_id[number]
+        self.assertIn("result", response, (request, response))
+        return response["result"]
+
+    def error(self, number):
+        return self.by_id[number][1]["error"]["code"]
+
+    def test_baseline(self):
+        self.assertEqual(self.error(2), -32008)  # none recorded yet
+        everything = self.result(3)
+        self.assertFalse(everything["ok"])
+        recorded = self.result(4)["baseline"]
+        self.assertTrue(recorded["recorded_now"])
+        self.assertEqual(recorded["violations"], everything["summary"]["violations"])
+        compared = self.result(5)
+        self.assertTrue(compared["ok"])
+        self.assertEqual((compared["baseline"]["new"], compared["baseline"]["known"]), (0, recorded["violations"]))
+        self.assertEqual(self.error(6), -32602)  # baseline and update_baseline together
+        after_move = self.result(28)  # the moved note keeps its baselined violations: still nothing new
+        self.assertTrue(after_move["ok"])
+
+    def test_pages_ideas_findings(self):
+        self.assertEqual(self.result(10)["status"], "dry-run")
+        self.assertEqual(self.result(11)["from"][0]["query"], "verification")
+        self.assertEqual(self.error(12), -32602)  # no zettels, no queries
+        written = self.result(13)
+        self.assertEqual((written["status"], written["page"]["path"]), ("written", "50_MOC/verification-gaps.md"))
+        self.assertEqual(self.result(14)["pages"][0]["path"], "50_MOC/verification-gaps.md")
+        self.assertEqual(self.result(16)["index"]["status"], "unchanged")  # only the engine state changes
+        self.assertEqual(self.result(18)["total"], 94)
+        self.assertEqual({f["method"] for f in self.result(19)["findings"]}, {"link"})
+        self.assertEqual(self.error(20), -32002)
+        idea = self.result(22)
+        self.assertEqual(idea["finding"]["id"], "missing-32eacad6a1")
+        self.assertIn("<!-- vault:finding -->", idea["idea"]["content"])
+        self.assertEqual(self.result(23)["status"], "refused")  # "maybe" is not a status of the format
+        self.assertEqual(self.result(24)["status"], "written")
+
+    def test_merge_move_next(self):
+        merge = self.result(25)
+        self.assertEqual(merge["status"], "dry-run")
+        self.assertEqual([(s["link"], s["action"]) for s in merge["self_links"]],
+                         [("[[pass-hat-k-reliability-metric]]", "line removed")])
+        self.assertEqual([f["action"] for f in merge["files"]].count("delete"), 1)
+        move = self.result(27)
+        self.assertEqual(move["moved"], {"20_ZETTLEKASTEN/agent-test-time-scaling-limited-by-verification-gap.md":
+                                         "20_ZETTLEKASTEN/verification-gap-limits-test-time-scaling.md"})
+        upcoming = self.result(29)
+        self.assertEqual(len(upcoming["items"]), 3)
+        self.assertTrue(all(item["command"].startswith("vault ") for item in upcoming["items"]))
+
+
+class SameAsCliTests(unittest.TestCase):
+    """The JSON-RPC methods return what the CLI prints with --json (less its "vault" and "ok")."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.vault = TempVaultCopy(SESSIONS["sample_vault_core"])
+        cls.core = REPO_ROOT / "formats" / "core.yaml"
+        cls.service = VaultService(cls.vault.root, format_path=cls.core)
+        cls.service.build()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.service.close()
+        cls.vault.cleanup()
+
+    def cli(self, *args):
+        result = subprocess.run([sys.executable, "-m", "vaultengine", args[0], str(self.vault.root), *args[1:], "-f",
+                                 str(self.core), "--json"], capture_output=True, text=True, cwd=REPO_ROOT)
+        data = json.loads(result.stdout)
+        data.pop("vault", None)
+        data.pop("ok", None)
+        return data
+
+    def test_read_methods(self):
+        pipeline = self.service.pipeline()
+        pipeline.pop("limit")
+        self.assertEqual(pipeline, self.cli("pipeline"))
+        facts = self.service.note_facts("a-bounty-list-is-a-map-of-what-cannot-be-verified")
+        self.assertEqual(facts, self.cli("note", "a-bounty-list-is-a-map-of-what-cannot-be-verified"))
+        found = self.service.findings()
+        cli = self.cli("findings", "--limit", "0")
+        self.assertEqual((found["total"], found["thresholds"], found["findings"]), (cli["total"], cli["thresholds"], cli["findings"]))
+        upcoming = self.service.next(limit=None)
+        cli = self.cli("next", "--limit", "0")
+        self.assertEqual((upcoming["total"], upcoming["counts"]), (cli["total"], cli["counts"]))
+        self.assertEqual([(i["id"], i["trust"]) for i in upcoming["items"]], [(i["id"], i["trust"]) for i in cli["items"]])
 
 
 class ProtocolErrorTests(unittest.TestCase):

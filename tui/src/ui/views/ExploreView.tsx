@@ -409,7 +409,7 @@ export function ExploreBrowser({api, data: first, start: firstStart, done}: Expl
 			) : mode === 'detail' && current ? (
 				<Detail item={current} section={sectionOf(current)} mark={markOf(current)} />
 			) : dryRun ? (
-				<WriteView result={dryRun} maxLines={12} dryRunHint="w writes it in both notes; Esc cancels" />
+				<WriteView result={dryRun} maxLines={12} writeHint="w writes it in both notes; Esc cancels" />
 			) : null}
 			{notice ? (
 				<Box paddingLeft={5}>

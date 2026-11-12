@@ -14,7 +14,8 @@ Server errors: -32001 index not built, -32002 note not found, -32003 format not
 configured (serve --format), -32004 write rejected (bad arguments, name taken;
 nothing written), -32005 write failed (rolled back, or a file changed meanwhile),
 -32006 invalid query (data: query, start, end, hint), -32007 not available (nothing to act on: no explore run
-yet, a ref not in the last run, a result that is not two notes to link, no map snapshot; data: hint).
+yet, a ref not in the last run, a result that is not two notes to link, no map snapshot; data: hint),
+-32008 no baseline recorded (vault.check baseline=true).
 Without the embedding model, note.related and links.suggest still answer: their
 "text_signal" says the text signal is unavailable and why.
 A write that would add violations is not an error: its result has status "refused". A request's "id"
@@ -42,6 +43,7 @@ from vaultengine.rpc.models import (
     METHOD_NOT_FOUND,
     METHODS,
     NOT_AVAILABLE,
+    NO_BASELINE,
     NOTE_NOT_FOUND,
     PARSE_ERROR,
     WRITE_FAILED,
@@ -49,7 +51,7 @@ from vaultengine.rpc.models import (
     Request,
 )
 from vaultengine.service import (
-    FormatNotConfigured, IndexNotBuilt, InvalidQuery, NoteNotFound, NotAvailable, ServiceError, VaultService,
+    FormatNotConfigured, IndexNotBuilt, InvalidQuery, NoBaseline, NoteNotFound, NotAvailable, ServiceError, VaultService,
     WriteFailedError, WriteRejected,
 )
 
@@ -61,6 +63,7 @@ _SERVICE_ERROR_CODES: dict[type[ServiceError], int] = {
     WriteFailedError: WRITE_FAILED,
     InvalidQuery: INVALID_QUERY,
     NotAvailable: NOT_AVAILABLE,
+    NoBaseline: NO_BASELINE,
 }
 
 
@@ -101,7 +104,8 @@ class RpcServer:
             "health.report": lambda p: service.health(limit=p.limit),
             "notes.pick": lambda p: service.pick(p.query, limit=p.limit),
             "note.get": lambda p: service.note(p.path),
-            "vault.check": lambda p: service.check(changed=p.changed, limit=p.limit),
+            "vault.check": lambda p: service.check(changed=p.changed, limit=p.limit, baseline=p.baseline,
+                                                   update_baseline=p.update_baseline),
             "vault.fix": lambda p: service.fix(dry_run=p.dry_run, only=p.only),
             "vault.coverage": lambda p: service.coverage(limit=p.limit),
             "note.new": lambda p: service.new(
@@ -134,6 +138,19 @@ class RpcServer:
             "notes.explain": lambda p: service.explain(p.a, p.b, p.words),
             "embed.status": lambda p: service.embed_status(),
             "config.show": lambda p: service.config_show(),
+            "vault.pipeline": lambda p: service.pipeline(limit=p.limit),
+            "note.facts": lambda p: service.note_facts(p.note),
+            "page.new": lambda p: service.page_new(p.title, zettels=p.zettels, queries=p.queries, limit=p.limit, tags=p.tags,
+                                                   folder=p.folder, dry_run=p.dry_run),
+            "page.refresh": lambda p: service.page_refresh(p.page, dry_run=p.dry_run),
+            "page.exclude": lambda p: service.page_exclude(p.page, p.zettels, undo=p.undo, dry_run=p.dry_run),
+            "page.check": lambda p: service.page_check(p.page),
+            "findings.list": lambda p: service.findings(methods=p.methods, id=p.id, limit=p.limit),
+            "idea.new": lambda p: service.idea_new(p.finding, title=p.title, tags=p.tags, dry_run=p.dry_run),
+            "idea.set": lambda p: service.idea_set(p.idea, p.status, dry_run=p.dry_run),
+            "note.move": lambda p: service.move(p.note, p.to, dry_run=p.dry_run),
+            "note.merge": lambda p: service.merge(p.survivor, p.other, dry_run=p.dry_run),
+            "vault.next": lambda p: service.next(limit=p.limit),
         }
         if set(self._handlers) != set(METHODS):
             raise RuntimeError(f"handlers and METHODS disagree: {set(self._handlers) ^ set(METHODS)}")

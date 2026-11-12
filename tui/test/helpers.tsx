@@ -21,7 +21,7 @@ type Exchange = {
 	response: {result?: unknown; error?: ErrorObject} | unknown[] | null;
 };
 
-export type Session = 'resolver_vault' | 'sample_vault' | 'sample_vault_format' | 'sample_vault_explore';
+export type Session = 'resolver_vault' | 'sample_vault' | 'sample_vault_format' | 'sample_vault_explore' | 'sample_vault_core';
 
 export function recorded(session: Session): Map<string, unknown> {
 	const results = new Map<string, unknown>();
@@ -57,6 +57,16 @@ export function recordedById(session: Session, id: number): unknown {
 /** Result of request `id` of the sample_vault_format session (vault.check, note.link, ...). */
 export function formatResult<T>(id: number): T {
 	const value = recordedById('sample_vault_format', id);
+	if (value instanceof Error) {
+		throw value;
+	}
+
+	return value as T;
+}
+
+/** Result of request `id` of the sample_vault_core session (served with --format core: pipeline, pages, findings, …). */
+export function coreResult<T>(id: number): T {
+	const value = recordedById('sample_vault_core', id);
 	if (value instanceof Error) {
 		throw value;
 	}
@@ -143,6 +153,7 @@ export type FakeApi = VaultApi & {calls: string[]};
 export function fakeApi(overrides: Partial<VaultApi> = {}): FakeApi {
 	const results = recorded('resolver_vault');
 	const formatResults = recorded('sample_vault_format');
+	const coreResults = recorded('sample_vault_core');
 	const calls: string[] = [];
 	const replay = async <T,>(method: string, params: object = {}): Promise<T> => {
 		const clean = Object.fromEntries(Object.entries(params).filter(([, value]) => value !== undefined));
@@ -153,6 +164,17 @@ export function fakeApi(overrides: Partial<VaultApi> = {}): FakeApi {
 		}
 
 		return formatResults.get(key) as T;
+	};
+	/** The core session's recorded result for (method, params); a call never recorded fails loudly, naming it. */
+	const core = async <T,>(method: string, params: object = {}): Promise<T> => {
+		const clean = Object.fromEntries(Object.entries(params).filter(([, value]) => value !== undefined && value !== null));
+		calls.push(`${method} ${JSON.stringify(clean)}`);
+		const key = `${method} ${JSON.stringify(clean)}`;
+		if (!coreResults.has(key)) {
+			throw new Error(`no recorded sample_vault_core reply for ${key}`);
+		}
+
+		return coreResults.get(key) as T;
 	};
 	const lookup = <T,>(method: string, params: Record<string, unknown> = {}): T | undefined =>
 		results.get(`${method} ${JSON.stringify(params)}`) as T | undefined;
@@ -219,6 +241,18 @@ export function fakeApi(overrides: Partial<VaultApi> = {}): FakeApi {
 			return sampleReply('mentions.unlinked', params);
 		},
 		...exploreMethods(calls),
+		pipeline: async (params) => core('vault.pipeline', params),
+		noteFacts: async (params) => core('note.facts', params),
+		pageNew: async (params) => core('page.new', params),
+		pageRefresh: async (params) => core('page.refresh', params),
+		pageExclude: async (params) => core('page.exclude', params),
+		pageCheck: async (params) => core('page.check', params),
+		findings: async (params) => core('findings.list', params),
+		ideaNew: async (params) => core('idea.new', params),
+		ideaSet: async (params) => core('idea.set', params),
+		move: async (params) => core('note.move', params),
+		merge: async (params) => core('note.merge', params),
+		next: async (params) => core('vault.next', params),
 	};
 	return Object.assign(api, overrides, {calls});
 }

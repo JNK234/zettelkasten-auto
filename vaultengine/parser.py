@@ -29,11 +29,11 @@ from urllib.parse import unquote
 
 from vaultengine.frontmatter import frontmatter_aliases, frontmatter_tags, split_frontmatter
 from vaultengine.mask import mask_code, mask_region, mask_regions
-from vaultengine.model import BlockId, ExternalLink, HeaderField, Heading, InlineField, Link, ParsedNote, Tag
+from vaultengine.model import BlockId, ExternalLink, HeaderField, Heading, InlineField, Link, Marker, ParsedNote, Tag
 
 # Bump whenever parse output can change for the same input; the SQLite index
 # re-parses every note when the stored version differs.
-PARSER_VERSION = 1
+PARSER_VERSION = 2  # 2: vault block markers
 
 _WIKILINK = re.compile(r"(?<!\\)(?P<bang>!?)\[\[(?P<inner>[^\[\]\n]+?)\]\]")
 
@@ -201,6 +201,22 @@ def _extract_headings(original: str, masked: str, lines: _LineIndex, spans: list
     return headings
 
 
+_MARKER = re.compile(r"^[ \t]*<!-- (/?)vault:([\w-]+) -->[ \t]*$", re.MULTILINE)
+
+
+def _extract_markers(original: str, masked: str, lines: _LineIndex) -> list[Marker]:
+    """``<!-- vault:name -->`` and ``<!-- /vault:name -->`` lines (not inside code), with the number
+    of non-blank lines after each up to the next marker line."""
+    found = [(lines.line_of(m.start()), m[2], bool(m[1])) for m in _MARKER.finditer(masked)]
+    text_lines = original.split("\n")
+    markers = []
+    for index, (line, name, closing) in enumerate(found):
+        end = found[index + 1][0] - 1 if index + 1 < len(found) else len(text_lines)
+        content = sum(1 for text in text_lines[line:end] if text.strip())
+        markers.append(Marker(name, closing, line, content))
+    return markers
+
+
 def _extract_block_ids(masked: str, lines: _LineIndex, spans: list[tuple[int, int]]) -> list[BlockId]:
     found = []
     for match in _BLOCK_ID.finditer(masked):
@@ -311,6 +327,7 @@ def parse_note_with_layout(text: str, path: str | None = None) -> tuple[ParsedNo
     layout = NoteLayout(text=text, masked=masked)
     note.headings = _extract_headings(text, masked, lines, layout.headings)
     note.block_ids = _extract_block_ids(masked, lines, layout.block_ids)
+    note.markers = _extract_markers(text, masked, lines)
 
     wikilinks = _extract_wikilinks(masked, lines)
     without_wikilinks = mask_regions(masked, [(link.start, link.end) for link in wikilinks])

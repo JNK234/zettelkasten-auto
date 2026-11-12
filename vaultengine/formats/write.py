@@ -6,11 +6,18 @@ Every write goes through one transaction:
    vault's path, so a refused write leaves nothing behind in the vault) and roll
    back any write a crash interrupted (see *Atomicity*);
 2. read the vault and plan the new file contents, editing only the lines needed;
-3. the gate: check the whole vault as it would be after the write. The write is
+3. the gate: check the vault as it would be after the write. The write is
    refused, and nothing is written, if it would add any violation anywhere. A
    violation that was already there does not block it (so a note can be repaired
    one problem at a time); a new note has no "before", so it must be clean.
-   Violations are compared by what they are about, not by line number;
+   Violations are compared by what they are about, not by line number, and a
+   moved note's violations follow it to its new path. Only the notes a write can
+   affect are checked, before and after (``affected``): the notes it writes, moves
+   or deletes; the notes whose links name any of them (old and new names, aliases:
+   their links may now resolve differently); the files sharing those names; and the
+   notes their relation fields point at (mirrors). No other note's violations can
+   change, so the verdict is the one a check of the whole vault would give
+   (``judge_everything``, kept to test that);
 4. commit all files atomically, as one group;
 5. update the index for the written notes only, so other pending edits stay
    "changed since the last index" for ``vault check --changed``. A written note is
@@ -19,7 +26,13 @@ Every write goes through one transaction:
 Atomicity: each new content is written to a temporary file next to its target and
 fsynced; each existing target is hard-linked to a backup; a journal listing them
 is written to ``.vaultengine/journal/``; then the temporaries are renamed over the
-targets (atomic per file) and read back. Removing the journal is the commit point.
+targets (atomic per file), files to delete are unlinked (their backups stay until
+the end), and everything is read back. Removing the journal is the commit point.
+
+Reading: with a usable index (and no server parse cache) the vault is read through
+it (``vaultengine.indexed``): notes changed since the last ``vault index`` are parsed
+from disk and the planned changes are overlaid in memory, so a write costs what it
+touches, not the size of the vault.
 If anything fails before that, every file is restored from its backup and new
 files are removed. If the process dies in between, the next write command (or
 ``recover``) finds the journal and rolls the group back. Leftover temporaries
@@ -32,6 +45,7 @@ import datetime as dt
 import errno
 import json
 import os
+import posixpath
 import re
 import shutil
 import time
@@ -45,7 +59,7 @@ from typing import Any, Callable, Iterator, Literal
 
 from vaultengine.formats.edit import EditRefused, Lines, add_relation, set_frontmatter_value, set_header_value
 from vaultengine.formats.spec import FormatSpec, MetadataKey, NoteType
-from vaultengine.formats.typed import Issue, TypedVault
+from vaultengine.formats.typed import Issue, TypedVault, violation_keys
 from vaultengine.index import IndexNeedsRebuild, VaultIndex
 from vaultengine.parser import parse_note
 from vaultengine.vault import Vault, link_name, lookup_key
@@ -55,8 +69,9 @@ TEMP_PREFIX = ".vault-write-"
 _NAME_FORBIDDEN = re.compile(r'[\\/:*?"<>|#^\[\]]')
 _SLUG = re.compile(r"[^0-9a-z]+")
 LOCK_TIMEOUT_SECONDS = 30.0
-# Fault injection for tests only: exit abruptly after this many renames of a commit.
+# Fault injection for tests only: exit abruptly after this many renames of a commit, or after its deletions.
 _CRASH_ENV = "VAULTENGINE_TEST_CRASH_AFTER_RENAMES"
+_CRASH_DELETES_ENV = "VAULTENGINE_TEST_CRASH_AFTER_DELETES"
 
 
 class WriteError(ValueError):
@@ -75,12 +90,16 @@ class WriteFailed(RuntimeError):
 class FileChange:
     path: str  # vault-relative
     old: str | None  # current content, byte-exact; None when the file is created
-    new: str
+    new: str | None  # None when the file is deleted
     changes: list[str] = field(default_factory=list)
 
     @property
     def created(self) -> bool:
         return self.old is None
+
+    @property
+    def deleted(self) -> bool:
+        return self.new is None
 
 
 @dataclass
@@ -88,6 +107,11 @@ class WritePlan:
     operation: str
     files: list[FileChange] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)  # things that were already so
+    # Engine state that goes with the write (e.g. .vaultengine/pages.json): committed in the same
+    # atomic group and rolled back with it, but not notes: not checked by the gate, not indexed.
+    side_files: list[FileChange] = field(default_factory=list)
+    # Notes that move (old path -> new path; a merged note -> its survivor): their violations follow them.
+    renamed: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -137,36 +161,85 @@ def find_note(typed: TypedVault, ref: str) -> str:
 # ----- the gate ---------------------------------------------------------------------
 
 
-def violation_keys(issue: Issue) -> list[tuple[str, ...]]:
-    """What a violation is about, without line numbers (edits move lines)."""
-    detail = issue.detail or {}
-    if issue.code == "missing-heading":
-        return [(issue.path, issue.code, name) for name in detail.get("headings", [])]
-    if issue.code == "missing-mirror":
-        return [(issue.path, issue.code, detail["relation"], detail["source"])]
-    if issue.code == "heading-order":
-        return [(issue.path, issue.code)]
-    return [(issue.path, issue.code, issue.message)]
-
-
 def after_vault(typed: TypedVault, files: list[FileChange]) -> TypedVault:
+    """The vault as it would be after the write, through the same format. Index-backed when ``typed`` is:
+    the planned changes are overlaid on the index, nothing else is parsed."""
+    from vaultengine.indexed import IndexedVault, IndexGraph
+
+    if isinstance(typed.vault, IndexedVault):
+        overlay = typed.vault.overlay({change.path: change.new for change in files})
+        return TypedVault(typed.spec, overlay, IndexGraph(overlay))
     notes = dict(typed.vault.notes)
+    paths = set(typed.vault.files)
     for change in files:
-        notes[change.path] = parse_note(change.new, path=change.path)
-    paths = set(typed.vault.files) | {change.path for change in files}
+        if change.new is None:
+            notes.pop(change.path, None)
+            paths.discard(change.path)
+        else:
+            notes[change.path] = parse_note(change.new, path=change.path)
+            paths.add(change.path)
     return TypedVault(typed.spec, Vault(paths, notes, typed.vault.root))
 
 
-def judge(typed: TypedVault, files: list[FileChange]) -> Verdict:
-    after = after_vault(typed, files)
-    before = Counter(key for issue in typed.issues() for key in violation_keys(issue))
+def _name_keys(vault: Vault, path: str) -> set[str]:
+    keys = {lookup_key(posixpath.basename(path)), lookup_key(link_name(path))}
+    if path in vault.notes:
+        keys |= {lookup_key(alias) for alias in vault.notes[path].aliases}
+    return keys
+
+
+def _linkers(vault: Vault, keys: set[str]) -> set[str]:
+    """Notes with a link whose target (whole, or its last part) is one of ``keys``."""
+    if hasattr(vault, "sources_linking"):
+        return vault.sources_linking(keys)
+    found = set()
+    for path in vault.notes:
+        note = vault.notes[path]
+        for link in note.links + note.embeds:
+            target = link.target.strip()
+            if lookup_key(target) in keys or lookup_key(posixpath.basename(target)) in keys:
+                found.add(path)
+                break
+    return found
+
+
+def affected(before: TypedVault, after: TypedVault, files: list[FileChange]) -> set[str]:
+    """The notes whose violations a write can change (see the module docstring)."""
+    touched = {change.path for change in files}
+    keys: set[str] = set()
+    for path in touched:
+        keys |= _name_keys(before.vault, path) | _name_keys(after.vault, path)
+    near = set(touched)
+    for view in (before, after):
+        near |= _linkers(view.vault, keys)
+        for key in keys:
+            near |= set(view.vault._by_name.get(key, [])) | set(view.vault._by_alias.get(key, []))
+    result = set(near)
+    for view in (before, after):
+        for path in near:
+            if path in view.vault.notes:
+                result |= {target for target, status, kind in view.graph.outgoing_fields(path)
+                           if kind == "inline" and status == "resolved" and target}
+    return result
+
+
+def _count(issues: list[Issue], renamed: dict[str, str] | None = None) -> Counter:
+    counts: Counter[tuple[str, ...]] = Counter()
+    for issue in issues:
+        for key in violation_keys(issue):
+            counts[tuple(renamed.get(part, part) for part in key) if renamed else key] += 1
+    return counts
+
+
+def _verdict(before_issues: list[Issue], after_issues: list[Issue], files: list[FileChange], after: TypedVault,
+             renamed: dict[str, str] | None) -> Verdict:
+    before = _count(before_issues, renamed)
     seen: Counter[tuple[str, ...]] = Counter()
     new, tolerated = [], []
     touched = {change.path for change in files}
-    for issue in after.issues():
-        keys = violation_keys(issue)
+    for issue in after_issues:
         fresh = False
-        for key in keys:
+        for key in violation_keys(issue):
             seen[key] += 1
             if seen[key] > before.get(key, 0):
                 fresh = True
@@ -175,6 +248,21 @@ def judge(typed: TypedVault, files: list[FileChange]) -> Verdict:
         elif issue.path in touched:
             tolerated.append(issue)
     return Verdict(new, tolerated, after)
+
+
+def judge(typed: TypedVault, files: list[FileChange], renamed: dict[str, str] | None = None) -> Verdict:
+    """The gate: violations the write would add, checked on the notes it can affect only."""
+    after = after_vault(typed, files)
+    notes = sorted(affected(typed, after, files))
+    before_issues = [i for p in notes if p in typed.vault.notes for i in typed.issues(p)]
+    after_issues = [i for p in notes if p in after.vault.notes for i in after.issues(p)]
+    return _verdict(before_issues, after_issues, files, after, renamed)
+
+
+def judge_everything(typed: TypedVault, files: list[FileChange], renamed: dict[str, str] | None = None) -> Verdict:
+    """The gate checking every note before and after: what ``judge`` must always agree with (tests)."""
+    after = after_vault(typed, files)
+    return _verdict(typed.issues(), after.issues(), files, after, renamed)
 
 
 # ----- commit ------------------------------------------------------------------------
@@ -215,8 +303,12 @@ def _journal_dir(root: Path) -> Path:
 def _rollback(root: Path, entries: list[dict[str, Any]]) -> None:
     for entry in reversed(entries):
         target = root / entry["target"]
-        temp = root / entry["temp"]
         backup = root / entry["backup"] if entry["backup"] else None
+        if entry.get("deleted"):  # a file to delete: put it back if it went
+            if backup is not None and backup.exists():
+                os.replace(backup, target)
+            continue
+        temp = root / entry["temp"]
         if temp.exists():  # never renamed: the target is as it was
             temp.unlink()
             if backup is not None and backup.exists():
@@ -249,6 +341,19 @@ def commit(root: Path, files: list[FileChange]) -> None:
                 what = "was created" if change.old is None else "changed" if current is not None else "was deleted"
                 raise WriteFailed(f"{change.path} {what} while the write was being prepared; nothing was written")
         for number, change in enumerate(files):
+            if change.new is not None:
+                continue
+            target = root / change.path  # a file to delete: backed up now, unlinked after the renames
+            backup = target.parent / f"{TEMP_PREFIX}{txid}-{number}.bak"
+            entries.append({"target": change.path, "temp": None, "backup": backup.relative_to(root).as_posix(),
+                            "created": False, "deleted": True, "made_dirs": []})
+            try:
+                os.link(target, backup)
+            except OSError:
+                shutil.copy2(target, backup)
+        for number, change in enumerate(files):
+            if change.new is None:
+                continue
             target = root / change.path
             made_dirs = []
             parent = target.parent
@@ -281,14 +386,24 @@ def commit(root: Path, files: list[FileChange]) -> None:
             os.fsync(stream.fileno())
         _fsync_dir(journal_dir)
 
-        for number, entry in enumerate(entries):
+        renames = [entry for entry in entries if not entry.get("deleted")]
+        for number, entry in enumerate(renames):
             os.replace(root / entry["temp"], root / entry["target"])
             if crash_after is not None and number + 1 >= int(crash_after):
                 os._exit(70)  # test-only: die between renames, leaving the journal
+        for entry in entries:
+            if entry.get("deleted"):
+                (root / entry["target"]).unlink()
+        if os.environ.get(_CRASH_DELETES_ENV) and any(entry.get("deleted") for entry in entries):
+            os._exit(70)  # test-only: die after the deletions, leaving the journal
         for directory in {(root / entry["target"]).parent for entry in entries}:
             _fsync_dir(directory)
         for change in files:
-            if (root / change.path).read_bytes() != change.new.encode("utf-8"):
+            target = root / change.path
+            if change.new is None:
+                if target.exists():
+                    raise WriteFailed(f"{change.path} is still there after it was deleted; every file was restored")
+            elif target.read_bytes() != change.new.encode("utf-8"):
                 raise WriteFailed(f"{change.path} does not hold what was written; every file was restored")
     except BaseException as exc:
         _rollback(root, entries)
@@ -391,7 +506,7 @@ def sync_index(db_path: Path, root: Path, written: list[str], stale_before: set[
         return {"status": "no-index", "synced": [], "pending": written}
     if reason:
         return {"status": "needs-rebuild", "reason": reason, "synced": [], "pending": written}
-    pending = sorted(p for p in written if p in stale_before and after.issues(p))
+    pending = sorted(p for p in written if p in stale_before and p in after.vault.notes and after.issues(p))
     synced = sorted(set(written) - set(pending))
     if synced:
         try:
@@ -412,19 +527,35 @@ def run_write(spec: FormatSpec, root: str | Path, db_path: str | Path, build: Ca
     db_path = Path(db_path)
     with write_lock(root):
         recovered = recover(root)
-        stale_before, reason = _stale_notes(db_path, root)
-        typed = TypedVault(spec, Vault.load(root, cache=parse_cache))
-        plan = build(typed)
-        if not plan.files:
-            return Outcome("unchanged", plan, recovered=recovered)
-        verdict = judge(typed, plan.files)
-        if not verdict.ok:
-            return Outcome("refused", plan, verdict, recovered=recovered)
-        if dry_run:
-            return Outcome("dry-run", plan, verdict, recovered=recovered)
-        commit(root, plan.files)
-        index = sync_index(db_path, root.resolve(), [f.path for f in plan.files], stale_before, reason, verdict.after)
-        return Outcome("written", plan, verdict, index, recovered)
+        typed = None
+        if parse_cache is None:
+            from vaultengine.indexed import IndexedVault, IndexGraph
+
+            indexed = IndexedVault.open(root, db_path)
+            if indexed is not None:
+                typed = TypedVault(spec, indexed, IndexGraph(indexed))
+                stale_before, reason = set(indexed.stale.added) | set(indexed.stale.changed), None
+        if typed is None:
+            stale_before, reason = _stale_notes(db_path, root)
+            typed = TypedVault(spec, Vault.load(root, cache=parse_cache))
+        try:
+            plan = build(typed)
+            if not plan.files and not plan.side_files:
+                return Outcome("unchanged", plan, recovered=recovered)
+            verdict = judge(typed, plan.files, plan.renamed) if plan.files else Verdict([], [], typed)
+            if not verdict.ok:
+                return Outcome("refused", plan, verdict, recovered=recovered)
+            if dry_run:
+                return Outcome("dry-run", plan, verdict, recovered=recovered)
+            commit(root, plan.files + plan.side_files)
+            if not plan.files:  # engine state only: no note changed, nothing to index
+                return Outcome("written", plan, verdict, {"status": "unchanged", "synced": [], "pending": []}, recovered)
+            written = [f.path for f in plan.files]
+            index = sync_index(db_path, root.resolve(), written, stale_before, reason, verdict.after)
+            return Outcome("written", plan, verdict, index, recovered)
+        finally:
+            if hasattr(typed.vault, "close"):
+                typed.vault.close()
 
 
 def diff_text(files: list[FileChange]) -> str:
@@ -434,9 +565,10 @@ def diff_text(files: list[FileChange]) -> str:
     chunks = []
     for change in files:
         old = (change.old or "").splitlines(keepends=True)
-        new = change.new.splitlines(keepends=True)
+        new = (change.new or "").splitlines(keepends=True)
         fromfile = "/dev/null" if change.created else f"a/{change.path}"
-        for line in difflib.unified_diff(old, new, fromfile=fromfile, tofile=f"b/{change.path}"):
+        tofile = "/dev/null" if change.deleted else f"b/{change.path}"
+        for line in difflib.unified_diff(old, new, fromfile=fromfile, tofile=tofile):
             if line.endswith(("\r\n", "\n", "\r")):
                 chunks.append(line.rstrip("\r\n") + "\n")
             else:
@@ -457,7 +589,7 @@ def outcome_to_dict(outcome: Outcome, dry_run: bool) -> dict[str, Any]:
         "dry_run": dry_run,
         "written": outcome.status == "written",
         "files": [
-            {"path": f.path, "action": "create" if f.created else "modify", "changes": list(f.changes),
+            {"path": f.path, "action": "create" if f.created else "delete" if f.deleted else "modify", "changes": list(f.changes),
              "diff": file_diff(f), "content": f.new if f.created else None}
             for f in plan.files
         ],
@@ -515,6 +647,7 @@ def plan_new(
     relations: list[tuple[str, str]] | None = None,
     sections: dict[str, str] | None = None,
     now: dt.datetime | None = None,
+    body_text: str | None = None,
 ) -> WritePlan:
     spec = typed.spec
     note_type = spec.type_named(type_name)
@@ -590,6 +723,8 @@ def plan_new(
         placed_relations = True
     if note_type.new.title_heading:
         body.extend(["", f"# {title}"])
+    if body_text and body_text.strip():
+        body.extend(["", body_text.strip("\n")])  # free text after the title, before any required heading
     for index, pattern in enumerate(note_type.headings):
         if pattern.is_regex:
             raise WriteError(f"{type_name} requires a heading matching {pattern.pattern}; vault new cannot write it")

@@ -20,13 +20,22 @@ export function CheckView({data}: {data: VaultCheckResult}) {
 			<Body>
 				{data.ok ? (
 					<Text>
-						<Text color={theme.ok}>✓</Text> no violations in {plural(scope.checked, 'note')} checked
+						<Text color={theme.ok}>✓</Text> no {data.baseline ? 'new ' : ''}violations in {plural(scope.checked, 'note')} checked
 					</Text>
 				) : (
 					<Text>
-						<Text color={theme.error}>✗</Text> {plural(summary.violations, 'violation')} in {plural(summary.notes, 'note')}
+						<Text color={theme.error}>✗</Text> {plural(summary.violations, data.baseline ? 'new violation' : 'violation')} in{' '}
+						{plural(summary.notes, 'note')}
 					</Text>
 				)}
+				{data.baseline ? (
+					<Text dimColor>
+						baseline {data.baseline.recorded_now ? 'recorded now' : `of ${data.baseline.recorded_at ?? '?'}`}:{' '}
+						{plural(data.baseline.violations, 'violation')} · {formatNumber(data.baseline.known)} still there (not listed) ·{' '}
+						{formatNumber(data.baseline.fixed)} fixed since
+						{data.baseline.renames.length > 0 ? ` · ${plural(data.baseline.renames.length, 'renamed note')} followed` : ''}
+					</Text>
+				) : null}
 				{summary.by_code.length > 0 ? (
 					<Text dimColor>{summary.by_code.map((row) => `${formatNumber(row.count)} ${row.code}`).join(' · ')}</Text>
 				) : null}

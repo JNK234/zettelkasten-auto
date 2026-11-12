@@ -15,7 +15,8 @@ const USAGE = `Usage: vault-tui --vault <path> [options]
 
 Options:
   -v, --vault <path>     Obsidian vault folder (required)
-  -f, --format <name>    note format for /check /fix /new /link /ingest /coverage (e.g. brain, or a .yaml file)
+  -f, --format <name>    note format for /check /fix /new /link /ingest /coverage and /pipeline /page
+                         /findings /idea /move /merge /next (e.g. core, brain, or a .yaml file)
       --python <path>    Python interpreter with vaultengine (default: $VAULT_TUI_PYTHON, repo .venv, python3)
       --db <path>        index file (default: <vault>/.vaultengine/index.sqlite)
       --no-index         do not update the index on start

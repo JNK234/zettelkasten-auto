@@ -1,5 +1,6 @@
 """`vault` command line: index, stats, health, search, related, suggest, unlinked, embed, config show,
-formats, check, fix, new, link, set, ingest, coverage, serve (JSON-RPC), rpc-schema.
+formats, check, fix, new, link, set, ingest, coverage, pipeline, note, page, findings, idea, move, merge,
+next, serve (JSON-RPC), rpc-schema.
 
 Settings (vault, index, format, embedding model) come from flags, then VAULTENGINE_* environment
 variables, then the `engine:` section of config/config.yaml, then defaults (``settings.py``).
@@ -241,7 +242,8 @@ def _format_formats(data: dict[str, Any], vault: str, limit: int) -> str:
     only_type = data["only_type"]
     scope = f", type {only_type}" if only_type else ""
     out = [f"Format {fmt['name']} ({fmt['path']}) on {Path(vault).resolve()}{scope}", ""]
-    out.append(f"  notes   {data['notes']:>6}   {data['typed']} typed, {len(data['untyped'])} untyped")
+    ignored = f", {data['ignored']} in ignored folders" if data.get("ignored") else ""
+    out.append(f"  notes   {data['notes']:>6}   {data['typed']} typed, {len(data['untyped'])} untyped{ignored}")
     out.append(f"  issues  {issues['total']:>6}   in {_plural(issues['notes'], 'note')}" + (f" of type {only_type}" if only_type else ""))
 
     out.extend(["", f"  {'Types':<14}{'notes':>6}{'clean':>7}{'issues':>8}   match"])
@@ -368,22 +370,59 @@ def _format_check(data: dict[str, Any], vault: str) -> str:
         for item in note["violations"]:
             out.append(f"  {item['line']:>5}  {item['code']:<20} {item['message']}")
     out.append("")
+    baseline = data.get("baseline")
+    if baseline is None:
+        if data["ok"]:
+            out.append(f"✓ no violations in {_plural(scope['checked'], 'note')} checked")
+        else:
+            out.append(f"✗ {_plural(summary['violations'], 'violation')} in {_plural(summary['notes'], 'note')}")
+            out.extend(f"  {row['count']:>6}  {row['code']}" for row in summary["by_code"])
+        return "\n".join(out)
+    if baseline["recorded_now"]:
+        was = f" (it had {baseline['previous']})" if baseline["previous"] is not None else ""
+        out.append(f"Recorded a baseline of {_plural(baseline['violations'], 'violation')}{was}: {baseline['path']}")
+        out.append("  `vault check --baseline` now fails only on violations that are not in it")
+        return "\n".join(out)
+    known = f"{_plural(baseline['known'], 'known violation')} in the baseline not shown"
+    recorded = f"baseline of {baseline['recorded_at']}: {baseline['path']}"
     if data["ok"]:
-        out.append(f"✓ no violations in {_plural(scope['checked'], 'note')} checked")
+        out.append(f"✓ no new violations in {_plural(scope['checked'], 'note')} checked ({known})")
     else:
-        out.append(f"✗ {_plural(summary['violations'], 'violation')} in {_plural(summary['notes'], 'note')}")
+        out.append(f"✗ {_plural(summary['violations'], 'new violation')} in {_plural(summary['notes'], 'note')} ({known})")
         out.extend(f"  {row['count']:>6}  {row['code']}" for row in summary["by_code"])
+    out.append(f"  {recorded}")
+    for rename in baseline["renames"]:
+        out.append(f"  followed a renamed note ({rename['how']}): {rename['from']} → {rename['to']}")
+    if baseline["fixed"]:
+        out.append(f"  {_plural(baseline['fixed'], 'baselined violation')} fixed since; "
+                   f"`--update-baseline` records the smaller baseline")
     return "\n".join(out)
 
 
 def _cmd_check(args: argparse.Namespace) -> int:
-    from vaultengine.formats import TypedVault
-    from vaultengine.formats.check import check_report, scope_all, scope_changed, select_issues
-    from vaultengine.vault import Vault
+    from vaultengine.formats.check import (
+        BaselineError, BaselineResult, baseline_path, check_report, compare_to_baseline, load_baseline,
+        record_baseline, scope_all, scope_changed, select_issues,
+    )
 
     spec = _load_spec(args)
     if spec is None:
         return 2
+    if args.baseline and args.update_baseline:
+        print("error: --baseline compares with the baseline, --update-baseline records it; give one", file=sys.stderr)
+        return 2
+    baseline_file = baseline_path(args.vault, spec.name) if args.baseline or args.update_baseline else None
+    baseline = None
+    if args.baseline:
+        if not baseline_file.exists():
+            print(f"error: no baseline for format {spec.name!r} at {baseline_file}; record one with "
+                  f"`vault check {args.vault} -f {args.format} --update-baseline`", file=sys.stderr)
+            return 2
+        try:
+            baseline = load_baseline(baseline_file, spec.name)
+        except BaselineError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
     stale = None
     if args.changed:
         if not Path(args.db).exists():
@@ -393,12 +432,28 @@ def _cmd_check(args: argparse.Namespace) -> int:
         with VaultIndex.open_existing(args.db) as index:
             stale = index.staleness(args.vault)
             last = index.meta().get("last_indexed_at")
-    typed = TypedVault(spec, Vault.load(args.vault))
+    typed = _typed_for_reading(args, spec, quiet=True)
     if stale is None:
         scope = scope_all(typed)
     else:
         scope = scope_changed(typed, stale.added, stale.changed, stale.deleted, last, stale.reason)
-    data = check_report(typed, scope, select_issues(typed, scope))
+    issues = select_issues(typed, scope)
+    result = None
+    if args.update_baseline:
+        # Record the whole vault as it is now (the only time `check` writes). Nothing is new.
+        previous = None
+        if baseline_file.exists():
+            try:
+                previous = len(load_baseline(baseline_file, spec.name).violations)
+            except BaselineError:
+                previous = None
+        recorded = record_baseline(typed, baseline_file)
+        result = BaselineResult(recorded, [], issues, [], recorded=True, previous=previous)
+    elif baseline is not None:
+        result = compare_to_baseline(typed, issues, baseline)
+    data = check_report(typed, scope, result.new if result else issues)
+    if result is not None:
+        data["baseline"] = result.to_dict()
     if args.json:
         _print_json({"vault": str(Path(args.vault).resolve()), **data})
     else:
@@ -547,10 +602,11 @@ def _cmd_new(args: argparse.Namespace) -> int:
 
     values = _pairs(args.set, "--set")
     sections = {name: _read_section_text(text) for name, text in (args.section or [])}
+    body = _read_section_text(args.body) if args.body is not None else None
     relations = [(name, target) for name, target in (args.rel or [])]
     return _run_write_command(args, lambda typed: plan_new(
         typed, args.type, args.title, folder=args.folder, name=args.name, values=values,
-        relations=relations, sections=sections,
+        relations=relations, sections=sections, body_text=body,
     ))
 
 
@@ -632,6 +688,649 @@ def _cmd_ingest(args: argparse.Namespace) -> int:
             out.extend(["", f"  {candidate.path}", *_candidate_lines(candidate)])
         print("\n".join(out))
         return 1
+
+
+# ----- pipeline and note facts ----------------------------------------------------------------
+
+
+def _typed_for_reading(args: argparse.Namespace, spec, quiet: bool = False):
+    """The vault through a format, read from the index when there is a usable one (notes changed
+    since the last `vault index` are parsed from disk; nothing is written), else from every file
+    (``quiet``: without saying so)."""
+    from vaultengine.formats import TypedVault
+    from vaultengine.indexed import open_typed
+    from vaultengine.vault import Vault
+
+    typed = open_typed(spec, args.vault, args.db)
+    if typed is None:
+        if not quiet:
+            print(f"note: no usable index at {args.db}; reading every note (`vault index {args.vault}` makes this fast)",
+                  file=sys.stderr)
+        typed = TypedVault(spec, Vault.load(args.vault))
+    return typed
+
+
+def _pipeline_for(args: argparse.Namespace):
+    from vaultengine.formats.pipeline import Pipeline
+
+    spec = _load_spec(args)
+    if spec is None:
+        return None
+    if spec.pipeline is None:
+        print(f"error: format {spec.name!r} has no `pipeline:` block (see docs/formats.md)", file=sys.stderr)
+        return None
+    return Pipeline(_typed_for_reading(args, spec))
+
+
+_REASONS = {
+    "missing": "cite source notes that are not in the vault",
+    "not-a-source": "cite notes that are not sources",
+    "url-only": "cite only URLs",
+    "none": "cite nothing",
+}
+
+
+def _format_pipeline(data: dict[str, Any], vault: str, limit: int) -> str:
+    fmt, roles = data["format"], data["roles"]
+    source, zettel, page = ("/".join(roles[k]) for k in ("sources", "extract", "compile"))
+    out = [f"vault pipeline {Path(vault).resolve()}  (format {fmt['name']}: {fmt['path']})", ""]
+    stages, total = data["stages"], len(data["sources"])
+    meaning = {"compiled": f"a {page} links to a {zettel} that links to it",
+               "extracted": f"a {zettel} links to it, no {page} uses those yet",
+               "ingested": f"no {zettel} links to it"}
+    out.append(f"  {source + ' notes':<22}{total:>5}")
+    for stage in ("compiled", "extracted", "ingested"):
+        out.append(f"    {stage:<20}{stages[stage]:>5}   {meaning[stage]}")
+    ext, comp = data["extract"], data["compile"]
+    unsourced = ext["unsourced"]
+    out.append(f"  {zettel + ' notes':<22}{ext['total']:>5}")
+    out.append(f"    {'in a ' + page:<20}{ext['in_a_compile_note']:>5}")
+    out.append(f"    {'resting on a ' + source:<20}{ext['resting_on_a_source']:>5}")
+    if unsourced["total"]:
+        reasons = ", ".join(f"{n} {_REASONS[r]}" for r, n in unsourced["by_reason"].items() if n)
+        out.append(f"    {'on no ' + source + ' note':<20}{unsourced['total']:>5}   {reasons}")
+    out.append(f"  {page + ' notes':<22}{comp['total']:>5}   {comp['using_an_extract_note']} link to a {zettel}")
+    if data["ignored"]:
+        out.append(f"  {'ignored':<22}{data['ignored']:>5}   notes in ignored folders, which play no part")
+
+    out.extend(["", f"{source.capitalize()} notes by stage  ({zettel}s linking to it, {page}s using those)"])
+    shown, more = _shown(data["sources"], limit)
+    for row in shown:
+        out.append(f"  {row['stage']:<10}{len(row['zettels']):>4} {zettel[:1]}{len(row['pages']):>4} {page[:1]}   {row['path']}")
+    if more:
+        out.append(more)
+
+    gaps = data["gaps"]
+    for title, items in ((f"{source.capitalize()} notes nothing has been extracted from", gaps["not_extracted"]),
+                         (f"{zettel.capitalize()} notes no {page} includes", gaps["not_compiled"])):
+        out.extend(["", f"{title} ({len(items)})"])
+        shown, more = _shown(items, limit)
+        out.extend(f"  {path}" for path in shown)
+        if more:
+            out.append(more)
+    return "\n".join(out)
+
+
+def _cmd_pipeline(args: argparse.Namespace) -> int:
+    pipeline = _pipeline_for(args)
+    if pipeline is None:
+        return 2
+    data = pipeline.report()
+    if args.json:
+        _print_json({"vault": str(Path(args.vault).resolve()), **data})
+    else:
+        print(_format_pipeline(data, args.vault, args.limit))
+    return 0
+
+
+def _format_note_facts(data: dict[str, Any]) -> str:
+    roles = data["roles"]
+    source, zettel, page = ("/".join(roles[k]) for k in ("sources", "extract", "compile"))
+    kind = data["type"] or ("ignored folder" if data["ignored"] else "no type")
+    out = [f"{data['path']}  ({kind})"]
+    if data["stage"]:
+        out.append(f"  stage      {data['stage']}")
+    elif data["type"] in roles["extract"]:
+        out.append(f"  stage      none: it rests on no {source} note")
+    if data["modified"]:
+        out.append(f"  modified   {data['modified']}  (file)")
+    if data.get("trust"):
+        t = data["trust"]
+        out.append(f"  trust      {t['percentile']}th percentile  (linked from {t['links_in']}, cited by {t['pages']} pages "
+                   f"and {t['ideas']} ideas)")
+
+    def rows(label: str, items: list[dict[str, Any]], what: str) -> None:
+        out.append(f"  {label:<10} {len(items)} {what}{'' if len(items) == 1 else 's'}")
+        for item in items:
+            via = ", ".join(Path(v).stem for v in item["via"])
+            how = ("direct" + (f"; also via {via}" if via else "")) if item["direct"] else f"via {via}"
+            via = "" if how == "direct" else f"  ({how})"
+            out.append(f"      {item['path']}{via}")
+
+    out.extend(["", "Rests on"])
+    rows("sources", data["rests_on"]["sources"], source)
+    rows("zettels", data["rests_on"]["extract"], zettel)
+    out.extend(["", "Used by"])
+    rows("zettels", data["used_by"]["extract"], zettel)
+    rows("pages", data["used_by"]["compile"], page)
+
+    def typed_rows(label: str, items: list[dict[str, Any]]) -> None:
+        kinds = Counter(item["type"] or ("ignored" if item["ignored"] else "no type") for item in items)
+        summary = ", ".join(f"{n} {k}" for k, n in sorted(kinds.items(), key=lambda kv: (-kv[1], kv[0])))
+        out.append(f"  {label:<10} {_plural(len(items), 'note')}" + (f": {summary}" if items else ""))
+        for item in items:
+            out.append(f"      {item['path']}  ({item['type'] or ('ignored' if item['ignored'] else 'no type')})")
+
+    out.extend(["", "Links"])
+    typed_rows("from", data["linked_from"])
+    typed_rows("to", data["links_to"])
+    if data["links_to_nothing"]:
+        out.append(f"  {'dangling':<10} {len(data['links_to_nothing'])} that match no note or several: "
+                   + ", ".join(item["raw"] for item in data["links_to_nothing"][:5])
+                   + (" …" if len(data["links_to_nothing"]) > 5 else ""))
+    out.extend(["", f"Violations ({len(data['violations'])})"])
+    out.extend(f"  {v['line']:>5}  {v['code']:<20} {v['message']}" for v in data["violations"])
+    return "\n".join(out)
+
+
+def _cmd_note(args: argparse.Namespace) -> int:
+    from vaultengine.formats.write import NoteMissing, find_note
+
+    pipeline = _pipeline_for(args)
+    if pipeline is None:
+        return 2
+    try:
+        path = find_note(pipeline.typed, args.note)
+    except NoteMissing as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    data = pipeline.note(path)
+    if args.json:
+        _print_json({"vault": str(Path(args.vault).resolve()), **data})
+    else:
+        print(_format_note_facts(data))
+    return 0
+
+
+# ----- pages ---------------------------------------------------------------------------------
+
+_ONLY_LINKS = __import__("re").compile(r"^(\s*,?\s*\[\[[^\[\]]+\]\])+\s*,?\s*$")
+
+
+def _page_sources(args: argparse.Namespace) -> list[tuple[str, Any]] | None:
+    """Each --from value: ('notes', [refs]) when it is only [[links]], else ('query', [paths ranked])."""
+    import re
+
+    items: list[tuple[str, Any]] = []
+    conn_index = None
+    try:
+        for value in args.from_:
+            if _ONLY_LINKS.match(value):
+                refs = [m.split("|")[0].split("#")[0].strip() for m in re.findall(r"\[\[([^\[\]]+)\]\]", value)]
+                items.append(("notes", refs))
+                continue
+            if conn_index is None:
+                opened = _open_for_reading(args)
+                if opened is None:
+                    return None
+                conn_index = opened[0]
+            try:
+                result = search_module.search(conn_index.conn, value, limit=None)
+            except search_module.QueryError as exc:
+                print(exc.render(value), file=sys.stderr)
+                return None
+            items.append(("query", (value, [hit.path for hit in result.hits])))
+    finally:
+        if conn_index is not None:
+            conn_index.close()
+    return items
+
+
+def _run_page_write(args: argparse.Namespace, build, show_page: bool, needs: str = "pages") -> int:
+    """A write that prints by default and writes with --write (pages, ideas)."""
+    from vaultengine.formats.write import WriteError, WriteFailed, diff_text, outcome_to_dict, run_write
+
+    spec = _load_spec(args)
+    if spec is None:
+        return 2
+    if getattr(spec, needs) is None:
+        print(f"error: format {spec.name!r} has no `{needs}:` block (see docs/formats.md)", file=sys.stderr)
+        return 2
+    found: dict[str, Any] = {}
+    try:
+        outcome = run_write(spec, args.vault, args.db, lambda typed: build(typed, found), dry_run=not args.write)
+    except WriteError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    except WriteFailed as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 3
+    plan, verdict = outcome.plan, outcome.verdict
+    code = 1 if outcome.status == "refused" else 0
+    if args.json:
+        data = outcome_to_dict(outcome, not args.write)
+        data["state"] = [{"path": f.path, "changes": f.changes} for f in plan.side_files]
+        data.update(found.get("json", {}))
+        _print_json({"vault": str(Path(args.vault).resolve()), **data, "ok": outcome.status != "refused"})
+        return code
+    out = [f"recovered an interrupted write: restored {', '.join(outcome.recovered)}"] if outcome.recovered else []
+    page = plan.files[0] if plan.files and plan.files[0].created else None
+    if show_page and page is not None and outcome.status != "written":
+        out.extend([page.new.rstrip("\n"), "", "─" * 60])
+    elif outcome.status in ("dry-run", "refused") and plan.files:
+        out.extend([diff_text(plan.files).rstrip("\n"), ""])
+    out.extend(found.get("lines", []))
+    if outcome.status == "unchanged":
+        out.extend(plan.notes)
+        out.append("Nothing to write: the blocks are up to date and the zettels are as recorded."
+                   if plan.operation == "page refresh" else "Nothing to write.")
+        print("\n".join(out))
+        return 0
+    if outcome.status == "refused":
+        out.append(f"✗ refused: the {plan.operation} would add {_plural(len(verdict.new_violations), 'violation')}; nothing was written")
+        for issue in verdict.new_violations:
+            out.append(f"  {issue.path}:{issue.line}  {issue.code:<16} {issue.message}")
+        print("\n".join(out))
+        return code
+    verb = "Would write" if outcome.status == "dry-run" else "Wrote"
+    if plan.files:
+        out.append(f"{verb} {_plural(len(plan.files), 'note')} ({plan.operation}):")
+    else:
+        out.append(f"{'Would record' if outcome.status == 'dry-run' else 'Recorded'} in the engine state ({plan.operation}); no note changes:")
+    for change in plan.files:
+        out.append(f"  {'+' if change.created else '~'} {change.path}")
+        out.extend(f"      {text}" for text in change.changes)
+    out.extend(f"  = {note}" for note in plan.notes)
+    for side in plan.side_files:
+        out.append(f"  state    {side.path}: {'; '.join(side.changes)}")
+    if plan.files:
+        out.append("  check    no new violations")
+        if verdict.tolerated:
+            codes = ", ".join(f"{n} {c}" for c, n in sorted(Counter(i.code for i in verdict.tolerated).items()))
+            out.append(f"           already there, not blocking: {codes}")
+    if outcome.status == "dry-run":
+        out.append("Not written: add --write to write it.")
+    elif outcome.index and outcome.index.get("status") == "updated":
+        out.append(f"  index    updated {_plural(len(outcome.index['synced']), 'note')}")
+    print("\n".join(out))
+    return code
+
+
+def _cmd_page_new(args: argparse.Namespace) -> int:
+    from vaultengine.formats.pages import PageError, Pages
+    from vaultengine.formats.write import find_note
+
+    sources = _page_sources(args)
+    if sources is None:
+        return 2
+
+    def build(typed, found):
+        pages = Pages(typed)
+        zettels: list[str] = []
+        lines = []
+        for kind, value in sources:
+            if kind == "notes":
+                zettels.extend(find_note(typed, ref) for ref in value)
+                continue
+            query, paths = value
+            hits = [p for p in paths if p in typed.vault.notes and pages.is_zettel(p)]
+            lines.append(f"from {query!r}: {min(len(hits), args.limit)} of {len(hits)} matching zettels"
+                         f" ({len(paths)} notes matched{'; --limit for more' if len(hits) > args.limit else ''})")
+            zettels.extend(hits[:args.limit])
+        if not zettels:
+            raise PageError("no zettels to make the page from (--from matched none)")
+        found["lines"] = lines
+        plan = pages.plan_new(args.title, zettels, folder=args.folder, tags=args.tags)
+        found["json"] = {"page": {"path": plan.files[0].path, "content": plan.files[0].new}}
+        return plan
+
+    return _run_page_write(args, build, show_page=True)
+
+
+def _cmd_page_exclude(args: argparse.Namespace) -> int:
+    from vaultengine.formats.pages import Pages
+
+    return _run_page_write(args, lambda typed, found: Pages(typed).plan_exclude(args.page, args.zettels, undo=args.undo),
+                           show_page=False)
+
+
+def _cmd_page_refresh(args: argparse.Namespace) -> int:
+    from vaultengine.formats.pages import Pages
+
+    return _run_page_write(args, lambda typed, found: Pages(typed).plan_refresh(args.page), show_page=False)
+
+
+def _format_page_check(data: dict[str, Any], vault: str, fmt: str, limit: int) -> list[str]:
+    out = []
+    when = f"refreshed {data['refreshed_at']}" if data["refreshed_at"] else "no refresh recorded"
+    out.append(f"{data['path']}  ({data['title']}; {when})" if data["managed"] else f"{data['path']}  ({data['title']})")
+    if data.get("renamed_from"):
+        out.append(f"  = renamed from {data['renamed_from']}: its record followed it")
+    if data.get("excluded"):
+        out.append(f"  = {_plural(len(data['excluded']), 'zettel')} excluded from it (`vault page exclude … --undo` to bring one back)")
+    for problem in data["problems"]:
+        out.append(f"  ✗ {problem}")
+    if not data["managed"]:
+        return out
+    if data["ready"]:
+        out.append("  ✓ ready to write: blocks up to date, zettels as recorded, nothing behind, in the index, no violations")
+        return out
+    for block in data["blocks"]:
+        if block["status"] == "missing":
+            out.append(f"  ✗ {block['name']} block missing (its markers are gone)")
+        elif block["status"] == "out-of-date":
+            out.append(f"  ✗ {block['name']} block out of date")
+            out.extend(f"      - {line}" for line in block["removed"][:limit])
+            out.extend(f"      + {line}" for line in block["added"][:limit])
+    if data["changed"] is None:
+        out.append("  ✗ no record of its zettels: refresh it once so changes can be tracked")
+    elif data["changed"]:
+        out.append(f"  ✗ {_plural(len(data['changed']), 'zettel')} changed since the last refresh")
+        out.extend(f"      {item['status']:<13} {item['path']}" for item in data["changed"])
+    if data["behind"]:
+        out.append(f"  ✗ behind: {_plural(len(data['behind']), 'zettel')} with at least two of its tags or links in common, not on it")
+        shown, more = _shown(data["behind"], limit)
+        for row in shown:
+            why = " · ".join(part for part in (
+                f"tags {', '.join(row['tags'])}" if row["tags"] else "",
+                f"links {', '.join(row['links'])}" if row["links"] else "") if part)
+            out.append(f"      {row['path']}   {why}")
+        if more:
+            out.append("    " + more)
+    if data["index"] != "current":
+        out.append(f"  ✗ index line {'missing' if data['index'] == 'missing' else 'out of date'}")
+    for v in data["violations"]:
+        out.append(f"  ✗ {v['code']}: {v['message']}")
+    fixes = []
+    if any(b["status"] == "out-of-date" for b in data["blocks"]) or data["changed"] or data["changed"] is None \
+            or data["index"] != "current":
+        fixes.append(f"vault page refresh {vault} {data['path']!r} -f {fmt} --write")
+    if data["behind"]:
+        fixes.append("link the behind zettels that belong in the text and refresh; `vault page exclude` the ones that do not")
+    out.extend(f"  → {fix}" for fix in fixes)
+    return out
+
+
+def _cmd_page_check(args: argparse.Namespace) -> int:
+    from vaultengine.formats import TypedVault
+    from vaultengine.formats.pages import PageError, Pages
+    from vaultengine.formats.write import NoteMissing, find_note
+    from vaultengine.vault import Vault
+
+    spec = _load_spec(args)
+    if spec is None:
+        return 2
+    try:
+        pages = Pages(_typed_for_reading(args, spec))
+        targets = [find_note(pages.typed, args.page)] if args.page else pages.pages()
+        results = [pages.check(p) for p in targets]
+    except (PageError, NoteMissing) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    managed = [r for r in results if r["managed"]]
+    attention = [r for r in results if (r["managed"] or args.page) and not r["ready"]]
+    if args.json:
+        _print_json({"vault": str(Path(args.vault).resolve()), "format": {"name": spec.name, "path": spec.path},
+                     "pages": results, "ready": not attention})
+        return 1 if attention else 0
+    out = [f"vault page check {Path(args.vault).resolve()}  (format {spec.name}: {spec.path})", ""]
+    for result in results:
+        if result["managed"] or args.page:
+            out.extend(_format_page_check(result, args.vault, args.format, args.limit) + [""])
+    unmanaged = [r["path"] for r in results if not r["managed"] and not r["problems"][1:]]
+    if unmanaged and not args.page:
+        out.append(f"{_plural(len(unmanaged), 'page')} without vault blocks (not made by `vault page new`): "
+                   + ", ".join(unmanaged))
+        out.append("")
+    ready = len(managed) - len([r for r in attention if r["managed"]])
+    out.append(f"{'✓' if not attention else '✗'} {ready} of {_plural(len(managed), 'managed page')} ready to write")
+    print("\n".join(out))
+    return 1 if attention else 0
+
+
+# ----- findings and ideas ------------------------------------------------------------------------
+
+
+def _findings_for(args: argparse.Namespace, spec):
+    """Findings from the index (read only); None after printing why there are none."""
+    from vaultengine.findings import Findings, counts_for, skip_for
+
+    opened = _open_for_reading(args)
+    if opened is None:
+        return None, None
+    index, info = opened
+    return Findings(index.conn, skip_for(spec), counts_for(spec), _findings_engine(args, index, spec)), (index, info)
+
+
+def _findings_engine(args: argparse.Namespace, index: VaultIndex, spec):
+    """The Relatedness link findings score with: the configured embedding model and the format's tag fields."""
+    from vaultengine.related import Relatedness
+    from vaultengine.tagrule import format_rule
+
+    return Relatedness(index.conn, lambda: args.settings.provider(), args.vault, format_rule(spec))
+
+
+def _cmd_findings(args: argparse.Namespace) -> int:
+    from vaultengine.findings import METHODS
+
+    spec = _load_spec(args)
+    if spec is None:
+        return 2
+    findings, opened = _findings_for(args, spec)
+    if findings is None:
+        return 2
+    index, info = opened
+    with index:
+        items = findings.all(args.method or None)
+        if args.id:
+            items = [f for f in items if f.id == args.id]
+            if not items:
+                print(f"error: no finding {args.id!r} now (ids: vault findings {args.vault} -f {args.format})", file=sys.stderr)
+                return 2
+    if args.json:
+        _print_json({"vault": str(Path(args.vault).resolve()), "index": info, "total": len(items),
+                     "thresholds": findings.thresholds, "findings": [f.to_dict() for f in items]})
+        return 0
+    out = [f"vault findings {Path(args.vault).resolve()}  ({_plural(len(items), 'finding')}; "
+           f"from the index of {info['last_indexed_at']}{', out of date' if info['stale'] else ''})"]
+    t = findings.thresholds
+    parts = []
+    if "missing-note" in t:
+        parts.append(f"missing notes: {t['missing-note']['linking_notes']}+ linking notes")
+    if "existing-name" in t:
+        parts.append(f"names: {t['existing-name']['linking_notes']}+")
+    if "link" in t:
+        parts.append(f"links: score {t['link']['score']:.2f}+")
+    if parts:
+        out.append("  thresholds (percentiles of this vault, with floors): " + ", ".join(parts))
+    for method, about in METHODS.items():
+        mine = [f for f in items if f.method == method]
+        if not mine:
+            continue
+        out.extend(["", f"{method}: {about} ({len(mine)})"])
+        shown, more = _shown(mine, 0 if args.id else args.limit)
+        for finding in shown:
+            out.append(f"  {finding.id}  {finding.title}")
+            out.extend(f"      {line}" for line in finding.evidence)
+        if more:
+            out.append(more)
+    out.extend(["", f"An idea from one: vault idea new {args.vault} --from <id> -f {args.format} [--write]"])
+    print("\n".join(out))
+    return 0
+
+
+def _cmd_idea_new(args: argparse.Namespace) -> int:
+    from vaultengine.formats.ideas import plan_idea_new
+
+    spec = _load_spec(args)
+    if spec is None:
+        return 2
+    findings, opened = _findings_for(args, spec)
+    if findings is None:
+        return 2
+    with opened[0]:
+        finding = findings.get(args.from_)
+    if finding is None:
+        print(f"error: no finding {args.from_!r} now (see `vault findings {args.vault} -f {args.format}`)", file=sys.stderr)
+        return 2
+
+    def build(typed, found):
+        plan = plan_idea_new(typed, finding, title=args.title, tags=args.tags)
+        found["json"] = {"finding": finding.to_dict(), "idea": {"path": plan.files[0].path, "content": plan.files[0].new}}
+        return plan
+
+    return _run_page_write(args, build, show_page=True, needs="ideas")
+
+
+def _cmd_idea_set(args: argparse.Namespace) -> int:
+    from vaultengine.formats.ideas import plan_idea_set
+
+    return _run_page_write(args, lambda typed, found: plan_idea_set(typed, args.idea, args.status), show_page=False,
+                           needs="ideas")
+
+
+# ----- move and merge ------------------------------------------------------------------------------
+
+
+def _run_relocation(args: argparse.Namespace, build) -> int:
+    """A move or merge: shows what it would do (diffs) by default, writes with --write."""
+    from vaultengine.formats.write import WriteError, WriteFailed, diff_text, outcome_to_dict, run_write
+
+    spec = _load_spec(args)
+    if spec is None:
+        return 2
+    try:
+        outcome = run_write(spec, args.vault, args.db, build, dry_run=not args.write)
+    except WriteError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    except WriteFailed as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 3
+    plan, verdict = outcome.plan, outcome.verdict
+    report = getattr(plan, "report", None)
+    code = 1 if outcome.status == "refused" else 0
+    if args.json:
+        data = outcome_to_dict(outcome, not args.write)
+        data["state"] = [{"path": f.path, "changes": f.changes} for f in plan.side_files]
+        data["moved"] = plan.renamed
+        data["rewritten"] = report.rewritten if report else []
+        data["now_resolving"] = report.now_resolving if report else []
+        data["self_links"] = [asdict(link) for link in report.self_links] if report else []
+        _print_json({"vault": str(Path(args.vault).resolve()), **data, "ok": outcome.status != "refused"})
+        return code
+    out = [f"recovered an interrupted write: restored {', '.join(outcome.recovered)}"] if outcome.recovered else []
+    deleted = {f.path: f for f in plan.files if f.deleted}
+    for change in plan.files:
+        if change.deleted:
+            continue
+        source = next((old for old, new in plan.renamed.items() if new == change.path and old in deleted), None)
+        if change.created and source is not None:  # a move: show it as a rename, with what changed inside
+            out.append(f"rename {source} -> {change.path}")
+            inner = diff_text([type(change)(change.path, deleted[source].old, change.new)])
+            if inner:
+                out.append(inner.rstrip("\n"))
+        else:
+            out.append(diff_text([change]).rstrip("\n"))
+    for path in deleted:
+        if plan.operation == "merge":
+            out.append(f"delete {path}  (its text is in the merged section of {plan.renamed.get(path)})")
+    if outcome.status == "refused":
+        out.append("")
+        out.append(f"✗ refused: the {plan.operation} would add {_plural(len(verdict.new_violations), 'violation')}; nothing was written")
+        for issue in verdict.new_violations:
+            out.append(f"  {issue.path}:{issue.line}  {issue.code:<16} {issue.message}")
+        print("\n".join(out))
+        return code
+    verb = "Would" if outcome.status == "dry-run" else "Did"
+    out.extend(["", f"{verb} {plan.operation}: " + "; ".join(plan.notes)])
+    touched = [f for f in plan.files if not f.deleted and not f.created and f.path not in plan.renamed.values()]
+    if report:
+        out.append(f"  links    {_plural(len(report.rewritten), 'link')} rewritten in {_plural(len({r.split(':')[0] for r in report.rewritten}), 'note')}")
+        for line in report.now_resolving[:5]:
+            out.append(f"           matched no note before, reaches it now: {line}")
+        if report.self_links:
+            out.append(f"  self     {_plural(len(report.self_links), 'link')} would point at the note it is in: dropped")
+            for link in report.self_links[:5]:
+                out.append(f"           {link}")
+            if len(report.self_links) > 5:
+                out.append(f"           … and {len(report.self_links) - 5} more (--json lists them all)")
+    for side in plan.side_files:
+        out.append(f"  state    {side.path}: {'; '.join(side.changes)}")
+    if touched or plan.files:
+        out.append("  check    no new violations")
+        if verdict.tolerated:
+            codes = ", ".join(f"{n} {c}" for c, n in sorted(Counter(i.code for i in verdict.tolerated).items()))
+            out.append(f"           already there, not blocking: {codes}")
+    if outcome.status == "dry-run":
+        out.append("Not written: add --write to write it.")
+    elif outcome.index and outcome.index.get("status") == "updated":
+        out.append(f"  index    updated {_plural(len(outcome.index['synced']), 'note')}")
+    print("\n".join(out))
+    return code
+
+
+def _cmd_move(args: argparse.Namespace) -> int:
+    from vaultengine.formats.moves import plan_move
+
+    return _run_relocation(args, lambda typed: plan_move(typed, args.note, args.to))
+
+
+def _cmd_merge(args: argparse.Namespace) -> int:
+    from vaultengine.formats.moves import plan_merge
+
+    return _run_relocation(args, lambda typed: plan_merge(typed, args.survivor, args.other))
+
+
+# ----- next ---------------------------------------------------------------------------------------
+
+
+def _cmd_next(args: argparse.Namespace) -> int:
+    from vaultengine.findings import Findings, counts_for, skip_for
+    from vaultengine.formats.todo import ABOUT, KINDS, Queue
+
+    spec = _load_spec(args)
+    if spec is None:
+        return 2
+    if spec.pipeline is None:
+        print(f"error: format {spec.name!r} has no `pipeline:` block (see docs/formats.md)", file=sys.stderr)
+        return 2
+    typed = _typed_for_reading(args, spec)
+    findings = None
+    index = None
+    if Path(args.db).exists():
+        index = VaultIndex.open_existing(args.db)
+        findings = Findings(index.conn, skip_for(spec), counts_for(spec), _findings_engine(args, index, spec))
+    else:
+        print("note: no index, so no merge or write items (they come from `vault findings`)", file=sys.stderr)
+    try:
+        queue = Queue(typed, args.vault, args.format, findings)
+        items = queue.items()
+    finally:
+        if index is not None:
+            index.close()
+    shown, more = _shown(items, args.limit)
+    if args.json:
+        _print_json({"vault": str(Path(args.vault).resolve()), "format": {"name": spec.name, "path": spec.path},
+                     "total": len(items), "counts": queue.counts, "items": [it.to_dict() for it in shown]})
+        return 0
+    out = [f"vault next {Path(args.vault).resolve()}  (format {spec.name}; {_plural(len(items), 'item')}, "
+           "most trusted first)", ""]
+    width = len(str(len(shown)))
+    for number, item in enumerate(shown, start=1):
+        out.append(f"{number:>{width}}. {item.kind:<8} {item.title}   (trust {item.trust})")
+        out.append(f"{'':>{width}}  why  {item.why}")
+        out.append(f"{'':>{width}}  run  {item.command}")
+    if more:
+        out.append(more)
+    out.extend(["", "By kind (listed / all):"])
+    for kind in KINDS:
+        count = queue.counts.get(kind, {"listed": 0, "all": 0})
+        extra = f" ({count['zettels_in_no_page']} zettels in no page)" if "zettels_in_no_page" in count else ""
+        cut = " below the median trust not listed" if count["all"] > count["listed"] else ""
+        out.append(f"  {kind:<8} {count['listed']:>4} / {count['all']:<4} {ABOUT[kind]}{extra}{';' + cut if cut else ''}")
+    print("\n".join(out))
+    return 0
 
 
 def _cmd_coverage(args: argparse.Namespace) -> int:
@@ -2364,6 +3063,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--changed", action="store_true",
         help="only notes added or changed since the last `vault index`, plus violations they cause in other notes",
     )
+    check.add_argument(
+        "--baseline", action="store_true",
+        help="fail only on violations not in the vault's baseline (.vaultengine/baseline-<format>.json, "
+        "recorded with --update-baseline); a renamed note keeps its baselined violations",
+    )
+    check.add_argument(
+        "--update-baseline", action="store_true",
+        help="record the whole vault's current violations as the baseline, replacing the old one (exit 0); "
+        "the only option of check that writes",
+    )
     def writer(name: str, help_text: str, handler) -> argparse.ArgumentParser:
         sub = add(name, help_text, handler, vault_required=True)
         format_arg(sub)
@@ -2384,6 +3093,8 @@ def build_parser() -> argparse.ArgumentParser:
                      help="a relation to an existing note, mirror written there (repeatable)")
     new.add_argument("--section", action="append", nargs=2, metavar=("HEADING", "TEXT"),
                      help="text under a required heading; @file reads a file, - reads stdin (repeatable)")
+    new.add_argument("--body", metavar="TEXT",
+                     help="text right after the title (for types without required headings); @file reads a file, - reads stdin")
     link = writer("link", "Relate note A to note B (A relation:: [[B]]) and write the mirror in B.", _cmd_link)
     link.add_argument("source", help="note A: vault path or note name")
     link.add_argument("target", help="note B: vault path or note name")
@@ -2402,6 +3113,99 @@ def build_parser() -> argparse.ArgumentParser:
     format_arg(cov)
     cov.add_argument("--limit", type=int, default=10, help="max notes listed per list (0 = all)")
     cov.set_defaults(uses_index=False)
+    pipe = add("pipeline", "Each source's stage (ingested, extracted, compiled) and the gaps, from the links.", _cmd_pipeline)
+    format_arg(pipe)
+    pipe.add_argument("--limit", type=int, default=10, help="max notes listed per list (0 = all)")
+    note = add("note", "What the engine knows about one note: links, what it rests on, what uses it, its stage.", _cmd_note)
+    note.add_argument("note", help="vault path or note name")
+    format_arg(note)
+    page = commands.add_parser("page", help="Pages made from zettels: new, refresh, check.",
+                               description="Pages made from zettels: scaffold one (new), rebuild its generated blocks "
+                               "(refresh), see what needs attention (check).")
+    page_commands = page.add_subparsers(dest="page_command", required=True)
+
+    def page_sub(name: str, help_text: str, handler) -> argparse.ArgumentParser:
+        sub = page_commands.add_parser(name, help=help_text, description=help_text)
+        sub.add_argument("vault", help="vault folder")
+        format_arg(sub)
+        sub.add_argument("--db", help="index file (default: engine.index in the config, else VAULT/.vaultengine/index.sqlite)")
+        settings_args(sub)
+        sub.add_argument("--json", action="store_true", help="print JSON instead of text")
+        sub.set_defaults(handler=handler, needs_vault=True)
+        return sub
+
+    page_new = page_sub("new", "Scaffold a page from zettels: Created, Tags, a zettels block and a sources block. "
+                        "Prints it; --write writes it (with the index line and a log line).", _cmd_page_new)
+    page_new.add_argument("title", help="the page's title")
+    page_new.add_argument("--from", dest="from_", action="append", required=True, metavar="QUERY_OR_NOTES",
+                          help="zettels: '[[a]] [[b]]' (only links: these notes) or a search query (its best-ranked "
+                          "zettels, needs `vault index`); repeatable")
+    page_new.add_argument("--limit", type=int, default=10, help="zettels taken from each query (default 10)")
+    page_new.add_argument("--tags", help="the page's Tags value (default: the tags its zettels share)")
+    page_new.add_argument("--folder", help="folder for the page (default: the page type's folder)")
+    page_new.add_argument("--write", action="store_true", help="write it (default: print it and write nothing)")
+    page_refresh = page_sub("refresh", "Rebuild a page's blocks from the zettels it links now, and record them. "
+                            "Shows the change; --write writes it.", _cmd_page_refresh)
+    page_refresh.add_argument("page", help="the page: vault path or name")
+    page_refresh.add_argument("--write", action="store_true", help="write it (default: show the change, write nothing)")
+    page_exclude = page_sub("exclude", "Record that zettels are not for a page, so it is not behind on them "
+                            "(kept in the engine state, not in the note). Shows it; --write records it.", _cmd_page_exclude)
+    page_exclude.add_argument("page", help="the page: vault path or name")
+    page_exclude.add_argument("zettels", nargs="+", help="zettels (vault path or name)")
+    page_exclude.add_argument("--undo", action="store_true", help="bring them back")
+    page_exclude.add_argument("--write", action="store_true", help="record it (default: show it, record nothing)")
+    page_check = page_sub("check", "What needs attention on a page (or on every page): blocks out of date, zettels "
+                          "changed since the last refresh, zettels it is behind on, its index line, violations.",
+                          _cmd_page_check)
+    page_check.add_argument("page", nargs="?", help="one page (default: every page)")
+    page_check.add_argument("--limit", type=int, default=10, help="max lines per list (0 = all)")
+    move = add("move", "Move or rename a note; every link that reached it still does (shows the change; --write writes it).",
+               _cmd_move, vault_required=True)
+    move.add_argument("note", help="the note: vault path or name")
+    move.add_argument("to", help="a folder (ending in /, or an existing folder), a new name, or a new vault path")
+    format_arg(move)
+    move.add_argument("--write", action="store_true", help="write it (default: show the change, write nothing)")
+    merge = add("merge", "Merge note B into note A: A keeps its text, B's is appended in a marked section, links to B reach A. "
+                "B may be a name with no note. Shows the change; --write writes it.", _cmd_merge, vault_required=True)
+    merge.add_argument("survivor", help="A, the note that stays (vault path or name)")
+    merge.add_argument("other", help="B, merged into A and removed (vault path or name; or a name links use with no note)")
+    format_arg(merge)
+    merge.add_argument("--write", action="store_true", help="write it (default: show the change, write nothing)")
+    nxt = add("next", "One queue of what needs doing, most trusted first: each item with its reason and the command "
+               "that resolves it.", _cmd_next)
+    format_arg(nxt)
+    nxt.add_argument("--limit", type=int, default=10, help="items shown (0 = all)")
+    findings = add("findings", "What the engine discovered: missing notes many notes link to, two names for one idea, "
+                   "names that are probably an existing note, links worth adding; each with a stable id.", _cmd_findings)
+    format_arg(findings, help_text="format file (its ignored folders take no part; default: engine.format in the config)")
+    findings.add_argument("--method", action="append", choices=["missing-note", "same-idea", "existing-name", "link"],
+                          help="only this method (repeatable)")
+    findings.add_argument("--id", help="only this finding, in full")
+    findings.add_argument("--limit", type=int, default=5, help="findings listed per method (0 = all)")
+    idea = commands.add_parser("idea", help="Ideas made from findings: new, set.",
+                               description="Ideas made from findings: write one (new), move its status (set).")
+    idea_commands = idea.add_subparsers(dest="idea_command", required=True)
+
+    def idea_sub(name: str, help_text: str, handler) -> argparse.ArgumentParser:
+        sub = idea_commands.add_parser(name, help=help_text, description=help_text)
+        sub.add_argument("vault", help="vault folder")
+        format_arg(sub)
+        sub.add_argument("--db", help="index file (default: engine.index in the config, else VAULT/.vaultengine/index.sqlite)")
+        settings_args(sub)
+        sub.add_argument("--json", action="store_true", help="print JSON instead of text")
+        sub.add_argument("--write", action="store_true", help="write it (default: print it and write nothing)")
+        sub.set_defaults(handler=handler, needs_vault=True)
+        return sub
+
+    idea_new = idea_sub("new", "An idea from a finding: Created, Tags, Status #open, the finding's method, notes and evidence "
+                        "between <!-- vault:finding --> markers, and a Claim for you. Prints it; --write writes it.", _cmd_idea_new)
+    idea_new.add_argument("--from", dest="from_", required=True, metavar="FINDING_ID", help="a finding id from `vault findings`")
+    idea_new.add_argument("--title", help="the idea's title (default: from the finding)")
+    idea_new.add_argument("--tags", help="its Tags value (default: the tags the finding's notes share)")
+    idea_set = idea_sub("set", "Set an idea's status (one of the format's values, e.g. open, dropped, done). "
+                        "Shows it; --write writes it.", _cmd_idea_set)
+    idea_set.add_argument("idea", help="the idea: vault path or name")
+    idea_set.add_argument("status", help="the new status, with or without '#'")
     serve = add("serve", "Serve the JSON-RPC 2.0 API on stdin/stdout (one JSON message per line).", _cmd_serve, json_flag=False)
     format_arg(serve, required=False, help_text="format for vault.check/fix/coverage and the note.* writes (name or file;"
                " default: engine.format in the config)")

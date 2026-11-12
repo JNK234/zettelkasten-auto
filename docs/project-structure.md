@@ -5,7 +5,7 @@
 ```text
 zettelkasten-auto/
 ├── README.md                # overview and the documentation index
-├── docs/                    # the documentation (linked from README.md)
+├── docs/                    # the documentation (linked from README.md); workflow.md: the reading workflow step by step
 │   └── experiments/         # vault experiment reports, one per run that set a default (<date>.md)
 ├── vaultengine/             # Vault engine (no LLM)
 │   ├── parser.py            # Obsidian-flavoured markdown parsing (also header and key:: fields)
@@ -14,6 +14,8 @@ zettelkasten-auto/
 │   ├── index.py             # Incremental SQLite index (also partial updates for writes)
 │   ├── queries.py           # stats / health / note queries on the index
 │   ├── service.py           # Operations used by the JSON-RPC server
+│   ├── indexed.py           # a vault read from the index: notes rebuilt from it, only changed files parsed
+│   ├── findings.py          # vault findings: what the engine discovered, with stable ids
 │   ├── cli.py               # `vault` command
 │   ├── settings.py          # engine settings: flag > env (VAULTENGINE_*) > config file (engine:) > default
 │   ├── graphrank.py         # the link graph (missing notes included, link directions kept): PageRank (numpy), co-citation, coupling
@@ -23,7 +25,7 @@ zettelkasten-auto/
 │   ├── shape.py             # vault map: communities (Louvain), topic pages, meaning edges, betweenness, constraint, HITS
 │   ├── lenses.py            # vault deepen: neighbourhood, cited together, same foundations, backbone, cluster
 │   ├── discover.py          # vault discover: hidden link, same role, bridge, gap, surprise, unwritten, wander
-│   ├── connect.py           # vault suggest (links to add) and vault unlinked
+│   ├── connect.py           # vault suggest (links to add; accumulated note by note, exact) and vault unlinked
 │   ├── suggest.py           # vault suggest (notes to write, drafts)
 │   ├── experiment.py        # vault experiment: hidden-link recovery, text variants, communities vs topics; seeded
 │   ├── explore.py           # vault explore: the lens registry, sections, equal space, near-duplicates, where to start
@@ -41,20 +43,27 @@ zettelkasten-auto/
 │   ├── formats/             # the formats layer
 │   │   ├── spec.py          # loading and validating a format file
 │   │   ├── typed.py         # a vault seen through a format: types, metadata, relations, roles, violations
-│   │   ├── check.py         # vault check (and --changed)
+│   │   ├── check.py         # vault check (and --changed, --baseline)
 │   │   ├── fix.py           # vault fix
 │   │   ├── edit.py          # byte-preserving line edits
 │   │   ├── write.py         # the safe write path: new, link, set; the gate, the atomic commit, index sync
 │   │   ├── ingest.py        # vault ingest: conversion and the duplicate gate
 │   │   ├── similarity.py    # title similarity and content overlap
-│   │   └── coverage.py      # vault coverage
+│   │   ├── coverage.py      # vault coverage
+│   │   ├── pipeline.py      # vault pipeline, vault note
+│   │   ├── pages.py         # vault page new, refresh, check, exclude
+│   │   ├── ideas.py         # vault idea new, set
+│   │   ├── moves.py         # vault move, vault merge: links rewritten with the resolver, records follow, self-links dropped
+│   │   └── todo.py          # vault next: the queue, and trust
 │   └── rpc/                 # JSON-RPC 2.0 server, Pydantic models, schema.json
 ├── formats/brain.yaml       # the format of the sample vault
+├── formats/core.yaml        # the lean format: source, zettel, page, idea, one folder each; the pipeline
 ├── tui/                     # `vault-tui` terminal app (TypeScript + Ink), see tui/README.md
 ├── scripts/
+│   ├── setup.sh             # install everything (source it: also puts `vault` on PATH)
 │   ├── verify.sh            # every check of the engine, CLI, API and app
+│   ├── bench_pages.py       # generate a core vault of N notes; time every command of the reading workflow
 │   ├── check_docs.py        # every link in the docs resolves
-│   ├── setup.sh             # uv sync + npm ci with absolute paths (source it in the sandbox)
 │   ├── bench_shape.py       # times vault map and vault discover on generated vaults (thousands to 50,000 notes)
 │   ├── bench_commands.py    # times every vault command on a generated vault
 ├── config/
@@ -71,4 +80,6 @@ zettelkasten-auto/
 │       ├── extraction.py    # Concept extraction with validation
 │       └── providers.py     # LLM providers (OpenAI, Anthropic, Ollama, Gemini)
 └── tests/                   # Python tests; fixtures/vault is the sample vault, fixtures/rpc the recorded API sessions
+                             # (sample_vault_core: every reading-workflow method), fixtures/findings the findings of the
+                             # pair-by-pair implementation on the sample, which the current one must give
 ```

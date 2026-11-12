@@ -360,7 +360,7 @@ class TagLinkTests(unittest.TestCase):
 
     def test_the_index_records_the_field_of_each_link(self):
         rows = self.ix.conn.execute(
-            """SELECT f.path, l.target, l.field_source, l.field_key FROM links l JOIN files f ON f.id = l.source_id
+            """SELECT f.path, l.target, l.field_kind, l.field_key FROM links l JOIN files f ON f.id = l.source_id
                WHERE f.path IN ('P.md', 'Q.md') ORDER BY f.path, l.ordinal""").fetchall()
         self.assertEqual([tuple(r) for r in rows], [("P.md", "topic", "header", "Tags"), ("P.md", "Q", "header", "Tags"),
                                                     ("P.md", "R", None, None), ("Q.md", "topic", "header", "Tags"),

@@ -42,13 +42,16 @@ def iter_vault_files(root: Path) -> Iterator[tuple[str, Path]]:
     Files and folders whose name starts with '.' are skipped (.obsidian, .trash,
     .git, and the index's own .vaultengine folder), as Obsidian does not show them.
     """
+    root_text = os.fspath(root)
     for directory, subdirs, filenames in os.walk(root):
         subdirs[:] = sorted(d for d in subdirs if not d.startswith("."))
+        # The folder's vault-relative prefix once per folder: Path.relative_to per file is slow on large vaults.
+        relative = os.path.relpath(directory, root_text)
+        prefix = "" if relative == "." else relative.replace(os.sep, "/") + "/"
         for filename in sorted(filenames):
             if filename.startswith("."):
                 continue
-            full = Path(directory) / filename
-            yield unicodedata.normalize("NFC", full.relative_to(root).as_posix()), full
+            yield unicodedata.normalize("NFC", prefix + filename), Path(directory, filename)
 
 
 class Vault:

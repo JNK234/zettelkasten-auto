@@ -6,20 +6,25 @@
 /**
  * Any request this server accepts.
  */
-export type Request = (IndexBuildRequest | IndexStatusRequest | VaultStatsRequest | HealthReportRequest | NotesPickRequest | NoteGetRequest | VaultCheckRequest | VaultFixRequest | VaultCoverageRequest | NoteNewRequest | NoteLinkRequest | NoteSetRequest | NoteIngestRequest | SearchQueryRequest | NotePreviewRequest | NoteRelatedRequest | LinksSuggestRequest | NotesSuggestRequest | MentionsUnlinkedRequest | ExploreRunRequest | ExploreMarkRequest | ExploreKeptRequest | ExploreLinkRequest | ExploreUnlinkRequest | MapGetRequest | MapSinceRequest | NoteDeepenRequest | VaultDiscoverRequest | NotesExplainRequest | EmbedStatusRequest | ConfigShowRequest)
+export type Request = (IndexBuildRequest | IndexStatusRequest | VaultStatsRequest | HealthReportRequest | NotesPickRequest | NoteGetRequest | VaultCheckRequest | VaultFixRequest | VaultCoverageRequest | NoteNewRequest | NoteLinkRequest | NoteSetRequest | NoteIngestRequest | SearchQueryRequest | NotePreviewRequest | NoteRelatedRequest | LinksSuggestRequest | NotesSuggestRequest | MentionsUnlinkedRequest | ExploreRunRequest | ExploreMarkRequest | ExploreKeptRequest | ExploreLinkRequest | ExploreUnlinkRequest | MapGetRequest | MapSinceRequest | NoteDeepenRequest | VaultDiscoverRequest | NotesExplainRequest | EmbedStatusRequest | ConfigShowRequest | VaultPipelineRequest | NoteFactsRequest | PageNewRequest | PageRefreshRequest | PageExcludeRequest | PageCheckRequest | FindingsListRequest | IdeaNewRequest | IdeaSetRequest | NoteMoveRequest | NoteMergeRequest | VaultNextRequest)
 /**
  * Any response this server sends: a method result or an error.
  */
-export type Response = (IndexBuildResponse | IndexStatusResponse | VaultStatsResponse | HealthReportResponse | NotesPickResponse | NoteGetResponse | VaultCheckResponse | VaultFixResponse | VaultCoverageResponse | NoteNewResponse | NoteLinkResponse | NoteSetResponse | NoteIngestResponse | SearchQueryResponse | NotePreviewResponse | NoteRelatedResponse | LinksSuggestResponse | NotesSuggestResponse | MentionsUnlinkedResponse | ExploreRunResponse | ExploreMarkResponse | ExploreKeptResponse | ExploreLinkResponse | ExploreUnlinkResponse | MapGetResponse | MapSinceResponse | NoteDeepenResponse | VaultDiscoverResponse | NotesExplainResponse | EmbedStatusResponse | ConfigShowResponse | ErrorResponse)
+export type Response = (IndexBuildResponse | IndexStatusResponse | VaultStatsResponse | HealthReportResponse | NotesPickResponse | NoteGetResponse | VaultCheckResponse | VaultFixResponse | VaultCoverageResponse | NoteNewResponse | NoteLinkResponse | NoteSetResponse | NoteIngestResponse | SearchQueryResponse | NotePreviewResponse | NoteRelatedResponse | LinksSuggestResponse | NotesSuggestResponse | MentionsUnlinkedResponse | ExploreRunResponse | ExploreMarkResponse | ExploreKeptResponse | ExploreLinkResponse | ExploreUnlinkResponse | MapGetResponse | MapSinceResponse | NoteDeepenResponse | VaultDiscoverResponse | NotesExplainResponse | EmbedStatusResponse | ConfigShowResponse | VaultPipelineResponse | NoteFactsResponse | PageNewResponse | PageRefreshResponse | PageExcludeResponse | PageCheckResponse | FindingsListResponse | IdeaNewResponse | IdeaSetResponse | NoteMoveResponse | NoteMergeResponse | VaultNextResponse | ErrorResponse)
 
 export interface VaultRpcSchema {
 AmbiguousLink?: AmbiguousLink
+BaselineFixed?: BaselineFixed
+BaselineRename?: BaselineRename
+BaselineSummary?: BaselineSummary
+BehindZettel?: BehindZettel
 BlockItem?: BlockItem
 BridgeLens?: BridgeLens
 Broker?: Broker
 CheckScope?: CheckScope
 CheckSummary?: CheckSummary
 CheckedNote?: CheckedNote
+Citation?: Citation
 CitingNote?: CitingNote
 ClauseMatch?: ClauseMatch
 ClusterNeighbour?: ClusterNeighbour
@@ -37,6 +42,7 @@ CoverageCitation?: CoverageCitation
 CoverageCiting?: CoverageCiting
 CoverageReasons?: CoverageReasons
 CoverageSources?: CoverageSources
+DanglingLink?: DanglingLink
 DeepenBackbone?: DeepenBackbone
 DeepenCluster?: DeepenCluster
 DeepenHit?: DeepenHit
@@ -44,6 +50,7 @@ DeepenLenses?: DeepenLenses
 DeepenNeighbourhood?: DeepenNeighbourhood
 DeepenPairNote?: DeepenPairNote
 DeepenPairs?: DeepenPairs
+DescribedNote?: DescribedNote
 DirectEvidence?: DirectEvidence
 DiscoverLenses?: DiscoverLenses
 DuplicateCandidate?: DuplicateCandidate
@@ -82,6 +89,12 @@ ExploreUnlinkResponse?: ExploreUnlinkResponse
 ExploreUnlinkResult?: ExploreUnlinkResult
 Facets?: Facets
 FieldCount?: FieldCount
+Finding?: Finding
+FindingNote?: FindingNote
+FindingsListParams?: FindingsListParams
+FindingsListRequest?: FindingsListRequest
+FindingsListResponse?: FindingsListResponse
+FindingsListResult?: FindingsListResult
 FolderCount?: FolderCount
 FormatRef?: FormatRef
 GapFound?: GapFound
@@ -96,11 +109,19 @@ HealthReportResult?: HealthReportResult
 HealthSummary?: HealthSummary
 HiddenLens?: HiddenLens
 HiddenResult?: HiddenResult
+IdeaNewParams?: IdeaNewParams
+IdeaNewRequest?: IdeaNewRequest
+IdeaNewResponse?: IdeaNewResponse
+IdeaNewResult?: IdeaNewResult
+IdeaSetParams?: IdeaSetParams
+IdeaSetRequest?: IdeaSetRequest
+IdeaSetResponse?: IdeaSetResponse
 IncomingLink?: IncomingLink
 IndexBuildParams?: IndexBuildParams
 IndexBuildRequest?: IndexBuildRequest
 IndexBuildResponse?: IndexBuildResponse
 IndexBuildResult?: IndexBuildResult
+IndexInfo?: IndexInfo
 IndexStatusParams?: IndexStatusParams
 IndexStatusRequest?: IndexStatusRequest
 IndexStatusResponse?: IndexStatusResponse
@@ -109,6 +130,7 @@ IndexSync?: IndexSync
 IngestDocument?: IngestDocument
 KeepRate?: KeepRate
 KeptItem?: KeptItem
+KindCount?: KindCount
 LeftOutTag?: LeftOutTag
 LinkCounts?: LinkCounts
 LinkRef?: LinkRef
@@ -150,11 +172,17 @@ MissingSubpath?: MissingSubpath
 MostCited?: MostCited
 MovedNote?: MovedNote
 NameCount?: NameCount
+NewNote?: NewNote
+NextItem?: NextItem
 NoEvidence?: NoEvidence
 NoteDeepenParams?: NoteDeepenParams
 NoteDeepenRequest?: NoteDeepenRequest
 NoteDeepenResponse?: NoteDeepenResponse
 NoteDeepenResult?: NoteDeepenResult
+NoteFactsParams?: NoteFactsParams
+NoteFactsRequest?: NoteFactsRequest
+NoteFactsResponse?: NoteFactsResponse
+NoteFactsResult?: NoteFactsResult
 NoteGetParams?: NoteGetParams
 NoteGetRequest?: NoteGetRequest
 NoteGetResponse?: NoteGetResponse
@@ -166,6 +194,12 @@ NoteIngestResult?: NoteIngestResult
 NoteLinkParams?: NoteLinkParams
 NoteLinkRequest?: NoteLinkRequest
 NoteLinkResponse?: NoteLinkResponse
+NoteMergeParams?: NoteMergeParams
+NoteMergeRequest?: NoteMergeRequest
+NoteMergeResponse?: NoteMergeResponse
+NoteMoveParams?: NoteMoveParams
+NoteMoveRequest?: NoteMoveRequest
+NoteMoveResponse?: NoteMoveResponse
 NoteNewParams?: NoteNewParams
 NoteNewRequest?: NoteNewRequest
 NoteNewResponse?: NoteNewResponse
@@ -194,8 +228,32 @@ NotesSuggestResponse?: NotesSuggestResponse
 NotesSuggestResult?: NotesSuggestResult
 OtherModel?: OtherModel
 OutgoingLink?: OutgoingLink
+PageBlock?: PageBlock
+PageCheck?: PageCheck
+PageCheckParams?: PageCheckParams
+PageCheckRequest?: PageCheckRequest
+PageCheckResponse?: PageCheckResponse
+PageCheckResult?: PageCheckResult
+PageExcludeParams?: PageExcludeParams
+PageExcludeRequest?: PageExcludeRequest
+PageExcludeResponse?: PageExcludeResponse
+PageFrom?: PageFrom
+PageNewParams?: PageNewParams
+PageNewRequest?: PageNewRequest
+PageNewResponse?: PageNewResponse
+PageNewResult?: PageNewResult
+PageRefreshParams?: PageRefreshParams
+PageRefreshRequest?: PageRefreshRequest
+PageRefreshResponse?: PageRefreshResponse
+PageVia?: PageVia
+PageZettelChange?: PageZettelChange
 PendingChanges?: PendingChanges
 PickedNote?: PickedNote
+PipelineCompile?: PipelineCompile
+PipelineExtract?: PipelineExtract
+PipelineGaps?: PipelineGaps
+PipelineRoles?: PipelineRoles
+PipelineStages?: PipelineStages
 PlacedNote?: PlacedNote
 PreviewLine?: PreviewLine
 ProbablyExisting?: ProbablyExisting
@@ -204,8 +262,11 @@ PropertyStats?: PropertyStats
 RelatedHit?: RelatedHit
 RelatedSeed?: RelatedSeed
 RelationRef?: RelationRef
+RelocationResult?: RelocationResult
 Request?: Request
 Response?: Response
+RestingOn?: RestingOn
+RestsOn?: RestsOn
 RoleLens?: RoleLens
 RoleResult?: RoleResult
 SearchClause?: SearchClause
@@ -214,6 +275,7 @@ SearchQueryParams?: SearchQueryParams
 SearchQueryRequest?: SearchQueryRequest
 SearchQueryResponse?: SearchQueryResponse
 SearchQueryResult?: SearchQueryResult
+SelfLink?: SelfLink
 SettingRow?: SettingRow
 SharedReference?: SharedReference
 SharedWord?: SharedWord
@@ -223,6 +285,9 @@ SinceTopicPage?: SinceTopicPage
 SinceWritten?: SinceWritten
 SkippedFix?: SkippedFix
 Snippet?: Snippet
+SourceStage?: SourceStage
+StateChange?: StateChange
+StatefulWriteResult?: StatefulWriteResult
 SurpriseFound?: SurpriseFound
 SurpriseLens?: SurpriseLens
 SurpriseResult?: SurpriseResult
@@ -233,13 +298,17 @@ TagStats?: TagStats
 TagsEvidence?: TagsEvidence
 TextEvidence?: TextEvidence
 TextSignal?: TextSignal
+Trust?: Trust
 Unavailable?: Unavailable
 UncitedNote?: UncitedNote
 UnlinkedMention?: UnlinkedMention
 UnresolvedTarget?: UnresolvedTarget
+Unsourced?: Unsourced
+UnsourcedNote?: UnsourcedNote
 UnwrittenFound?: UnwrittenFound
 UnwrittenLens?: UnwrittenLens
 UnwrittenResult?: UnwrittenResult
+UsedBy?: UsedBy
 Variant?: Variant
 VaultCheckParams?: VaultCheckParams
 VaultCheckRequest?: VaultCheckRequest
@@ -257,6 +326,14 @@ VaultFixParams?: VaultFixParams
 VaultFixRequest?: VaultFixRequest
 VaultFixResponse?: VaultFixResponse
 VaultFixResult?: VaultFixResult
+VaultNextParams?: VaultNextParams
+VaultNextRequest?: VaultNextRequest
+VaultNextResponse?: VaultNextResponse
+VaultNextResult?: VaultNextResult
+VaultPipelineParams?: VaultPipelineParams
+VaultPipelineRequest?: VaultPipelineRequest
+VaultPipelineResponse?: VaultPipelineResponse
+VaultPipelineResult?: VaultPipelineResult
 VaultStatsParams?: VaultStatsParams
 VaultStatsRequest?: VaultStatsRequest
 VaultStatsResponse?: VaultStatsResponse
@@ -274,6 +351,71 @@ source: string
 line: number
 raw: string
 candidates: string[]
+}
+export interface BaselineFixed {
+path: string
+line: (number | null)
+code: (string | null)
+message: (string | null)
+}
+export interface BaselineRename {
+/**
+ * The baselined path, gone now.
+ */
+from: string
+/**
+ * The note it became (its baselined violations follow it).
+ */
+to: string
+similarity: number
+how: ("same text" | "similar text")
+}
+export interface BaselineSummary {
+/**
+ * The baseline file (.vaultengine/baseline-<format>.json).
+ */
+path: string
+recorded_at: (string | null)
+/**
+ * True for update_baseline: it was just recorded.
+ */
+recorded_now: boolean
+/**
+ * Violations in the baseline it replaced (update_baseline), if any.
+ */
+previous: (number | null)
+/**
+ * Violations in the baseline.
+ */
+violations: number
+/**
+ * Violations not in it: these are listed, and make ok false.
+ */
+new: number
+/**
+ * Violations in scope that it has: not listed.
+ */
+known: number
+/**
+ * Baselined violations found nowhere now.
+ */
+fixed: number
+fixed_items: BaselineFixed[]
+/**
+ * Baselined notes followed to a new path (same or similar text).
+ */
+renames: BaselineRename[]
+}
+export interface BehindZettel {
+path: string
+/**
+ * Tags it shares with the page.
+ */
+tags: string[]
+/**
+ * Notes both it and the page's zettels link to.
+ */
+links: string[]
 }
 export interface BlockItem {
 id: string
@@ -343,12 +485,24 @@ path: string
  * Where it is, or for something missing, where it belongs.
  */
 line: number
-code: ("missing-heading" | "heading-order" | "missing-key" | "missing-value" | "bad-value" | "missing-relation" | "unexpected-relation" | "unknown-field" | "bad-relation" | "unresolved-target" | "ambiguous-target" | "relation-target-type" | "missing-mirror")
+code: ("missing-heading" | "heading-order" | "missing-key" | "missing-value" | "bad-value" | "missing-relation" | "unexpected-relation" | "unknown-field" | "bad-relation" | "unresolved-target" | "ambiguous-target" | "relation-target-type" | "missing-mirror" | "too-few-links" | "untyped-note" | "missing-block")
 message: string
 /**
  * Another note involved: for missing-mirror, the note whose field implies it.
  */
 related: (string | null)
+}
+export interface Citation {
+line: number
+raw: string
+role?: (string | null)
+status?: (string | null)
+target_path?: (string | null)
+target_type?: (string | null)
+/**
+ * For reason url-only: the URL cited.
+ */
+url?: (string | null)
 }
 export interface CitingNote {
 note: string
@@ -482,6 +636,11 @@ linked: number
  */
 unlinked: string[]
 }
+export interface DanglingLink {
+line: number
+raw: string
+status: string
+}
 export interface DeepenBackbone {
 community: (number | null)
 chain: string[]
@@ -551,6 +710,11 @@ evidence: EvidenceName[]
 export interface EvidenceName {
 name: string
 weight: number
+}
+export interface DescribedNote {
+path: string
+type: (string | null)
+ignored: boolean
 }
 export interface DirectEvidence {
 /**
@@ -938,7 +1102,7 @@ id: (number | string | null)
 result: ExploreLinkResult
 }
 export interface ExploreLinkResult {
-operation: ("new" | "link" | "set" | "fix" | "ingest" | "link-it" | "unlink")
+operation: ("new" | "link" | "set" | "fix" | "ingest" | "link-it" | "unlink" | "page new" | "page refresh" | "page exclude" | "idea new" | "idea set" | "move" | "merge")
 /**
  * written; refused (would add violations, nothing written); dry-run; unchanged.
  */
@@ -980,7 +1144,10 @@ kept: boolean
 }
 export interface WrittenFile {
 path: string
-action: ("create" | "modify")
+/**
+ * delete: a moved note's old path, a merged note.
+ */
+action: ("create" | "modify" | "delete")
 /**
  * What was done, for people: 'line 11: added [[X]] to `supported-by::`'.
  */
@@ -995,7 +1162,10 @@ diff: string
 content: (string | null)
 }
 export interface IndexSync {
-status: ("updated" | "no-index" | "needs-rebuild")
+/**
+ * unchanged: the write changed no note, only the engine's state (e.g. page.exclude).
+ */
+status: ("updated" | "no-index" | "needs-rebuild" | "unchanged")
 /**
  * Written notes now up to date in the index.
  */
@@ -1217,7 +1387,7 @@ id: (number | string | null)
 result: ExploreUnlinkResult
 }
 export interface ExploreUnlinkResult {
-operation: ("new" | "link" | "set" | "fix" | "ingest" | "link-it" | "unlink")
+operation: ("new" | "link" | "set" | "fix" | "ingest" | "link-it" | "unlink" | "page new" | "page refresh" | "page exclude" | "idea new" | "idea set" | "move" | "merge")
 /**
  * written; refused (would add violations, nothing written); dry-run; unchanged.
  */
@@ -1259,6 +1429,104 @@ tags: Count[]
  * Folders of all matching notes, every ancestor; "" is the vault root.
  */
 folders: Count[]
+}
+export interface Finding {
+/**
+ * Stable: derived from the method and the notes (survives edits and new evidence).
+ */
+id: string
+method: ("missing-note" | "same-idea" | "existing-name" | "link")
+title: string
+notes: FindingNote[]
+/**
+ * Lines, for people.
+ */
+evidence: string[]
+/**
+ * Orders findings within a method.
+ */
+score: number
+/**
+ * The evidence, machine-readable; keys depend on the method.
+ */
+data: {
+[k: string]: unknown
+}
+about: string
+}
+export interface FindingNote {
+name: string
+/**
+ * Null for a note that does not exist.
+ */
+path: (string | null)
+linking_notes: (number | null)
+}
+export interface FindingsListParams {
+/**
+ * Only these methods.
+ */
+methods?: ([("missing-note" | "same-idea" | "existing-name" | "link"), ...(("missing-note" | "same-idea" | "existing-name" | "link"))[]] | null)
+/**
+ * Only this finding (error -32002 when there is none now).
+ */
+id?: (string | null)
+/**
+ * Findings per method (null = all); total counts them all.
+ */
+limit?: (number | null)
+}
+/**
+ * What the engine discovered, each with a stable id and its evidence (`vault findings`). Omit "id" to send a notification (no response).
+ */
+export interface FindingsListRequest {
+jsonrpc: "2.0"
+method: "findings.list"
+params?: FindingsListParams
+id?: (number | string | null)
+}
+/**
+ * Successful response to findings.list.
+ */
+export interface FindingsListResponse {
+jsonrpc: "2.0"
+id: (number | string | null)
+result: FindingsListResult
+}
+export interface FindingsListResult {
+index: IndexInfo
+/**
+ * Findings (of the methods asked), before limit.
+ */
+total: number
+by_method: {
+[k: string]: number
+}
+/**
+ * Per method: the vault's percentile, its floor, the value used.
+ */
+thresholds: {
+[k: string]: {
+[k: string]: unknown
+}
+}
+findings: Finding[]
+limit: (number | null)
+}
+export interface IndexInfo {
+db: string
+last_indexed_at: (string | null)
+stale: boolean
+pending: PendingChanges
+}
+export interface PendingChanges {
+added: string[]
+changed: string[]
+deleted: string[]
+/**
+ * Set when a version or setting change forces a rebuild.
+ */
+reason: (string | null)
 }
 export interface FolderCount {
 folder: string
@@ -1339,6 +1607,153 @@ raw: string
 target_path: string
 kind: ("heading" | "block")
 subpath: string
+}
+export interface IdeaNewParams {
+/**
+ * Check and return the diff; write nothing.
+ */
+dry_run?: boolean
+/**
+ * A finding id from findings.list.
+ */
+finding: string
+/**
+ * Default: from the finding.
+ */
+title?: (string | null)
+/**
+ * Default: the tags the finding's notes share.
+ */
+tags?: (string | null)
+}
+/**
+ * An idea note from a finding (`vault idea new`). Omit "id" to send a notification (no response).
+ */
+export interface IdeaNewRequest {
+jsonrpc: "2.0"
+method: "idea.new"
+params: IdeaNewParams
+id?: (number | string | null)
+}
+/**
+ * Successful response to idea.new.
+ */
+export interface IdeaNewResponse {
+jsonrpc: "2.0"
+id: (number | string | null)
+result: IdeaNewResult
+}
+export interface IdeaNewResult {
+operation: ("new" | "link" | "set" | "fix" | "ingest" | "link-it" | "unlink" | "page new" | "page refresh" | "page exclude" | "idea new" | "idea set" | "move" | "merge")
+/**
+ * written; refused (would add violations, nothing written); dry-run; unchanged.
+ */
+status: ("written" | "refused" | "dry-run" | "unchanged")
+dry_run: boolean
+written: boolean
+files: WrittenFile[]
+/**
+ * Parts of the request that were already so, e.g. an existing mirror.
+ */
+already: string[]
+/**
+ * Why a write was refused: violations it would add.
+ */
+new_violations: Violation[]
+/**
+ * Violations already in the notes written; they do not block a write.
+ */
+tolerated: Violation[]
+/**
+ * Null unless written.
+ */
+index: (IndexSync | null)
+/**
+ * Files restored from an interrupted earlier write.
+ */
+recovered: string[]
+/**
+ * What the write records (or would) in the engine's state files.
+ */
+state: StateChange[]
+finding: Finding
+idea: NewNote
+}
+export interface StateChange {
+/**
+ * An engine state file (.vaultengine/pages.json, a baseline).
+ */
+path: string
+changes: string[]
+}
+export interface NewNote {
+path: string
+content: string
+}
+export interface IdeaSetParams {
+/**
+ * Check and return the diff; write nothing.
+ */
+dry_run?: boolean
+/**
+ * Vault path or name.
+ */
+idea: string
+/**
+ * One of the format's statuses (open, dropped, done), with or without '#'.
+ */
+status: string
+}
+/**
+ * Set an idea's status (`vault idea set`). Omit "id" to send a notification (no response).
+ */
+export interface IdeaSetRequest {
+jsonrpc: "2.0"
+method: "idea.set"
+params: IdeaSetParams
+id?: (number | string | null)
+}
+/**
+ * Successful response to idea.set.
+ */
+export interface IdeaSetResponse {
+jsonrpc: "2.0"
+id: (number | string | null)
+result: StatefulWriteResult
+}
+export interface StatefulWriteResult {
+operation: ("new" | "link" | "set" | "fix" | "ingest" | "link-it" | "unlink" | "page new" | "page refresh" | "page exclude" | "idea new" | "idea set" | "move" | "merge")
+/**
+ * written; refused (would add violations, nothing written); dry-run; unchanged.
+ */
+status: ("written" | "refused" | "dry-run" | "unchanged")
+dry_run: boolean
+written: boolean
+files: WrittenFile[]
+/**
+ * Parts of the request that were already so, e.g. an existing mirror.
+ */
+already: string[]
+/**
+ * Why a write was refused: violations it would add.
+ */
+new_violations: Violation[]
+/**
+ * Violations already in the notes written; they do not block a write.
+ */
+tolerated: Violation[]
+/**
+ * Null unless written.
+ */
+index: (IndexSync | null)
+/**
+ * Files restored from an interrupted earlier write.
+ */
+recovered: string[]
+/**
+ * What the write records (or would) in the engine's state files.
+ */
+state: StateChange[]
 }
 export interface IncomingLink {
 source: string
@@ -1442,15 +1857,6 @@ notes: number
 attachments: number
 links: number
 }
-export interface PendingChanges {
-added: string[]
-changed: string[]
-deleted: string[]
-/**
- * Set when a version or setting change forces a rebuild.
- */
-reason: (string | null)
-}
 export interface IngestDocument {
 file: string
 kind: ("markdown" | "text" | "html")
@@ -1458,6 +1864,14 @@ title: string
 sha256: string
 url: (string | null)
 warnings: string[]
+}
+export interface KindCount {
+/**
+ * In the queue (items of some kinds below the median trust are left out).
+ */
+listed: number
+all: number
+zettels_in_no_page?: (number | null)
 }
 export interface LinkCounts {
 total: number
@@ -1876,6 +2290,29 @@ export interface NameCount {
 name: string
 linking_notes: number
 }
+export interface NextItem {
+kind: ("refresh" | "behind" | "merge" | "write" | "extract" | "page" | "idea")
+/**
+ * A note path, or a missing note's name.
+ */
+subject: string
+title: string
+why: string
+/**
+ * The vault command that resolves it.
+ */
+command: string
+/**
+ * Percentile of how much the vault relies on the subject.
+ */
+trust: number
+raw: number
+key: string
+/**
+ * Stable id of the item.
+ */
+id: string
+}
 export interface NoteDeepenParams {
 note: string
 lenses?: ([("neighbourhood" | "cited" | "foundations" | "backbone" | "cluster"), ...(("neighbourhood" | "cited" | "foundations" | "backbone" | "cluster"))[]] | null)
@@ -1905,6 +2342,106 @@ export interface NoteDeepenResult {
 note: string
 percentile: number
 lenses: DeepenLenses
+}
+export interface NoteFactsParams {
+/**
+ * Vault path or note name.
+ */
+note: string
+}
+/**
+ * What the engine knows about one note: stage, what it rests on, what uses it, trust (`vault note`). Omit "id" to send a notification (no response).
+ */
+export interface NoteFactsRequest {
+jsonrpc: "2.0"
+method: "note.facts"
+params: NoteFactsParams
+id?: (number | string | null)
+}
+/**
+ * Successful response to note.facts.
+ */
+export interface NoteFactsResponse {
+jsonrpc: "2.0"
+id: (number | string | null)
+result: NoteFactsResult
+}
+export interface NoteFactsResult {
+format: FormatRef
+path: string
+type: (string | null)
+ignored: boolean
+/**
+ * For sources and extract notes; null when an extract note rests on no source.
+ */
+stage: (("ingested" | "extracted" | "compiled") | null)
+/**
+ * The file's modification time (ISO 8601).
+ */
+modified: (string | null)
+rests_on: RestsOn
+used_by: UsedBy
+linked_from: DescribedNote[]
+links_to: DescribedNote[]
+/**
+ * Links that match no note, or several.
+ */
+links_to_nothing: DanglingLink[]
+violations: Violation[]
+trust: Trust
+roles: PipelineRoles
+}
+export interface RestsOn {
+sources: RestingOn[]
+extract: RestingOn[]
+}
+export interface RestingOn {
+path: string
+/**
+ * Linked directly (else only through the notes in via).
+ */
+direct: boolean
+via: string[]
+}
+export interface UsedBy {
+extract: RestingOn[]
+compile: RestingOn[]
+}
+export interface Trust {
+/**
+ * Notes linking to it (index and log left out).
+ */
+links_in: number
+/**
+ * Pages relying on it.
+ */
+pages: number
+/**
+ * Ideas citing it.
+ */
+ideas: number
+/**
+ * log2(1 + links_in) + pages + ideas.
+ */
+raw: number
+/**
+ * Share of notes with a lower raw trust, 0-100.
+ */
+percentile: number
+}
+export interface PipelineRoles {
+/**
+ * Types whose notes are sources (ingested, extracted, compiled).
+ */
+sources: string[]
+/**
+ * Types that extract from sources (zettels).
+ */
+extract: string[]
+/**
+ * Types that compile extracts (pages).
+ */
+compile: string[]
 }
 export interface NoteGetParams {
 /**
@@ -2020,7 +2557,7 @@ id: (number | string | null)
 result: NoteIngestResult
 }
 export interface NoteIngestResult {
-operation: ("new" | "link" | "set" | "fix" | "ingest" | "link-it" | "unlink")
+operation: ("new" | "link" | "set" | "fix" | "ingest" | "link-it" | "unlink" | "page new" | "page refresh" | "page exclude" | "idea new" | "idea set" | "move" | "merge")
 /**
  * duplicate: an existing note matches; nothing written (see duplicates).
  */
@@ -2088,7 +2625,7 @@ id: (number | string | null)
 result: WriteResult
 }
 export interface WriteResult {
-operation: ("new" | "link" | "set" | "fix" | "ingest" | "link-it" | "unlink")
+operation: ("new" | "link" | "set" | "fix" | "ingest" | "link-it" | "unlink" | "page new" | "page refresh" | "page exclude" | "idea new" | "idea set" | "move" | "merge")
 /**
  * written; refused (would add violations, nothing written); dry-run; unchanged.
  */
@@ -2116,6 +2653,133 @@ index: (IndexSync | null)
  * Files restored from an interrupted earlier write.
  */
 recovered: string[]
+}
+export interface NoteMergeParams {
+/**
+ * Check and return the diff; write nothing.
+ */
+dry_run?: boolean
+/**
+ * A, the note that stays (vault path or name).
+ */
+survivor: string
+/**
+ * B, merged into A and removed; or a name links use with no note.
+ */
+other: string
+}
+/**
+ * Merge note B into A: links to B reach A; self-links dropped (`vault merge`). Omit "id" to send a notification (no response).
+ */
+export interface NoteMergeRequest {
+jsonrpc: "2.0"
+method: "note.merge"
+params: NoteMergeParams
+id?: (number | string | null)
+}
+/**
+ * Successful response to note.merge.
+ */
+export interface NoteMergeResponse {
+jsonrpc: "2.0"
+id: (number | string | null)
+result: RelocationResult
+}
+export interface RelocationResult {
+operation: ("new" | "link" | "set" | "fix" | "ingest" | "link-it" | "unlink" | "page new" | "page refresh" | "page exclude" | "idea new" | "idea set" | "move" | "merge")
+/**
+ * written; refused (would add violations, nothing written); dry-run; unchanged.
+ */
+status: ("written" | "refused" | "dry-run" | "unchanged")
+dry_run: boolean
+written: boolean
+files: WrittenFile[]
+/**
+ * Parts of the request that were already so, e.g. an existing mirror.
+ */
+already: string[]
+/**
+ * Why a write was refused: violations it would add.
+ */
+new_violations: Violation[]
+/**
+ * Violations already in the notes written; they do not block a write.
+ */
+tolerated: Violation[]
+/**
+ * Null unless written.
+ */
+index: (IndexSync | null)
+/**
+ * Files restored from an interrupted earlier write.
+ */
+recovered: string[]
+/**
+ * What the write records (or would) in the engine's state files.
+ */
+state: StateChange[]
+/**
+ * Old path -> new path (a merged note -> its survivor).
+ */
+moved: {
+[k: string]: string
+}
+/**
+ * 'path:line  old -> new' for every link re-spelled.
+ */
+rewritten: string[]
+/**
+ * Links that matched no note and reach the moved note now.
+ */
+now_resolving: string[]
+/**
+ * Links a merge would point at the note they are in: dropped.
+ */
+self_links: SelfLink[]
+}
+export interface SelfLink {
+path: string
+line: number
+/**
+ * As it was written.
+ */
+link: string
+action: ("line removed" | "unlinked" | "same-note link" | "removed")
+/**
+ * What replaces it ('' when removed).
+ */
+result: string
+}
+export interface NoteMoveParams {
+/**
+ * Check and return the diff; write nothing.
+ */
+dry_run?: boolean
+/**
+ * Vault path or name.
+ */
+note: string
+/**
+ * A folder (ending in /, or existing), a new name, or a new vault path.
+ */
+to: string
+}
+/**
+ * Move or rename a note; every link that reached it still does (`vault move`). Omit "id" to send a notification (no response).
+ */
+export interface NoteMoveRequest {
+jsonrpc: "2.0"
+method: "note.move"
+params: NoteMoveParams
+id?: (number | string | null)
+}
+/**
+ * Successful response to note.move.
+ */
+export interface NoteMoveResponse {
+jsonrpc: "2.0"
+id: (number | string | null)
+result: RelocationResult
 }
 export interface NoteNewParams {
 /**
@@ -2458,6 +3122,300 @@ name: string
 linking_notes: number
 path: string
 }
+export interface PageBlock {
+name: string
+status: ("current" | "out-of-date" | "missing")
+/**
+ * Lines in the block that the zettels no longer give.
+ */
+removed: string[]
+/**
+ * Lines the zettels give that the block lacks.
+ */
+added: string[]
+}
+export interface PageCheck {
+path: string
+title: string
+/**
+ * Made by page.new (it has vault blocks).
+ */
+managed: boolean
+blocks: PageBlock[]
+/**
+ * Zettels changed since the last refresh; null: none recorded.
+ */
+changed: (PageZettelChange[] | null)
+/**
+ * Zettels with 2+ tags or links in common with the page, not on it.
+ */
+behind: BehindZettel[]
+excluded: string[]
+violations: Violation[]
+/**
+ * Its line in the index note.
+ */
+index: (("current" | "out-of-date" | "missing") | null)
+refreshed_at: (string | null)
+renamed_from: (string | null)
+/**
+ * Blocks current, zettels as recorded, nothing behind, index line current, no violations.
+ */
+ready: boolean
+problems: string[]
+}
+export interface PageZettelChange {
+path: string
+status: ("not recorded" | "deleted" | "changed")
+}
+export interface PageCheckParams {
+/**
+ * One page (vault path or name); null = every page.
+ */
+page?: (string | null)
+}
+/**
+ * What needs attention on a page, or every page; whether it is ready. Omit "id" to send a notification (no response).
+ */
+export interface PageCheckRequest {
+jsonrpc: "2.0"
+method: "page.check"
+params?: PageCheckParams
+id?: (number | string | null)
+}
+/**
+ * Successful response to page.check.
+ */
+export interface PageCheckResponse {
+jsonrpc: "2.0"
+id: (number | string | null)
+result: PageCheckResult
+}
+export interface PageCheckResult {
+format: FormatRef
+pages: PageCheck[]
+/**
+ * Every managed page (or the one asked about) is ready.
+ */
+ready: boolean
+managed: number
+ready_pages: number
+}
+export interface PageExcludeParams {
+/**
+ * Check and return the diff; write nothing.
+ */
+dry_run?: boolean
+page: string
+/**
+ * Zettels not for this page (vault path or name).
+ * 
+ * @minItems 1
+ */
+zettels: [string, ...(string)[]]
+/**
+ * Bring them back.
+ */
+undo?: boolean
+}
+/**
+ * Record that zettels are not for a page, so it is not behind on them. Omit "id" to send a notification (no response).
+ */
+export interface PageExcludeRequest {
+jsonrpc: "2.0"
+method: "page.exclude"
+params: PageExcludeParams
+id?: (number | string | null)
+}
+/**
+ * Successful response to page.exclude.
+ */
+export interface PageExcludeResponse {
+jsonrpc: "2.0"
+id: (number | string | null)
+result: StatefulWriteResult
+}
+export interface PageFrom {
+query: string
+/**
+ * Notes the query matched.
+ */
+matched: number
+/**
+ * Of them, zettels.
+ */
+zettels: number
+/**
+ * The best-ranked zettels taken (limit).
+ */
+taken: string[]
+}
+export interface PageNewParams {
+/**
+ * Check and return the diff; write nothing.
+ */
+dry_run?: boolean
+title: string
+/**
+ * Zettels by vault path or name.
+ */
+zettels?: (string[] | null)
+/**
+ * Search queries: the best-ranked zettels of each (needs the index).
+ */
+queries?: (string[] | null)
+/**
+ * Zettels taken from each query.
+ */
+limit?: number
+/**
+ * The page's Tags value (default: the tags its zettels share).
+ */
+tags?: (string | null)
+/**
+ * Its folder (default: the page type's folder).
+ */
+folder?: (string | null)
+}
+/**
+ * A page from zettels, with its generated blocks, index and log lines (`vault page new`). Omit "id" to send a notification (no response).
+ */
+export interface PageNewRequest {
+jsonrpc: "2.0"
+method: "page.new"
+params: PageNewParams
+id?: (number | string | null)
+}
+/**
+ * Successful response to page.new.
+ */
+export interface PageNewResponse {
+jsonrpc: "2.0"
+id: (number | string | null)
+result: PageNewResult
+}
+export interface PageNewResult {
+operation: ("new" | "link" | "set" | "fix" | "ingest" | "link-it" | "unlink" | "page new" | "page refresh" | "page exclude" | "idea new" | "idea set" | "move" | "merge")
+/**
+ * written; refused (would add violations, nothing written); dry-run; unchanged.
+ */
+status: ("written" | "refused" | "dry-run" | "unchanged")
+dry_run: boolean
+written: boolean
+files: WrittenFile[]
+/**
+ * Parts of the request that were already so, e.g. an existing mirror.
+ */
+already: string[]
+/**
+ * Why a write was refused: violations it would add.
+ */
+new_violations: Violation[]
+/**
+ * Violations already in the notes written; they do not block a write.
+ */
+tolerated: Violation[]
+/**
+ * Null unless written.
+ */
+index: (IndexSync | null)
+/**
+ * Files restored from an interrupted earlier write.
+ */
+recovered: string[]
+/**
+ * What the write records (or would) in the engine's state files.
+ */
+state: StateChange[]
+page: NewNote
+/**
+ * Per query: what it matched and took.
+ */
+from: PageFrom[]
+}
+export interface PageRefreshParams {
+/**
+ * Check and return the diff; write nothing.
+ */
+dry_run?: boolean
+/**
+ * Vault path or name.
+ */
+page: string
+}
+/**
+ * Rebuild a page's blocks from the zettels it links now, and record them. Omit "id" to send a notification (no response).
+ */
+export interface PageRefreshRequest {
+jsonrpc: "2.0"
+method: "page.refresh"
+params: PageRefreshParams
+id?: (number | string | null)
+}
+/**
+ * Successful response to page.refresh.
+ */
+export interface PageRefreshResponse {
+jsonrpc: "2.0"
+id: (number | string | null)
+result: StatefulWriteResult
+}
+export interface PageVia {
+path: string
+/**
+ * The extract notes it goes through.
+ */
+via: string[]
+}
+export interface PipelineCompile {
+total: number
+using_an_extract_note: number
+}
+export interface PipelineExtract {
+total: number
+in_a_compile_note: number
+resting_on_a_source: number
+unsourced: Unsourced
+}
+export interface Unsourced {
+total: number
+/**
+ * missing, not-a-source, url-only, none.
+ */
+by_reason: {
+[k: string]: number
+}
+notes: UnsourcedNote[]
+}
+export interface UnsourcedNote {
+path: string
+reason: ("missing" | "not-a-source" | "url-only" | "none")
+citations: Citation[]
+}
+export interface PipelineGaps {
+/**
+ * Sources no extract note links to.
+ */
+not_extracted: string[]
+/**
+ * Extract notes no compile note links to.
+ */
+not_compiled: string[]
+}
+export interface PipelineStages {
+/**
+ * Sources no extract note links to.
+ */
+ingested: number
+/**
+ * Sources an extract note links to, that no compile note uses yet.
+ */
+extracted: number
+/**
+ * Sources a compile note reaches through an extract note.
+ */
+compiled: number
+}
 export interface PropertyCount {
 key: string
 notes: number
@@ -2499,6 +3457,14 @@ changed?: boolean
  * Max notes listed (null = all). The summary is never limited.
  */
 limit?: (number | null)
+/**
+ * Only violations not in the recorded baseline are listed and make ok false (`vault check --baseline`); error -32008 when none is recorded.
+ */
+baseline?: boolean
+/**
+ * Record the whole vault's violations as the baseline, replacing the old one (`--update-baseline`; the only write of a check). Nothing is new afterwards.
+ */
+update_baseline?: boolean
 }
 /**
  * Repair missing mirrors and missing required headings (safe write path). Omit "id" to send a notification (no response).
@@ -2594,6 +3560,36 @@ steps?: number
 seed?: (number | null)
 }
 /**
+ * Each source's stage (ingested, extracted, compiled) and the gaps (`vault pipeline`). Omit "id" to send a notification (no response).
+ */
+export interface VaultPipelineRequest {
+jsonrpc: "2.0"
+method: "vault.pipeline"
+params?: VaultPipelineParams
+id?: (number | string | null)
+}
+export interface VaultPipelineParams {
+/**
+ * Max rows in each list (sources, unsourced notes, gaps); null = all. The counts are never limited.
+ */
+limit?: (number | null)
+}
+/**
+ * One queue of what needs doing, most trusted first, each with its command (`vault next`). Omit "id" to send a notification (no response).
+ */
+export interface VaultNextRequest {
+jsonrpc: "2.0"
+method: "vault.next"
+params?: VaultNextParams
+id?: (number | string | null)
+}
+export interface VaultNextParams {
+/**
+ * Items listed (null = all); total and counts are never limited.
+ */
+limit?: (number | null)
+}
+/**
  * Successful response to vault.stats.
  */
 export interface VaultStatsResponse {
@@ -2648,13 +3644,28 @@ result: VaultCheckResult
 export interface VaultCheckResult {
 format: FormatRef
 scope: CheckScope
+/**
+ * No violations (with baseline: no new ones).
+ */
 ok: boolean
-summary: CheckSummary
+summary: CheckSummary1
 /**
  * Notes with violations, by path; violations by line.
  */
 notes: CheckedNote[]
+/**
+ * Null unless baseline or update_baseline.
+ */
+baseline: (BaselineSummary | null)
 limit: (number | null)
+}
+/**
+ * What is listed: with baseline, the new violations only.
+ */
+export interface CheckSummary1 {
+violations: number
+notes: number
+by_code: CodeCount[]
 }
 /**
  * Successful response to vault.fix.
@@ -2665,7 +3676,7 @@ id: (number | string | null)
 result: VaultFixResult
 }
 export interface VaultFixResult {
-operation: ("new" | "link" | "set" | "fix" | "ingest" | "link-it" | "unlink")
+operation: ("new" | "link" | "set" | "fix" | "ingest" | "link-it" | "unlink" | "page new" | "page refresh" | "page exclude" | "idea new" | "idea set" | "move" | "merge")
 /**
  * written; refused (would add violations, nothing written); dry-run; unchanged.
  */
@@ -2702,7 +3713,7 @@ remaining: CodeCount[]
 export interface SkippedFix {
 path: string
 line: number
-code: ("missing-heading" | "heading-order" | "missing-key" | "missing-value" | "bad-value" | "missing-relation" | "unexpected-relation" | "unknown-field" | "bad-relation" | "unresolved-target" | "ambiguous-target" | "relation-target-type" | "missing-mirror")
+code: ("missing-heading" | "heading-order" | "missing-key" | "missing-value" | "bad-value" | "missing-relation" | "unexpected-relation" | "unknown-field" | "bad-relation" | "unresolved-target" | "ambiguous-target" | "relation-target-type" | "missing-mirror" | "too-few-links" | "untyped-note" | "missing-block")
 message: string
 related: (string | null)
 /**
@@ -2814,5 +3825,62 @@ seed: number
 text_signal: TextSignal
 lenses: DiscoverLenses
 }
+/**
+ * Successful response to vault.pipeline.
+ */
+export interface VaultPipelineResponse {
+jsonrpc: "2.0"
+id: (number | string | null)
+result: VaultPipelineResult
+}
+export interface VaultPipelineResult {
+format: FormatRef
+roles: PipelineRoles
+stages: PipelineStages
+/**
+ * Compiled first, then extracted, then ingested.
+ */
+sources: SourceStage[]
+extract: PipelineExtract
+compile: PipelineCompile
+gaps: PipelineGaps
+/**
+ * Notes in ignored folders (no part in the pipeline).
+ */
+ignored: number
+limit: (number | null)
+}
+export interface SourceStage {
+path: string
+stage: ("ingested" | "extracted" | "compiled")
+/**
+ * Extract notes linking to it.
+ */
+zettels: string[]
+/**
+ * Compile notes linking to one of those.
+ */
+pages: PageVia[]
+}
+/**
+ * Successful response to vault.next.
+ */
+export interface VaultNextResponse {
+jsonrpc: "2.0"
+id: (number | string | null)
+result: VaultNextResult
+}
+export interface VaultNextResult {
+format: FormatRef
+total: number
+counts: {
+[k: string]: KindCount
+}
+/**
+ * Most trusted first.
+ */
+items: NextItem[]
+limit: (number | null)
+}
 
-export type VaultMethod = 'index.build' | 'index.status' | 'vault.stats' | 'health.report' | 'notes.pick' | 'note.get' | 'vault.check' | 'vault.fix' | 'vault.coverage' | 'note.new' | 'note.link' | 'note.set' | 'note.ingest' | 'search.query' | 'note.preview' | 'note.related' | 'links.suggest' | 'notes.suggest' | 'mentions.unlinked' | 'explore.run' | 'explore.mark' | 'explore.kept' | 'explore.link' | 'explore.unlink' | 'map.get' | 'map.since' | 'note.deepen' | 'vault.discover' | 'notes.explain' | 'embed.status' | 'config.show';
+export type VaultMethod = 'index.build' | 'index.status' | 'vault.stats' | 'health.report' | 'notes.pick' | 'note.get' | 'vault.check' | 'vault.fix' | 'vault.coverage' | 'note.new' | 'note.link' | 'note.set' | 'note.ingest' | 'search.query' | 'note.preview' | 'note.related' | 'links.suggest' | 'notes.suggest' | 'mentions.unlinked' | 'explore.run' | 'explore.mark' | 'explore.kept' | 'explore.link' | 'explore.unlink' | 'map.get' | 'map.since' | 'note.deepen' | 'vault.discover' | 'notes.explain' | 'embed.status' | 'config.show' | 'vault.pipeline' | 'note.facts' | 'page.new' | 'page.refresh' | 'page.exclude' | 'page.check' | 'findings.list' | 'idea.new' | 'idea.set' | 'note.move' | 'note.merge' | 'vault.next';

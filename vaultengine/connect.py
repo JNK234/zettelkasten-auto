@@ -61,12 +61,14 @@ on the weakest evidence there is.
 from __future__ import annotations
 
 import bisect
+import heapq
 import json
 import math
 import re
 import sqlite3
 import unicodedata
-from collections import Counter, defaultdict
+from array import array
+from collections import defaultdict
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -238,7 +240,10 @@ class LinkSuggestion:
 
 
 class LinkSuggester:
-    def __init__(self, conn: sqlite3.Connection, engine: Relatedness | None = None) -> None:
+    """``counts(source path, field kind)``: whether a link counts as evidence (default: every link; a
+    format leaves out links in metadata values). Any existing link still means the pair is linked."""
+
+    def __init__(self, conn: sqlite3.Connection, engine: Relatedness | None = None, counts=None) -> None:
         self.conn = conn
         self.engine = engine or Relatedness(conn)
         self.paths = self.engine.paths
@@ -250,6 +255,16 @@ class LinkSuggester:
         self.cites: dict[int, set[int]] = defaultdict(set)  # note -> notes it links to
         self.missing_name: dict[str, str] = {}
         graph = self.engine.graph
+        counted = None  # (source note id, "n:<id>" or "m:<key>") of the links that count, when ``counts`` is given
+        if counts is not None:
+            counted = set()
+            rows = conn.execute(
+                """SELECT l.source_id, l.target_id, l.status, l.target_key, s.path, l.field_kind
+                   FROM links l JOIN files s ON s.id = l.source_id WHERE s.kind = 'note' AND l.target != ''"""
+            )
+            for source, target, status, key, source_path, field_kind in rows:
+                if counts(source_path, field_kind):
+                    counted.add((source, f"n:{target}" if status == "resolved" else f"m:{key}"))
         name = {}
         for v in range(len(graph.labels)):
             if graph.is_missing(v):
@@ -261,6 +276,8 @@ class LinkSuggester:
             if graph.is_missing(a):
                 continue
             for b in targets:
+                if counted is not None and (graph.note_ids[a], name[b]) not in counted:
+                    continue
                 self.neighbours[name[a]].add(name[b])
                 self.neighbours[name[b]].add(name[a])
                 if not graph.is_missing(b):
@@ -303,87 +320,253 @@ class LinkSuggester:
                         result[(min(a, b), max(a, b))] = cosine
         return result
 
-    def suggestions(self, limit: int | None = 10, for_note: int | None = None, path: str | None = None) -> list[LinkSuggestion]:
-        """Pairs, best first; only those involving ``for_note``, or with both paths containing ``path``."""
-        # Shared neighbours: weighted cosine of the two notes' neighbour sets.
+    def suggestions(self, limit: int | None = 10, for_note: int | None = None, path: str | None = None,
+                    min_score: float | None = None, structural_percentile: float | None = None) -> list[LinkSuggestion]:
+        """Pairs, best first; only those involving ``for_note``, or with both paths containing ``path``.
+        ``structural_percentile``: only pairs with structural evidence (shared neighbours or citers) scoring at
+        least that nearest-rank percentile of such pairs, and at least ``min_score`` (the floor); the threshold
+        used is left in ``self.threshold``.
+
+        Candidates are the pairs that share a neighbour (or a citer) with at most HUB_LINKS links, plus the
+        pairs ``text_similarity`` finds and the pairs sharing a tag on at most HUB_LINKS notes. Their evidence
+        is accumulated note by note: each shared neighbour adds its weight once, so no pair's neighbour sets
+        are intersected, and the names and words that explain a pair are worked out only for the pairs
+        returned. The scores are those of the pair-by-pair definition (weighted shared neighbours, weighted
+        co-citers, shared tags, text), the neighbour sums summed exactly (``math.fsum``), so they do not
+        depend on the order sets happen to iterate in. Structural evidence (for ``structural_percentile``) is
+        shared neighbours or citers only: a pair found by its tags or text alone has none.
+        """
         weight = {node: 1 / math.log(1 + len(around)) for node, around in self.neighbours.items()}
-        total = {f: sum(weight[z] for z in self.neighbours.get(f"n:{f}", ())) for f in self.paths}
+        total = {f: math.fsum(weight[z] for z in self.neighbours.get(f"n:{f}", ())) for f in self.paths}
         citer_weight = {c: 1 / math.log(1 + len(targets)) for c, targets in self.cites.items()}
-        cited_total: Counter[int] = Counter()
+        cited_parts: dict[int, list[float]] = defaultdict(list)
         for citer, targets in self.cites.items():
             for note in targets:
-                cited_total[note] += citer_weight[citer]
-        # Candidates from specific evidence only (see HUB_LINKS).
-        candidates: set[tuple[int, int]] = set()
+                cited_parts[note].append(citer_weight[citer])
+        cited_total = {note: math.fsum(parts) for note, parts in cited_parts.items()}
+        hub_of: dict[int, list[str]] = defaultdict(list)  # note -> its neighbours with more than HUB_LINKS links
         for node, around in self.neighbours.items():
-            if len(around) <= HUB_LINKS:
-                notes = sorted(int(n[2:]) for n in around if n.startswith("n:"))
-                candidates.update((a, b) for i, a in enumerate(notes) for b in notes[i + 1 :])
-        for targets in self.cites.values():
-            if len(targets) <= HUB_LINKS:
-                notes = sorted(targets)
-                candidates.update((a, b) for i, a in enumerate(notes) for b in notes[i + 1 :])
+            if len(around) > HUB_LINKS:
+                for other in around:
+                    if other.startswith("n:"):
+                        hub_of[int(other[2:])].append(node)
         engine = self.engine
-        tag_notes: dict[str, list[int]] = defaultdict(list)
-        for f, tags in engine.note_tags.items():  # common tags already left out
-            for t in tags:
-                tag_notes[t].append(f)
-        for t, notes in tag_notes.items():
-            if len(notes) <= HUB_LINKS:
-                notes = sorted(notes)
-                candidates.update((a, b) for i, a in enumerate(notes) for b in notes[i + 1 :])
         text = self.text_similarity()
-        self.weights = active_weights(WEIGHTS, set() if self.engine.text.available() else {"text"})
-        weights = self.weights
-        candidates |= set(text)
-        candidates = {p for p in candidates if p[0] != p[1] and not self.is_linked(*p)}
-        if for_note is not None:
-            candidates = {p for p in candidates if for_note in p}
-        if path:
-            needle = unicodedata.normalize("NFC", path).casefold()
-            candidates = {p for p in candidates if all(needle in self.paths[f].casefold() for f in p)}
-        # All evidence for each candidate, hubs included.
-        citers_of: dict[int, set[int]] = defaultdict(set)
-        for citer, targets in self.cites.items():
-            for note in targets:
-                citers_of[note].add(citer)
-        shared: dict[tuple[int, int], float] = {}
-        cited: dict[tuple[int, int], float] = {}
-        shared_with: dict[tuple[int, int], list[tuple[float, str]]] = {}
-        cited_by: dict[tuple[int, int], list[tuple[float, int]]] = {}
-        for a, b in candidates:
-            both_cite = citers_of[a] & citers_of[b]
-            common = [z for z in self.neighbours.get(f"n:{a}", set()) & self.neighbours.get(f"n:{b}", set())
-                      if not (z.startswith("n:") and int(z[2:]) in both_cite)]  # a citer of both counts as "cited together"
-            if common:
-                shared[(a, b)] = sum(weight[z] for z in common) / math.sqrt((total[a] + 1) * (total[b] + 1))
-                shared_with[(a, b)] = [(weight[z], z) for z in common]
-            if both_cite:
-                cited[(a, b)] = sum(citer_weight[c] for c in both_cite) / math.sqrt((cited_total[a] + 1) * (cited_total[b] + 1))
-                cited_by[(a, b)] = [(citer_weight[c], c) for c in both_cite]
-        tags = {p: engine.tag_score(engine.note_tags.get(p[0], set()), engine.note_tags.get(p[1], set())) for p in candidates}
-        scores = {
-            p: weights["shared"] * shared.get(p, 0.0) + weights["cited"] * cited.get(p, 0.0) + weights["tags"] * tags[p]
-            + weights["text"] * text.get(p, 0.0)
-            for p in candidates
-        }
-        ranked = sorted(candidates, key=lambda p: (-scores[p], self.paths[p[0]], self.paths[p[1]]))
+        self.weights = active_weights(WEIGHTS, set() if engine.text.available() else {"text"})
+        note_tags = engine.note_tags
+        no_tags: set[str] = set()
+
+        def tags_of(x: int, y: int) -> float:
+            return engine.tag_score(note_tags.get(x, no_tags), note_tags.get(y, no_tags))
+
+        needle = unicodedata.normalize("NFC", path).casefold() if path else None
+        in_path = (lambda f: needle in self.paths[f].casefold()) if needle else (lambda f: True)
+
+        shift = max(max(self.paths, default=0).bit_length(), 1)  # a pair (x, y) is kept as one int: x << shift | y
+        mask = (1 << shift) - 1
+        keys = array("q") if 2 * shift <= 62 else []  # plain ints when two ids do not fit in 63 bits
+        scores = array("d")
+        no_structure: set[int] = set()  # indices of (text) pairs with no shared neighbour and no citer
+        linked = self.linked
+        w_shared, w_cited, w_tags, w_text = (self.weights[k] for k in ("shared", "cited", "tags", "text"))
+        sqrt, fsum = math.sqrt, math.fsum
+        paths = self.paths
+        in_path_ok = {f for f in paths if in_path(f)} if needle else None
+
+        # Per neighbour node: its notes in id order, and (when it is a note) what it cites.
+        node_notes: dict[str, list[int]] = {}
+        for node, around in self.neighbours.items():
+            node_notes[node] = sorted(int(m[2:]) for m in around if m.startswith("n:"))
+        node_cites = {f"n:{c}": targets for c, targets in self.cites.items()}
+        shared_total = {f: total[f] + 1 for f in paths}
+        cited_plus = {f: cited_total.get(f, 0.0) + 1 for f in paths}
+        empty: tuple = ()
+
+        def add(parts: dict, b: int, value: float) -> None:
+            held = parts.get(b)
+            if held is None:
+                parts[b] = value
+            elif held.__class__ is list:
+                held.append(value)
+            else:
+                parts[b] = [held, value]
+
+        def total_of(held) -> float:
+            return held if held.__class__ is float else fsum(held)
+
+        notes = [for_note] if for_note is not None else sorted(paths)
+        kept_text = set()
+        for a in notes:
+            node_a = f"n:{a}"
+            around_a = self.neighbours.get(node_a)
+            if not around_a or (in_path_ok is not None and a not in in_path_ok):
+                continue
+            shared_parts: dict[int, object] = {}  # b -> its weight, or the list of them
+            cited_here: dict[int, object] = {}
+            for z in around_a:
+                z_notes = node_notes[z]
+                z_cites = node_cites.get(z, empty)
+                start_at = bisect.bisect_right(z_notes, a) if for_note is None else 0
+                if len(self.neighbours[z]) <= HUB_LINKS:
+                    if a in z_cites:
+                        cw = citer_weight[int(z[2:])]
+                        wz = weight[z]
+                        for b in z_notes[start_at:]:
+                            if b == a:
+                                continue
+                            if b in z_cites:
+                                add(cited_here, b, cw)
+                                if b not in shared_parts:
+                                    shared_parts[b] = None
+                            else:
+                                add(shared_parts, b, wz)
+                    else:
+                        wz = weight[z]
+                        get = shared_parts.get
+                        for b in z_notes[start_at:]:
+                            if b == a:
+                                continue
+                            held = get(b)
+                            if held is None:
+                                shared_parts[b] = wz
+                            elif held.__class__ is list:
+                                held.append(wz)
+                            else:
+                                shared_parts[b] = [held, wz]
+                elif a in z_cites and len(z_cites) <= HUB_LINKS:
+                    cw = citer_weight[int(z[2:])]
+                    for b in z_cites:  # a specific citer with many links: candidates through what it cites
+                        if b != a and (for_note is not None or b > a):
+                            add(cited_here, b, cw)
+                            if b not in shared_parts:
+                                shared_parts[b] = None
+            hubs = hub_of.get(a, empty)
+            if hubs:
+                for b in list(shared_parts):  # hubs: their evidence counts for every candidate they connect
+                    node_b = f"n:{b}"
+                    for hub in hubs:
+                        if node_b not in self.neighbours[hub]:
+                            continue
+                        hub_cites = node_cites.get(hub, empty)
+                        if a in hub_cites and b in hub_cites:
+                            if len(hub_cites) > HUB_LINKS:
+                                add(cited_here, b, citer_weight[int(hub[2:])])
+                        else:
+                            held = shared_parts[b]
+                            if held is None:
+                                shared_parts[b] = weight[hub]
+                            else:
+                                add(shared_parts, b, weight[hub])
+            linked_a = linked[a]
+            for b, held in shared_parts.items():
+                x, y = (a, b) if a < b else (b, a)
+                if b in linked_a or a in linked[b]:
+                    continue
+                if in_path_ok is not None and b not in in_path_ok:
+                    continue
+                shared = total_of(held) / sqrt(shared_total[x] * shared_total[y]) if held is not None else 0.0
+                cited_held = cited_here.get(b)
+                cited = total_of(cited_held) / sqrt(cited_plus[x] * cited_plus[y]) if cited_held is not None else 0.0
+                found_text = text.get((x, y))
+                if found_text is not None:
+                    kept_text.add((x, y))
+                scores.append(w_shared * shared + w_cited * cited + w_tags * tags_of(x, y)
+                              + w_text * (found_text or 0.0))
+                keys.append(x << shift | y)
+        # Pairs that share nothing specific but are close by embedding, or share a tag on at most HUB_LINKS
+        # notes: their evidence, pair by pair.
+        tag_pairs: set[tuple[int, int]] = set()
+        tag_members: dict[str, list[int]] = defaultdict(list)
+        for f, tags in note_tags.items():  # common tags already left out
+            for tag in tags:
+                tag_members[tag].append(f)
+        for members in tag_members.values():
+            if len(members) <= HUB_LINKS:
+                members = sorted(members)
+                tag_pairs.update((x, y) for i, x in enumerate(members) for y in members[i + 1 :])
+        scored = set(keys)
+        for x, y in sorted(set(text) | tag_pairs):
+            if (x, y) in kept_text or (x << shift | y) in scored or (for_note is not None and for_note not in (x, y)):
+                continue
+            if x == y or self.is_linked(x, y) or (in_path_ok is not None and not (x in in_path_ok and y in in_path_ok)):
+                continue
+            shared_sum, cited_sum = self._pair_evidence(x, y, weight, citer_weight)
+            shared = shared_sum / sqrt(shared_total[x] * shared_total[y]) if shared_sum else 0.0
+            cited = cited_sum / sqrt(cited_plus[x] * cited_plus[y]) if cited_sum else 0.0
+            if not (shared_sum or cited_sum):
+                no_structure.add(len(scores))
+            keys.append(x << shift | y)
+            scores.append(w_shared * shared + w_cited * cited + w_tags * tags_of(x, y) + w_text * text.get((x, y), 0.0))
+
+        self.threshold = min_score
+        candidates = range(len(scores))
+        if structural_percentile is not None:
+            # The nearest-rank percentile of the structural scores: the k-th largest, k = n - rank + 1. Only the
+            # scores at or above the floor are ranked (when fewer than k are, the floor is the threshold).
+            n = len(scores) - len(no_structure)
+            floor = min_score or 0.0
+            if n:
+                rank = int(max(1, -(-n * structural_percentile // 100)))
+                k = n - rank + 1
+                above = [scores[i] for i in candidates if scores[i] >= floor and i not in no_structure]
+                self.threshold = heapq.nlargest(k, above)[-1] if len(above) >= k else floor
+                if min_score is not None:
+                    self.threshold = max(min_score, self.threshold)
+            candidates = [i for i in candidates if i not in no_structure]
+        if self.threshold is not None:
+            threshold = self.threshold
+            candidates = [i for i in candidates if scores[i] >= threshold]
+        if limit is not None and len(candidates) > limit:  # the limit-th best score; ties with it are ranked by path
+            cutoff = heapq.nlargest(limit, (scores[i] for i in candidates))[-1]
+            candidates = [i for i in candidates if scores[i] >= cutoff]
+        key = lambda i: (-scores[i], self.paths[keys[i] >> shift], self.paths[keys[i] & mask])  # noqa: E731
+        ranked = sorted(candidates, key=key)[:limit]
         found = []
-        for a, b in ranked if limit is None else ranked[:limit]:  # details only for what is returned
+        for i in ranked:  # the evidence, for what is returned only
+            a, b = keys[i] >> shift, keys[i] & mask
+            shared_sum, cited_sum = self._pair_evidence(a, b, weight, citer_weight)
+            shared_with, cited_by = self._pair_details(a, b, weight, citer_weight)
             x = text.get((a, b), 0.0)
-            terms = self.engine.text.words(self.engine.text.bag(a, self.paths[a]), self.engine.text.bag(b, self.paths[b])) if x > 0 else []
+            terms = engine.text.words(engine.text.bag(a, self.paths[a]), engine.text.bag(b, self.paths[b])) if x > 0 else []
             suggestion = LinkSuggestion(
-                a=self.paths[a], b=self.paths[b], score=scores[(a, b)],
-                shared=shared.get((a, b), 0.0), cited=cited.get((a, b), 0.0), text=x, tags=tags[(a, b)],
-                shared_tags=[tag_label(t) for t in sorted(engine.note_tags.get(a, set()) & engine.note_tags.get(b, set()),
+                a=self.paths[a], b=self.paths[b], score=scores[i],
+                shared=shared_sum / math.sqrt(shared_total[a] * shared_total[b]) if shared_sum else 0.0,
+                cited=cited_sum / math.sqrt(cited_plus[a] * cited_plus[b]) if cited_sum else 0.0, text=x,
+                tags=tags_of(a, b),
+                shared_tags=[tag_label(t) for t in sorted(note_tags.get(a, no_tags) & note_tags.get(b, no_tags),
                                                          key=lambda t: (-engine.tag_idf[t], t))],
-                shared_with=[self._name(n) for _, n in sorted(shared_with.get((a, b), []), key=lambda item: (-item[0], item[1]))],
-                cited_by=[link_name(self.paths[n]) for _, n in sorted(cited_by.get((a, b), []), key=lambda item: (-item[0], self.paths[item[1]]))],
+                shared_with=shared_with, cited_by=cited_by,
                 terms=terms,
             )
             suggestion.reason = self.reason(suggestion, self.engine.text.explains)
             found.append(suggestion)
         return found
+
+    def _citers_of(self) -> dict[int, set[int]]:
+        if not hasattr(self, "_citers"):
+            citers: dict[int, set[int]] = defaultdict(set)
+            for citer, targets in self.cites.items():
+                for note in targets:
+                    citers[note].add(citer)
+            self._citers = citers
+        return self._citers
+
+    def _common(self, a: int, b: int) -> tuple[list[str], set[int]]:
+        both_cite = self._citers_of()[a] & self._citers_of()[b]
+        common = [z for z in self.neighbours.get(f"n:{a}", set()) & self.neighbours.get(f"n:{b}", set())
+                  if not (z.startswith("n:") and int(z[2:]) in both_cite)]  # a citer of both counts as "cited together"
+        return common, both_cite
+
+    def _pair_evidence(self, a: int, b: int, weight, citer_weight) -> tuple[float, float]:
+        common, both_cite = self._common(a, b)
+        return math.fsum(weight[z] for z in common), math.fsum(citer_weight[c] for c in both_cite)
+
+    def _pair_details(self, a: int, b: int, weight, citer_weight) -> tuple[list[str], list[str]]:
+        common, both_cite = self._common(a, b)
+        shared_with = [self._name(n) for _, n in sorted(((weight[z], z) for z in common), key=lambda item: (-item[0], item[1]))]
+        cited_by = [link_name(self.paths[n]) for _, n in sorted(((citer_weight[c], c) for c in both_cite),
+                                                                 key=lambda item: (-item[0], self.paths[item[1]]))]
+        return shared_with, cited_by
 
     @staticmethod
     def reason(s: LinkSuggestion, explains: bool = True) -> str:

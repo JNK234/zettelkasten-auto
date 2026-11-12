@@ -5,7 +5,7 @@ A link is a *tag link* when it sits in a metadata field whose role is ``tag``:
 * with a format (``engine.format`` or ``--format``): a header field (``Key: value`` at the top of
   the note) that the note's type declares with ``link_role: tag`` (``formats/brain.yaml``:
   ``Tags: {kind: links, link_role: tag}`` in every type). The type comes from the path alone,
-  and the index records the field each link is in (``links.field_source``/``field_key``), so
+  and the index records the field each link is in (``links.field_kind``/``field_key``), so
   no note is read;
 * without a format: a field named ``tags`` (any case), header or ``tags::`` inline, the
   convention Obsidian uses for its own tags property.
