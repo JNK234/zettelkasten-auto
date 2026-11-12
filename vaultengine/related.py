@@ -5,31 +5,44 @@ Three signals, each scaled to 0..1 by its largest value among the candidates:
 * graph - personalized PageRank from the note over the link graph, missing
           notes included (``graphrank.py``), divided by each note's degree so
           hubs do not come first for everything;
-* text  - "more like this": the note's 30 most distinctive terms (tf of the
-          term, weighted by field as in search, sublinear: 1 + ln tf, times
-          idf = ln(N / df); only terms of 2+ characters in 2 to N/2 notes) are run
-          as a query, each weighted by its share, and every note is scored with the
-          same BM25F as ``vault search``. The tags field is left out (tags are
-          the third signal). Words of template headings (a heading
-          written the same way in 3 or more notes, like "Related zettels") do not
-          count: they say which template a note uses, not what it is about;
+* text  - the cosine of the two notes' embeddings (``embedding/``: the configured
+          provider, vectors cached in the index), centered: the mean vector of the
+          vault's notes is subtracted from both first. Without that, a static model
+          puts every pair of notes in one vault at a cosine of 0.5 to 0.9 (on the
+          sample vault: median 0.65, lowest 5% under 0.49), and every note would look
+          somewhat similar to every other; centered, the median pair is about 0 and only
+          notes closer than the vault's average get a text signal (negatives count as 0);
 * tags  - weighted Jaccard of the two notes' tag sets (nested tags count their
           parents too), each tag weighted by ln(N / notes with the tag). Tags on
           more than a third of the notes (status markers like #baby) are left out:
-          sharing them says nothing.
+          sharing them says nothing. A note's tags are its #tags and what its tag
+          links point to (``Tags: [[reward]]`` is the tag [[reward]]; ``tagrule.py``).
 
-score = 0.5 * graph + 0.3 * text + 0.2 * tags.
+score = 0.5 * graph + 0.3 * text + 0.2 * tags, the default of ``engine.related.weights``. Two more
+signals can be weighted in there: cocitation and coupling (``graphrank.Graph``: notes that link to
+both, what both link to), each scaled the same way; ``vault experiment`` measures which mix
+recovers held-out links best.
+
+When the embedding model cannot be loaded (missing or broken files), only the text
+signal is switched off: the result says so and why, and the other weights are rescaled
+to sum to 1 (5/7 graph, 2/7 tags), which keeps the same order the two would give anyway.
+Vectors not cached in the index are computed in memory for the run and reported, never
+written (``vault embed`` caches them).
 
 Each result says why, in terms that can be checked by opening the notes:
 "links here", "2 hops via kl-penalty-in-rlhf", "shares #ai-safety",
 "similar text (kl, divergence, ppo)". A reason is only given when it is a fact
 worth reading: hops up to 3, tags that are on at most a third of the notes,
-text when its signal is at least ``TEXT_REASON`` of the best match.
-Results that have no link to or from the note are marked "not linked".
+text when its signal is at least ``TEXT_REASON`` of the best match. The words in
+"similar text (...)" are words in both notes that add the most to their cosine,
+read off the embedding (``embedding/explain.py``); with a static model the reason
+needs at least one such word (two near-empty notes are not "similar text"), a model
+that cannot name words gives a bare "similar text". Results
+that have no link to or from the note are marked "not linked".
 
 A missing note (a link target with no note) can be the seed too: its graph node
-is the missing note itself, its text is what the notes linking to it are about,
-and its tags are those most of them share.
+is the missing note itself, its vector is the mean of the vectors of the notes
+linking to it, and its tags are those most of them share.
 """
 
 from __future__ import annotations
@@ -38,15 +51,26 @@ import math
 import sqlite3
 from collections import Counter, defaultdict
 from dataclasses import asdict, dataclass, field
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
-from vaultengine.graphrank import Graph, build_graph, hop_paths, personalized_pagerank
+from vaultengine.graphrank import Graph, build_graph, hop_paths
 from vaultengine.querylang import QueryError
-from vaultengine.search import FIELD_WEIGHTS, _bm25f, _Evaluator, _Searcher, idf
-from vaultengine.tokenize import tokenize
+from vaultengine.search import _Evaluator, _Searcher
 from vaultengine.vault import link_name, lookup_key
 
-WEIGHTS = {"graph": 0.5, "text": 0.3, "tags": 0.2}
-PROFILE_TERMS = 30
+if TYPE_CHECKING:
+    import numpy as np
+
+    from vaultengine.embedding import EmbeddingProvider
+    from vaultengine.embedding.explain import WordBag
+    from vaultengine.embedding.store import NoteVectors
+
+WEIGHTS = {"graph": 0.5, "cocitation": 0.0, "coupling": 0.0, "tags": 0.2, "text": 0.3}  # engine.related.weights
+# engine.related.unlinked_weights: for what is not linked yet (related --unlinked, discover, explore); measured by
+# `vault experiment` on hidden links (docs/experiments/2026-11-10.md)
+UNLINKED_WEIGHTS = {"graph": 0.1, "cocitation": 0.05, "coupling": 0.05, "tags": 0.1, "text": 0.7}
+SIGNALS = ("graph", "cocitation", "coupling", "tags", "text")
 TEXT_REASON = 0.25
 COMMON_TAG = 1 / 3  # tags on more of the notes than this are not given as a reason
 
@@ -56,7 +80,6 @@ class Seed:
     label: str  # note title, or the missing target as written
     path: str | None  # None for a missing note
     node: int
-    terms: dict[str, float]  # term -> weight, max 1
     tags: set[str]
     linkers: list[str] = field(default_factory=list)  # for a missing note: notes that link to it
 
@@ -73,7 +96,12 @@ class RelatedHit:
     hops: int | None
     reason: str
     shared_tags: list[str] = field(default_factory=list)
-    shared_terms: list[str] = field(default_factory=list)
+    shared_terms: list[str] = field(default_factory=list)  # words behind "similar text (...)"
+    cosine: float = 0.0  # centered cosine of the two embeddings (text is this over the best one)
+    cocitation: float = 0.0
+    coupling: float = 0.0
+    cited_by: list[str] = field(default_factory=list)  # notes linking both (when cocitation counts)
+    both_link: list[str] = field(default_factory=list)  # what both link to (when coupling counts)
 
 
 @dataclass
@@ -82,85 +110,256 @@ class RelatedResult:
     candidates: int  # notes with any signal
     hits: list[RelatedHit]
     compared: int = 0  # notes considered (all but the seed)
+    model_id: str | None = None  # the embedding model behind the text signal
+    text_unavailable: str | None = None  # why there is no text signal (the model cannot be loaded)
+    uncached: int = 0  # notes embedded in memory for this run: no cached vector (`vault embed` caches them)
+    weights: dict[str, float] = field(default_factory=lambda: dict(WEIGHTS))  # the weights used
 
     def to_dict(self) -> dict:
         return asdict(self)
 
 
-class Relatedness:
-    """Everything ``related`` needs, loaded once; call ``seed`` then ``related``."""
+def tag_label(tag: str) -> str:
+    """How a tag is shown: #name for a #tag, [[name]] for a tag link."""
+    return tag if tag.startswith("[[") else "#" + tag
 
-    def __init__(self, conn: sqlite3.Connection) -> None:
+
+def note_tag_sets(hashtags, graph: Graph, n_notes: int) -> tuple[dict[int, set[str]], dict[str, float], Counter[str]]:
+    """(note -> its tags, common ones left out; tag -> ln(N / notes with it); tag -> notes with it).
+
+    ``hashtags``: (file id, name key) of every #tag. A note's tags are its #tags with their parents and the
+    targets of its tag links (``[[topic]]``); tags on more than ``COMMON_TAG`` of the notes are left out.
+    """
+    note_tags: dict[int, set[str]] = defaultdict(set)
+    for file_id, name_key in hashtags:
+        parts = name_key.split("/")
+        note_tags[file_id].update("/".join(parts[:depth]) for depth in range(1, len(parts) + 1))
+    for node, targets in graph.tag_links.items():  # tag links: [[topic]]
+        note_tags[graph.note_ids[node]].update(graph.tag_name(t) for t in targets)
+    tag_notes = Counter(tag for tags in note_tags.values() for tag in tags)
+    tag_idf = {tag: math.log(n_notes / n) for tag, n in tag_notes.items()}
+    for tags in note_tags.values():  # tags on most notes carry no signal
+        tags -= {tag for tag in tags if tag_notes[tag] > COMMON_TAG * n_notes}
+    return note_tags, tag_idf, tag_notes
+
+
+def tag_similarity(a: set[str], b: set[str], tag_idf: dict[str, float]) -> float:
+    """Weighted Jaccard of two tag sets, each tag weighing its idf."""
+    union = sum(tag_idf.get(t, 0.0) for t in a | b)
+    return sum(tag_idf.get(t, 0.0) for t in a & b) / union if union else 0.0
+
+
+def link_signals(graph: Graph, seed: int, want: set[str]) -> dict[str, dict[int, float]]:
+    """The link signals from a graph node to every note (file id -> raw value, positive only).
+
+    graph: personalized PageRank divided by degree; cocitation and coupling: ``Graph.cocitation``/``coupling``.
+    """
+    out: dict[str, dict[int, float]] = {}
+    if "graph" in want:
+        rank = graph.walk().personalized_pagerank(seed)
+        out["graph"] = {graph.note_ids[n]: r / graph.degree(n) for n, r in rank.items()
+                        if n != seed and not graph.is_missing(n) and graph.degree(n) and r > 0}
+    if "cocitation" in want:
+        candidates = {b for c in graph.incoming[seed] for b in graph.outgoing[c]}
+        out["cocitation"] = {graph.note_ids[b]: v for b in candidates if b != seed and not graph.is_missing(b)
+                             for v in [graph.cocitation(seed, b)[0]] if v > 0}
+    if "coupling" in want:
+        candidates = {b for z in graph.outgoing[seed] for b in graph.incoming[z]}
+        out["coupling"] = {graph.note_ids[b]: v for b in candidates if b != seed and not graph.is_missing(b)
+                           for v in [graph.coupling(seed, b)[0]] if v > 0}
+    return out
+
+
+def scaled(values: dict[int, float]) -> dict[int, float]:
+    """Each value over the largest (0..1); nothing when no value is positive."""
+    top = max(values.values(), default=0.0)
+    return {k: v / top for k, v in values.items()} if top > 0 else {}
+
+
+def combine(raw: dict[str, dict[int, float]], weights: dict[str, float]) -> dict[int, float]:
+    """score = the sum over signals of weight x (raw / its largest value): how ``related`` ranks."""
+    total: dict[int, float] = defaultdict(float)
+    for name, values in raw.items():
+        w = weights.get(name, 0.0)
+        if w:
+            for k, v in scaled(values).items():
+                total[k] += w * v
+    return dict(total)
+
+
+def active_weights(weights: dict[str, float], unavailable: set[str]) -> dict[str, float]:
+    """The weights of the signals that are available, rescaled to sum to 1 (0 for the others)."""
+    total = sum(w for k, w in weights.items() if k not in unavailable)
+    return {k: (0.0 if k in unavailable or not total else w / total) for k, w in weights.items()}
+
+
+def configured_provider() -> "EmbeddingProvider":
+    """The provider from the engine settings (config/config.yaml, env), for callers that did not pass one."""
+    from vaultengine.settings import load_settings
+
+    return load_settings().provider()
+
+
+class TextSimilarity:
+    """Centered cosines between note embeddings, and the words behind them. Loads vectors on first use."""
+
+    def __init__(self, conn: sqlite3.Connection, root: str | Path | None, provider: Any = None) -> None:
         self.conn = conn
-        self.graph: Graph = build_graph(conn)
+        if root is None:
+            row = conn.execute("SELECT value FROM meta WHERE key = 'vault_root'").fetchone()
+            root = row[0] if row else "."
+        self.root = Path(root)
+        self._provider = provider
+        self.unavailable: str | None = None  # why there is no text signal, once loading failed
+        self._vectors: NoteVectors | None = None
+        self._centered: np.ndarray | None = None
+        self._mean: np.ndarray | None = None
+        self._bags: dict[int, WordBag] = {}
+        self._texts: dict[str, str] = {}  # note texts read while computing vectors in memory
+
+    @property
+    def provider(self) -> "EmbeddingProvider":
+        if self._provider is None:
+            self._provider = configured_provider()
+        elif callable(self._provider) and not hasattr(self._provider, "embed"):
+            self._provider = self._provider()
+        return self._provider
+
+    def available(self) -> bool:
+        """Load the model and the vectors; False (with ``unavailable`` saying why) if the model cannot be loaded."""
+        from vaultengine.embedding import EmbeddingError
+        from vaultengine.settings import SettingsError
+
+        if self._vectors is not None:
+            return True
+        if self.unavailable is not None:
+            return False
+        try:
+            self.vectors
+        except (EmbeddingError, SettingsError) as exc:
+            self.unavailable = str(exc)
+            return False
+        return True
+
+    @property
+    def uncached(self) -> list[str]:
+        """Notes embedded in memory for this run because the index has no vector for them."""
+        return self._vectors.computed if self._vectors is not None else []
+
+    @property
+    def explains(self) -> bool:
+        """Whether the provider can name the words behind a similarity (static models)."""
+        from vaultengine.embedding import StaticEmbeddingProvider
+
+        return self.available() and isinstance(self.provider, StaticEmbeddingProvider)
+
+    @property
+    def vectors(self) -> "NoteVectors":
+        if self._vectors is None:
+            import numpy as np
+
+            from vaultengine.embedding.store import note_vectors
+
+            self._vectors = note_vectors(self.conn, self.root, self.provider, self._texts)
+            matrix = self._vectors.matrix
+            used = np.abs(matrix).sum(axis=1) > 0  # a note with no known words has no direction
+            self._mean = matrix[used].mean(axis=0) if used.any() else np.zeros(matrix.shape[1], np.float32)
+            centered = matrix - self._mean
+            norms = np.linalg.norm(centered, axis=1, keepdims=True)
+            norms[~used] = np.inf  # -> a zero row: no similarity with anything
+            norms[norms == 0] = np.inf
+            self._centered = (centered / norms).astype(np.float32)
+        return self._vectors
+
+    @property
+    def mean(self) -> "np.ndarray":
+        self.vectors
+        return self._mean
+
+    @property
+    def centered(self) -> "np.ndarray":
+        """Row i: the centered, unit-length vector of note ``vectors.file_ids[i]`` (zeros if it has none)."""
+        self.vectors
+        return self._centered
+
+    def center(self, vector: "np.ndarray") -> "np.ndarray | None":
+        import numpy as np
+
+        if vector is None or not vector.any():
+            return None
+        u = vector - self.mean
+        norm = np.linalg.norm(u)
+        return u / norm if norm > 0 else None
+
+    def unit_mean(self, file_ids: list[int]) -> "np.ndarray | None":
+        """The normalised mean of these notes' vectors (the vector of a missing note)."""
+        import numpy as np
+
+        rows = [v for v in (self.vectors.get(f) for f in file_ids) if v is not None and v.any()]
+        if not rows:
+            return None
+        mean = np.mean(rows, axis=0)
+        norm = np.linalg.norm(mean)
+        return mean / norm if norm > 0 else None
+
+    def cosines(self, vector: "np.ndarray | None") -> dict[int, float]:
+        """file id -> centered cosine with ``vector`` (a raw unit vector), for every note with a vector."""
+        u = self.center(vector)
+        if u is None:
+            return {}
+        values = self.centered @ u.astype(self.centered.dtype)
+        return {f: float(v) for f, v in zip(self.vectors.file_ids, values)}
+
+    # -- the words behind a similarity (static providers only) --
+
+    def bag(self, file_id: int, path: str) -> "WordBag | None":
+        from vaultengine.embedding.explain import text_bag
+        from vaultengine.embedding.store import note_text
+
+        if not self.explains:
+            return None
+        if file_id not in self._bags:
+            text = self._texts.get(path) or note_text(self.root, path)
+            if text is None:
+                return None
+            self._bags[file_id] = text_bag(self.provider, text)
+        return self._bags[file_id]
+
+    def combined_bag(self, notes: list[tuple[int, str]]) -> "WordBag | None":
+        from vaultengine.embedding.explain import combine
+
+        bags = [b for b in (self.bag(f, p) for f, p in notes) if b is not None]
+        return combine(bags, self.vectors.matrix.shape[1]) if bags else None
+
+    def words(self, a: "WordBag | None", b: "WordBag | None", count: int = 3) -> list[str]:
+        from vaultengine.embedding.explain import shared_words
+
+        if a is None or b is None:
+            return []
+        return shared_words(a, b, self.mean, count)
+
+
+class Relatedness:
+    """Everything ``related`` needs, loaded once; call ``seed`` then ``related``.
+
+    ``provider``: the embedding provider (or a function returning it), default: the configured one.
+    ``root``: the vault folder, default: the one the index was built from.
+    Vectors are loaded on the first text score (missing ones embedded in memory, never written).
+    """
+
+    def __init__(self, conn: sqlite3.Connection, provider: Any = None, root: str | Path | None = None,
+                 tag_rule=None, weights: dict[str, float] | None = None) -> None:
+        self.conn = conn
+        self.graph: Graph = build_graph(conn, tag_rule)
         self.searcher = _Searcher(conn, fuzzy=False)
         self.n_notes = self.searcher.n_notes
         self.paths = {row[0]: row[1] for row in conn.execute("SELECT id, path FROM files WHERE kind = 'note'")}
-        self._profiles: dict[int, dict[str, float]] = {}
-        self.df = dict(conn.execute("SELECT term, df FROM terms"))
-        self.note_tags: dict[int, set[str]] = defaultdict(set)
-        for file_id, name_key in conn.execute("SELECT file_id, name_key FROM tags"):
-            parts = name_key.split("/")
-            self.note_tags[file_id].update("/".join(parts[:depth]) for depth in range(1, len(parts) + 1))
-        tag_notes = Counter(tag for tags in self.note_tags.values() for tag in tags)
-        self.tag_idf = {tag: math.log(self.n_notes / n) for tag, n in tag_notes.items()}
-        self.tag_notes = tag_notes
-        for tags in self.note_tags.values():  # tags on most notes carry no signal
-            tags -= {tag for tag in tags if tag_notes[tag] > COMMON_TAG * self.n_notes}
-        headings = defaultdict(set)
-        for file_id, text in conn.execute("SELECT file_id, text FROM headings"):
-            headings[file_id].add(text)
-        template_count = Counter(lookup_key(text) for texts in headings.values() for text in texts)
-        self.template_terms: dict[int, Counter[str]] = {
-            file_id: Counter(term for text in texts if template_count[lookup_key(text)] >= 3 for term in tokenize(text))
-            for file_id, texts in headings.items()
-        }
+        self.text = TextSimilarity(conn, root, provider)
+        self.weights = {**WEIGHTS, **(weights or {})}
+        self.note_tags, self.tag_idf, self.tag_notes = note_tag_sets(
+            conn.execute("SELECT file_id, name_key FROM tags").fetchall(), self.graph, self.n_notes)
 
     # -- seeds --
-
-    def term_profile(self, file_id: int) -> dict[str, float]:
-        if file_id not in self._profiles:
-            self._profiles[file_id] = self._term_profile(file_id)
-        return self._profiles[file_id]
-
-    def all_profiles(self) -> dict[int, dict[str, float]]:
-        """Term profiles of every note, read from the index in one pass (and cached)."""
-        missing = set(self.paths) - set(self._profiles)
-        if missing:
-            weighted: dict[int, Counter[str]] = defaultdict(Counter)
-            for file_id, term, name, tf in self.conn.execute("SELECT file_id, term, field, tf FROM postings WHERE field != 'tags'"):
-                if file_id in missing:
-                    self._add(weighted[file_id], file_id, term, name, tf)
-            for file_id in missing:
-                self._profiles[file_id] = self._score(weighted.get(file_id, Counter()))
-        return {f: self._profiles[f] for f in self.paths}
-
-    def _add(self, weighted: Counter[str], file_id: int, term: str, name: str, tf: int) -> None:
-        if name == "headings":
-            tf -= self.template_terms.get(file_id, Counter())[term]
-        if tf > 0:
-            weighted[term] += FIELD_WEIGHTS[name] * tf
-
-    def _term_profile(self, file_id: int) -> dict[str, float]:
-        weighted: Counter[str] = Counter()
-        rows = self.conn.execute("SELECT term, field, tf FROM postings WHERE file_id = ? AND field != 'tags'", (file_id,))
-        for term, name, tf in rows:  # tags have their own signal
-            self._add(weighted, file_id, term, name, tf)
-        return self._score(weighted)
-
-    def _score(self, weighted: Counter[str]) -> dict[str, float]:
-        scores = {}
-        for term, tf in weighted.items():
-            df = self.df.get(term, 0)
-            if 2 <= df <= self.n_notes / 2 and len(term) >= 2 and any(char.isalpha() for char in term):
-                scores[term] = (1 + math.log(tf)) * math.log(self.n_notes / df)
-        return scores
-
-    @staticmethod
-    def _top(scores: dict[str, float]) -> dict[str, float]:
-        top = sorted(scores.items(), key=lambda item: (-item[1], item[0]))[:PROFILE_TERMS]
-        best = top[0][1] if top else 1.0
-        return {term: weight / best for term, weight in top}
 
     def seed(self, ref: str) -> Seed:
         """The seed for a note reference (name, path or alias, like a link) or a missing link target."""
@@ -168,67 +367,74 @@ class Relatedness:
         file_id = evaluator.resolve(ref, (0, len(ref)))
         if file_id is not None and file_id in self.paths:
             path = self.paths[file_id]
-            return Seed(link_name(path), path, self.graph.by_file[file_id], self._top(self.term_profile(file_id)),
-                        set(self.note_tags.get(file_id, set())))
+            return Seed(link_name(path), path, self.graph.by_file[file_id], set(self.note_tags.get(file_id, set())))
         node = self.graph.by_missing.get(lookup_key(ref))
         if node is None:
             raise QueryError(f'no note or link target called "{ref}"', None, None,
                              "give a note name, path or alias, or the target of a link to a missing note")
         linker_nodes = sorted(other for other in self.graph.adjacency[node] if not self.graph.is_missing(other))
         linkers = [self.graph.note_ids[n] for n in linker_nodes]
-        combined: Counter[str] = Counter()
-        for linker in linkers:
-            for term, weight in self._top(self.term_profile(linker)).items():
-                combined[term] += weight
         tag_counts = Counter(tag for linker in linkers for tag in self.note_tags.get(linker, set()))
         shared = {tag for tag, n in tag_counts.items() if n >= 2 and n >= 0.3 * len(linkers)}
-        return Seed(self.graph.labels[node], None, node, self._top(dict(combined)), shared,
-                    [self.paths[linker] for linker in linkers])
+        return Seed(self.graph.labels[node], None, node, shared, [self.paths[linker] for linker in linkers])
+
+    def _linker_ids(self, seed: Seed) -> list[int]:
+        return [f for f in (self.graph.note_ids[n] for n in self.graph.adjacency[seed.node]) if f in self.paths]
+
+    def seed_vector(self, seed: Seed) -> "np.ndarray | None":
+        """The seed's embedding (unit length): the note's own, or the mean of the notes linking to a missing note."""
+        if seed.path is not None:
+            return self.text.vectors.get(self.graph.note_ids[seed.node])
+        return self.text.unit_mean(self._linker_ids(seed))
 
     # -- scores --
 
-    def text_scores(self, seed: Seed) -> dict[int, tuple[float, list[str]]]:
-        """note id -> (score, terms that contributed most)."""
-        if not seed.terms:
-            return {}
-        per_note: dict[int, dict[str, dict[str, tuple[int, int]]]] = defaultdict(lambda: defaultdict(dict))
-        for file_id, term, name, tf, length in self.searcher.rows(seed.terms):
-            per_note[file_id][term][name] = (tf, length)
-        scores = {}
-        for file_id, terms in per_note.items():
-            contributions = {}
-            for term, fields in terms.items():
-                _, score, _ = _bm25f(fields, self.searcher.avg_lengths, idf(self.n_notes, self.df.get(term, 0)))
-                contributions[term] = seed.terms[term] * score
-            ranked = sorted(contributions, key=lambda t: -contributions[t])
-            scores[file_id] = (sum(contributions.values()), ranked[:3])
-        return scores
+    def text_scores(self, seed: Seed) -> dict[int, float]:
+        """note id -> centered cosine with the seed, for the notes where it is positive."""
+        seed_file = self.graph.note_ids[seed.node]
+        return {f: c for f, c in self.text.cosines(self.seed_vector(seed)).items() if c > 0 and f != seed_file}
+
+    def seed_words(self, seed: Seed):
+        if seed.path is not None:
+            return self.text.bag(self.graph.note_ids[seed.node], seed.path)
+        return self.text.combined_bag([(f, self.paths[f]) for f in self._linker_ids(seed)])
 
     def tag_score(self, a: set[str], b: set[str]) -> float:
-        union = sum(self.tag_idf.get(t, 0.0) for t in a | b)
-        return sum(self.tag_idf.get(t, 0.0) for t in a & b) / union if union else 0.0
+        return tag_similarity(a, b, self.tag_idf)
 
-    def related(self, seed: Seed, limit: int | None = 10, unlinked_only: bool = False) -> RelatedResult:
+    def describe(self, seed: Seed, hits: list[RelatedHit], words: bool = True, paths=None) -> None:
+        """Fill in each hit's reason (and, with ``words``, the words behind "similar text": that reads the notes)."""
+        graph = self.graph
+        paths = paths if paths is not None else hop_paths(graph, seed.node)
+        seed_bag = self.seed_words(seed) if words and any(h.text >= TEXT_REASON for h in hits) else None
+        by_path = {path: file_id for file_id, path in self.paths.items()}
+        for hit in hits:  # reasons only for what is returned: the words mean reading the notes
+            if hit.text >= TEXT_REASON and seed_bag is not None:
+                hit.shared_terms = self.text.words(seed_bag, self.text.bag(by_path[hit.path], hit.path))
+            hit.reason = self.reason(seed, graph.by_file[by_path[hit.path]], hit, paths)
+
+    def related(self, seed: Seed, limit: int | None = 10, unlinked_only: bool = False, words: bool = True,
+                weights: dict[str, float] | None = None, reasons: bool = True) -> RelatedResult:
+        """The notes related to ``seed``, best first; ``words``: name the words behind "similar text" (reads the notes).
+        ``weights``: this call's mix instead of the engine's (e.g. ``UNLINKED_WEIGHTS`` for unlinked notes);
+        ``reasons``: False leaves the reasons empty (``describe`` fills them in for the hits that are shown)."""
         graph = self.graph
         seed_file = graph.note_ids[seed.node]
-        rank = personalized_pagerank(graph.adjacency, seed.node)
-        graph_raw = {graph.note_ids[n]: r / graph.degree(n) for n, r in rank.items()
-                     if n != seed.node and not graph.is_missing(n) and graph.degree(n)}
-        text_raw = self.text_scores(seed)
-        text_raw.pop(seed_file, None)
+        mix = {**WEIGHTS, **weights} if weights is not None else self.weights
+        text_on = self.text.available() if mix["text"] else False
+        weights = active_weights(mix, set() if text_on else {"text"})
+        raw = link_signals(graph, seed.node, {k for k in ("graph", "cocitation", "coupling") if weights[k]})
+        text_raw = self.text_scores(seed) if text_on else {}
+        raw["text"] = text_raw
         tags_raw = {f: self.tag_score(seed.tags, tags) for f, tags in self.note_tags.items() if f != seed_file}
-        tags_raw = {f: v for f, v in tags_raw.items() if v > 0}
-
-        def scaled(values: dict[int, float]) -> dict[int, float]:
-            top = max(values.values(), default=0.0)
-            return {k: v / top for k, v in values.items()} if top > 0 else {}
-
-        g = scaled({k: v for k, v in graph_raw.items() if v > 0})
-        x = scaled({k: v[0] for k, v in text_raw.items()})
-        t = scaled(tags_raw)
+        raw["tags"] = {f: v for f, v in tags_raw.items() if v > 0} if weights["tags"] else {}
+        parts = {name: scaled(values) for name, values in raw.items()}
+        score = combine(raw, weights)
+        g, x, t = parts.get("graph", {}), parts["text"], parts["tags"]
+        co, cp = parts.get("cocitation", {}), parts.get("coupling", {})
         paths = hop_paths(graph, seed.node)
         hits = []
-        for file_id in set(g) | set(x) | set(t):
+        for file_id in score:
             node = graph.by_file[file_id]
             linked = (seed.node, node) in graph.direct or (node, seed.node) in graph.direct
             if graph.is_missing(seed.node):  # a note linking to the missing note
@@ -241,19 +447,26 @@ class Relatedness:
                  if self.tag_notes[tag] <= COMMON_TAG * self.n_notes and not any(o.startswith(tag + "/") for o in seed.tags & self.note_tags[file_id])),
                 key=lambda tag: (-self.tag_idf[tag], tag),
             )
-            shared_terms = text_raw.get(file_id, (0, []))[1]
             hit = RelatedHit(
-                path=path, title=link_name(path),
-                score=WEIGHTS["graph"] * g.get(file_id, 0) + WEIGHTS["text"] * x.get(file_id, 0) + WEIGHTS["tags"] * t.get(file_id, 0),
+                path=path, title=link_name(path), score=score[file_id],
                 graph=g.get(file_id, 0.0), text=x.get(file_id, 0.0), tags=t.get(file_id, 0.0),
                 linked=linked, hops=paths[node].hops if node in paths else None, reason="",
-                shared_tags=shared_tags[:3], shared_terms=shared_terms if x.get(file_id, 0) >= TEXT_REASON else [],
+                shared_tags=shared_tags[:3], cosine=text_raw.get(file_id, 0.0),
+                cocitation=co.get(file_id, 0.0), coupling=cp.get(file_id, 0.0),
             )
-            hit.reason = self.reason(seed, node, hit, paths)
+            if hit.cocitation:
+                hit.cited_by = [self._node_name(c) for c, _ in graph.cocitation(seed.node, node)[1][:2]]
+            if hit.coupling:
+                hit.both_link = [self._node_name(z) for z, _ in graph.coupling(seed.node, node)[1][:2]]
             hits.append(hit)
         hits.sort(key=lambda h: (-h.score, h.path))
+        shown = hits if limit is None else hits[:limit]
+        if reasons:
+            self.describe(seed, shown, words, paths)
         compared = self.n_notes - (0 if seed_file is None else 1)
-        return RelatedResult(seed, len(hits), hits if limit is None else hits[:limit], compared)
+        model_id = self.text.vectors.model_id if text_on else None
+        return RelatedResult(seed, len(hits), shown, compared, model_id, self.text.unavailable,
+                             len(self.text.uncached), weights)
 
     def reason(self, seed: Seed, node: int, hit: RelatedHit, paths) -> str:
         graph = self.graph
@@ -275,9 +488,15 @@ class Relatedness:
                 via = f" via {self._node_name(path.via[0])}{more}" if path.via else ""
                 parts.append(f"{path.hops} hops{via}")
         if hit.shared_tags:
-            parts.append("shares " + ", ".join("#" + tag for tag in hit.shared_tags))
-        if hit.shared_terms:
+            parts.append("shares " + ", ".join(tag_label(tag) for tag in hit.shared_tags))
+        if hit.cited_by:
+            parts.append("cited together by " + ", ".join(hit.cited_by))
+        if hit.both_link:
+            parts.append("both link " + ", ".join(hit.both_link))
+        if hit.text >= TEXT_REASON and hit.shared_terms:
             parts.append("similar text (" + ", ".join(hit.shared_terms) + ")")
+        elif hit.text >= TEXT_REASON and not self.text.explains:  # a model that cannot name words
+            parts.append("similar text")
         return " · ".join(parts)
 
     def _node_name(self, node: int) -> str:
@@ -287,6 +506,7 @@ class Relatedness:
         return f"{name} (no note yet)" if self.graph.is_missing(node) else name
 
 
-def related(conn: sqlite3.Connection, ref: str, limit: int | None = 10, unlinked_only: bool = False) -> RelatedResult:
-    engine = Relatedness(conn)
+def related(conn: sqlite3.Connection, ref: str, limit: int | None = 10, unlinked_only: bool = False,
+            provider: Any = None, root: str | Path | None = None) -> RelatedResult:
+    engine = Relatedness(conn, provider, root)
     return engine.related(engine.seed(ref), limit=limit, unlinked_only=unlinked_only)

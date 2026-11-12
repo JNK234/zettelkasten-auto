@@ -6,7 +6,8 @@
  */
 import {afterEach, describe, expect, test} from 'vitest';
 import {cleanup} from 'ink-testing-library';
-import {fakeApi, keys, promptLine, renderApp} from './helpers.js';
+import type {LinksSuggestResult, NoteRelatedResult} from '../src/rpc/schema.js';
+import {fakeApi, keys, promptLine, renderApp, sampleReply} from './helpers.js';
 
 afterEach(() => {
 	cleanup();
@@ -241,9 +242,32 @@ describe('/related, /suggest, /unlinked', () => {
 		await app.press(keys.escape, keys.enter);
 		const frame = await app.waitFor('⏺ Related to kl-penalty-in-rlhf');
 		expect(frame).toContain('score = 0.5 × graph + 0.3 × text + 0.2 × tags · 179 notes compared');
-		expect(frame).toMatch(/ 1\. direct-preference-optimization-dpo {2}20_ZETTLEKASTEN {2}0\.59 {2}linked/);
-		expect(frame).toMatch(/ 2\. RLHF {2}10_SOURCES {2}0\.50 {2}not linked/);
-		expect(frame).toContain('2 hops via direct-preference-optimization-dpo +1 · similar text (kl, dpo, rlhf)');
+		expect(frame).toMatch(/ 1\. direct-preference-optimization-dpo {2}20_ZETTLEKASTEN {2}0\.87 {2}linked/);
+		expect(flat(frame)).toContain('linked from it · shares [[reinforcement-learning-from-human-feedback-rlhf]], [[policy-gradient-methods]]');
+		expect(frame).toMatch(/ 3\. RLHF {2}10_SOURCES {2}0\.50 {2}not linked/);
+		expect(frame).toContain('2 hops via direct-preference-optimization-dpo +1 · similar text (rlhf, reward, policy)');
+		// Recorded from a vault that was never `vault embed`-ed: the server computed the vectors without writing them.
+		expect(flat(frame)).toContain('180 notes had no cached vector: embedded for this answer only; `vault embed` caches them');
+	});
+
+	test('/related without the embedding model: links and tags still rank, the text signal says why it is off', async () => {
+		const off = {available: false, model_id: null, unavailable: 'embedding model folder not found: /no/model', uncached: 0};
+		const api = fakeApi({
+			related: async (params) => ({...sampleReply<NoteRelatedResult>('note.related', params), text_signal: off, weights: {graph: 0.5 / 0.7, text: 0, tags: 0.2 / 0.7}}),
+			suggestLinks: async (params) => ({...sampleReply<LinksSuggestResult>('links.suggest', params ?? {}), text_signal: off, weights: {shared: 0.4 / 0.7, cited: 0.3 / 0.7, text: 0}}),
+		});
+		const app = renderApp({api});
+		await app.waitFor('index fresh');
+		await app.type('/related @20_ZETTLEKASTEN/kl-penalty-in-rlhf.md');
+		await app.press(keys.escape, keys.enter);
+		const frame = await app.waitFor('⏺ Related to kl-penalty-in-rlhf');
+		expect(frame).toContain('score = 0.71 × graph + 0.29 × tags · 179 notes compared');
+		expect(flat(frame)).toContain('text signal unavailable: embedding model folder not found: /no/model (the other signals still rank)');
+		await app.type('/suggest links');
+		await app.press(keys.escape, keys.enter);
+		const links = await app.waitFor('⏺ Links to add');
+		expect(flat(links)).toContain('score = 0.57 × shared neighbours + 0.43 × cited together');
+		expect(flat(links)).toContain('text signal unavailable: embedding model folder not found: /no/model');
 	});
 
 	test('/related on a missing note, and on a name that is nothing', async () => {
@@ -263,9 +287,10 @@ describe('/related, /suggest, /unlinked', () => {
 		await app.type('/suggest');
 		await app.press(keys.escape, keys.enter);
 		const frame = await app.waitFor('⏺ Notes to write');
-		expect(frame).toContain('⏺ Links to add  score = 0.4 × shared neighbours + 0.3 × cited together + 0.3 × similar text');
+		expect(flat(frame)).toContain('⏺ Links to add score = 0.33 × shared neighbours + 0.25 × cited together + 0.17 × shared tags + 0.25 × similar text');
 		expect(flat(frame)).toContain('EVD - AppWorld fails any database change outside an allow-list ↔ EVD - AppWorld grades only the database');
-		expect(flat(frame)).toContain('shared neighbours: StonyBrookNLP-appworld - Controllable World…, discourse-graph (no note yet) +1 · cited together by');
+		// Tags: links are tags: discourse-graph is a shared tag now, not a shared neighbour.
+		expect(flat(frame)).toContain('shared neighbours: StonyBrookNLP-appworld - Controllable World… · shares #evidence, [[discourse-graph]], [[rl-environment-design]] · cited together by');
 		expect(frame).toContain('1. rl-environment-design  52 notes link here · 1 more mention it');
 		expect(flat(frame)).toContain('[[on-policy-vs-off-policy-learning]] (5 notes) → 20_ZETTLEKASTEN/on-policy-versus-off-policy-learning.md');
 	});

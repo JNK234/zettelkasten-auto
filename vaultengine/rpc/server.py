@@ -13,7 +13,10 @@ for unexpected failures (including a result that does not match its own model).
 Server errors: -32001 index not built, -32002 note not found, -32003 format not
 configured (serve --format), -32004 write rejected (bad arguments, name taken;
 nothing written), -32005 write failed (rolled back, or a file changed meanwhile),
--32006 invalid query (data: query, start, end, hint).
+-32006 invalid query (data: query, start, end, hint), -32007 not available (nothing to act on: no explore run
+yet, a ref not in the last run, a result that is not two notes to link, no map snapshot; data: hint).
+Without the embedding model, note.related and links.suggest still answer: their
+"text_signal" says the text signal is unavailable and why.
 A write that would add violations is not an error: its result has status "refused". A request's "id"
 is echoed in its error response when it is a valid id, otherwise null.
 """
@@ -38,6 +41,7 @@ from vaultengine.rpc.models import (
     JSONRPC_VERSION,
     METHOD_NOT_FOUND,
     METHODS,
+    NOT_AVAILABLE,
     NOTE_NOT_FOUND,
     PARSE_ERROR,
     WRITE_FAILED,
@@ -45,8 +49,8 @@ from vaultengine.rpc.models import (
     Request,
 )
 from vaultengine.service import (
-    FormatNotConfigured, IndexNotBuilt, InvalidQuery, NoteNotFound, ServiceError, VaultService, WriteFailedError,
-    WriteRejected,
+    FormatNotConfigured, IndexNotBuilt, InvalidQuery, NoteNotFound, NotAvailable, ServiceError, VaultService,
+    WriteFailedError, WriteRejected,
 )
 
 _SERVICE_ERROR_CODES: dict[type[ServiceError], int] = {
@@ -56,6 +60,7 @@ _SERVICE_ERROR_CODES: dict[type[ServiceError], int] = {
     WriteRejected: WRITE_REJECTED,
     WriteFailedError: WRITE_FAILED,
     InvalidQuery: INVALID_QUERY,
+    NotAvailable: NOT_AVAILABLE,
 }
 
 
@@ -117,6 +122,18 @@ class RpcServer:
             "links.suggest": lambda p: service.suggest_links(limit=p.limit, note=p.note, path=p.path),
             "notes.suggest": lambda p: service.suggest_notes(limit=p.limit, min_links=p.min_links),
             "mentions.unlinked": lambda p: service.unlinked(note=p.note, min_words=p.min_words, limit=p.limit, per_note=p.per_note),
+            "explore.run": lambda p: service.explore(p.note, p.lenses, p.per_lens, p.fresh, p.record, p.refresh),
+            "explore.mark": lambda p: service.explore_mark(p.verdict, p.refs),
+            "explore.kept": lambda p: service.explore_kept(p.lens),
+            "explore.link": lambda p: service.explore_link(p.ref, p.a, p.b, p.reason, p.dry_run),
+            "explore.unlink": lambda p: service.explore_unlink(p.a, p.b, p.dry_run),
+            "map.get": lambda p: service.map(p.limit, p.meaning, p.record),
+            "map.since": lambda p: service.map_since(p.since),
+            "note.deepen": lambda p: service.deepen(p.note, p.lenses, p.limit),
+            "vault.discover": lambda p: service.discover(p.note, p.lenses, p.limit, p.steps, p.seed),
+            "notes.explain": lambda p: service.explain(p.a, p.b, p.words),
+            "embed.status": lambda p: service.embed_status(),
+            "config.show": lambda p: service.config_show(),
         }
         if set(self._handlers) != set(METHODS):
             raise RuntimeError(f"handlers and METHODS disagree: {set(self._handlers) ^ set(METHODS)}")
@@ -167,7 +184,7 @@ class RpcServer:
         except Exception as exc:  # noqa: BLE001 - reported to the client, logged to stderr
             traceback.print_exc(file=sys.stderr)
             return _error(request.id, INTERNAL_ERROR, data={"type": type(exc).__name__, "message": str(exc)})
-        return {"jsonrpc": JSONRPC_VERSION, "id": request.id, "result": validated.model_dump(mode="json")}
+        return {"jsonrpc": JSONRPC_VERSION, "id": request.id, "result": validated.model_dump(mode="json", by_alias=True)}
 
 
 def serve_stdio(service: VaultService, stdin: BinaryIO | None = None, stdout: BinaryIO | None = None) -> int:

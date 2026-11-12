@@ -1,5 +1,8 @@
-"""`vault` command line: index, stats, health, search, related, suggest, unlinked, formats, check, fix,
-new, link, set, ingest, coverage, serve (JSON-RPC), rpc-schema.
+"""`vault` command line: index, stats, health, search, related, suggest, unlinked, embed, config show,
+formats, check, fix, new, link, set, ingest, coverage, serve (JSON-RPC), rpc-schema.
+
+Settings (vault, index, format, embedding model) come from flags, then VAULTENGINE_* environment
+variables, then the `engine:` section of config/config.yaml, then defaults (``settings.py``).
 
 Human-readable output by default, machine-readable with --json.
 Exit codes: 0 success, 2 usage error, missing index or invalid format file,
@@ -23,7 +26,7 @@ from dataclasses import asdict
 from vaultengine import queries
 from vaultengine.vault import link_name
 from vaultengine import search as search_module
-from vaultengine.index import IndexReport, Staleness, VaultIndex, default_db_path
+from vaultengine.index import IndexReport, Staleness, VaultIndex
 
 
 def _print_json(data: Any) -> None:
@@ -442,7 +445,7 @@ def _fix_extra(plan, args: argparse.Namespace) -> tuple[list[str], dict[str, Any
 # ----- safe writes: new, link, set ------------------------------------------------------
 
 
-def _run_write_command(args: argparse.Namespace, build, extra=None) -> int:
+def _run_write_command(args: argparse.Namespace, build, extra=None, on_outcome=None) -> int:
     from vaultengine.formats.write import WriteError, WriteFailed, diff_text, run_write
 
     spec = _load_spec(args)
@@ -456,6 +459,8 @@ def _run_write_command(args: argparse.Namespace, build, extra=None) -> int:
     except WriteFailed as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 3
+    if on_outcome is not None:
+        on_outcome(outcome)
     extra_lines, extra_data = extra() if extra else ([], {})
     plan, verdict = outcome.plan, outcome.verdict
     diff = diff_text(plan.files) if plan.files and (args.dry_run or args.diff or outcome.status == "refused") else ""
@@ -476,7 +481,8 @@ def _run_write_command(args: argparse.Namespace, build, extra=None) -> int:
         out.append("Nothing to write." if plan.operation != "fix" else "Nothing to fix automatically.")
     elif outcome.status == "refused":
         count = len(verdict.new_violations)
-        what = {"new": "new note", "set": "change", "link": "link", "fix": "fix"}.get(plan.operation, plan.operation)
+        what = {"new": "new note", "set": "change", "link": "link", "fix": "fix", "link-it": "link",
+                "unlink": "unlink"}.get(plan.operation, plan.operation)
         out.append(f"✗ refused: the {what} would add {_plural(count, 'violation')}; nothing was written")
         for path in sorted({i.path for i in verdict.new_violations}):
             out.append(f"  {path}")
@@ -865,17 +871,56 @@ def _cmd_search(args: argparse.Namespace) -> int:
 # ----- related -----------------------------------------------------------------
 
 
-def _format_related(result, header: str, style: _Style, width: int, explain: bool) -> str:
-    from vaultengine.related import WEIGHTS
+def _related_weights(args: argparse.Namespace, unlinked: bool = False) -> dict[str, float]:
+    """engine.related.weights, or engine.related.unlinked_weights when what is wanted is not linked yet
+    (`related --unlinked`, `discover`, `explore`: the mix `vault experiment` measured for exactly that)."""
+    related = args.settings.engine.related
+    return (related.unlinked_weights if unlinked else related.weights).model_dump()
 
+
+def _tag_rule(args: argparse.Namespace):
+    """Which links are tags (tagrule.py): from the format (--format, engine.format), else fields named tags.
+    None after printing the error when the format cannot be loaded."""
+    from vaultengine.formats import FormatError
+    from vaultengine.tagrule import rule_for_format
+
+    try:
+        return rule_for_format(getattr(args, "format", None) or args.settings.engine.format)
+    except FormatError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return None
+
+
+def _text_notes(unavailable: str | None, uncached: int, vault: str) -> list[str]:
+    """What to tell about the text signal: off (and why), or computed without the cache."""
+    if unavailable:
+        return [f"  text signal unavailable: {unavailable}",
+                "    (the other signals still rank; their weights are rescaled to sum to 1)"]
+    if uncached:
+        return [f"  {_plural(uncached, 'note')} had no cached vector: embedded in memory for this run only;"
+                f" `vault embed {vault}` caches them"]
+    return []
+
+
+def _text_status(text) -> dict[str, Any]:
+    """The text signal's state for --json (``text``: a related.TextSimilarity that was used)."""
+    on = text.available()
+    return {"available": on, "model_id": text.vectors.model_id if on else None, "unavailable": text.unavailable,
+            "uncached": len(text.uncached)}
+
+
+def _format_related(result, header: str, style: _Style, width: int, explain: bool, vault: str = ".") -> str:
     seed = result.seed
     if seed.path is None:
         title = f"Related to {seed.label} (no note yet; {_plural(len(seed.linkers), 'note')} link to it)"
     else:
         title = f"Related to {seed.label}"
     out = [style.bold(title), header, ""]
-    weights = " + ".join(f"{WEIGHTS[k]:g} × {k}" for k in ("graph", "text", "tags"))
-    out.append(f"  score = {weights} · {_plural(result.compared, 'note')} compared")
+    weights = " + ".join(f"{result.weights[k]:.2g} × {k}" for k in ("graph", "cocitation", "coupling", "text", "tags")
+                         if result.weights.get(k))
+    model = f" · text: {result.model_id} embeddings" if result.model_id else ""
+    out.append(f"  score = {weights} · {_plural(result.compared, 'note')} compared{model}")
+    out.extend(_text_notes(result.text_unavailable, result.uncached, vault))
     if not result.hits:
         out.append("  nothing related found")
     for rank, hit in enumerate(result.hits, 1):
@@ -891,7 +936,9 @@ def _format_related(result, header: str, style: _Style, width: int, explain: boo
         indent = " " * len(prefix)
         out.append(indent + (hit.reason or style.dim("(weak: only distant links)")))
         if explain:
-            out.append(indent + style.dim(f"graph {hit.graph:.2f} · text {hit.text:.2f} · tags {hit.tags:.2f} · {hit.path}"))
+            extra = "".join(f" · {k} {getattr(hit, k):.2f}" for k in ("cocitation", "coupling") if result.weights.get(k))
+            out.append(indent + style.dim(f"graph {hit.graph:.2f} · text {hit.text:.2f} (cosine {hit.cosine:.2f}) · tags {hit.tags:.2f}"
+                                          f"{extra} · {hit.path}"))
     return "\n".join(out)
 
 
@@ -903,8 +950,12 @@ def _cmd_related(args: argparse.Namespace) -> int:
     if opened is None:
         return 2
     index, info = opened
+    rule = _tag_rule(args)
+    if rule is None:
+        return 2
     with index:
-        engine = Relatedness(index.conn)
+        engine = Relatedness(index.conn, lambda: args.settings.provider(), args.vault, rule,
+                             _related_weights(args, unlinked=args.unlinked))
         try:
             seed = engine.seed(args.note)
         except QueryError as exc:
@@ -916,18 +967,811 @@ def _cmd_related(args: argparse.Namespace) -> int:
         return 0
     width = max(40, min(shutil.get_terminal_size((100, 24)).columns, 120))
     header = "  " + (seed.path or "missing note") + f" · index {info['last_indexed_at']}" + (" (OUT OF DATE)" if info["stale"] else "")
-    print(_format_related(result, header, _Style(_use_color(args.color)), width, args.explain))
+    print(_format_related(result, header, _Style(_use_color(args.color)), width, args.explain, args.vault))
+    return 0
+
+
+# ----- explain -----------------------------------------------------------------
+
+
+def _format_explain(rel, header: str, style: _Style, vault: str, limit: int, tag_rule: str = "") -> str:
+    from vaultengine.related import tag_label
+    from vaultengine.relations import LABELS
+
+    a, b = link_name(rel.a), link_name(rel.b)
+    out = [style.bold(f"How {a} and {b} relate"), header, ""]
+    out.append(f"  score {rel.score:.2f} = the sum of weight × value  (weights: engine.explore.weights, rescaled to sum to 1)")
+    text = rel.signal("text")
+    out.extend(_text_notes(text.unavailable, rel.uncached, vault))
+    out.extend(["", f"  {'signal':<14}{'value':>6}   {'weight':>6}   {'contribution':>12}"])
+    for s in rel.signals:
+        if not s.available:
+            out.append(f"  {LABELS[s.name]:<14}{'—':>6}   {'—':>6}   {'unavailable':>12}")
+        else:
+            out.append(f"  {LABELS[s.name]:<14}{s.value:>6.2f} × {s.weight:>6.2f} = {s.contribution:>12.3f}")
+
+    def more(items: list, shown: int) -> list[str]:
+        return [f"      … {len(items) - shown} more (--limit 0 shows all)"] if len(items) > shown else []
+
+    cut = lambda items: items if limit <= 0 else items[:limit]
+    width = lambda names: max((len(n) for n in names), default=0)
+
+    d = rel.signal("direct").evidence
+    out += ["", style.bold(f"  direct links  {rel.signal('direct').value:.2f}") + "  (1 if either links to the other)"]
+    for src, dst, lines, tagged in ((a, b, d["a_to_b"], d["a_to_b_tag_lines"]), (b, a, d["b_to_a"], d["b_to_a_tag_lines"])):
+        marks = ", ".join(f"{n} (a tag link)" if n in tagged else str(n) for n in lines)
+        where = f"{_plural(len(lines), 'link')} (line{'s' if len(lines) > 1 else ''} {marks})" if lines else "none"
+        out.append(f"    {src} → {dst}: {where}")
+
+    c = rel.signal("cocitation")
+    e = c.evidence
+    out += ["", style.bold(f"  co-citation  {c.value:.2f}") + "  (notes that link to both; each weighs 1 / ln(1 + the notes it links to))"]
+    if e["both"]:
+        rows = cut(e["both"])
+        w = width(link_name(x["note"]) for x in rows)
+        out += [f"    {link_name(x['note']):<{w}}  {x['weight']:.2f}  (links to {x['links_to']})" for x in rows] + more(e["both"], len(rows))
+        total = sum(x["weight"] for x in e["both"])
+        out.append(f"    = {total:.2f} / √(({e['total_a']:.2f} + 1) × ({e['total_b']:.2f} + 1)) = {c.value:.2f}"
+                   f"   [{e['citing_a']} and {e['citing_b']} notes link to each in all, weighing {e['total_a']:.2f} and {e['total_b']:.2f}]")
+    else:
+        out.append(f"    no note links to both  (notes linking to {a}: {e['citing_a']}; to {b}: {e['citing_b']})")
+
+    c = rel.signal("coupling")
+    e = c.evidence
+    out += ["", style.bold(f"  coupling  {c.value:.2f}") + "  (what both link to; each weighs 1 / ln(1 + the notes linking to it))"]
+    if e["both"]:
+        rows = cut(e["both"])
+        names = [x["target"] if x["missing"] else link_name(x["target"]) for x in rows]
+        names = [n + (" (no note yet)" if x["missing"] else "") for n, x in zip(names, rows)]
+        w = width(names)
+        out += [f"    {n:<{w}}  {x['weight']:.2f}  (linked from {x['linked_from']})" for n, x in zip(names, rows)] + more(e["both"], len(rows))
+        total = sum(x["weight"] for x in e["both"])
+        out.append(f"    = {total:.2f} / √(({e['total_a']:.2f} + 1) × ({e['total_b']:.2f} + 1)) = {c.value:.2f}"
+                   f"   [{e['references_a']} and {e['references_b']} references in all, weighing {e['total_a']:.2f} and {e['total_b']:.2f}]")
+    else:
+        out.append(f"    nothing both link to  ({a} links to {_plural(e['references_a'], 'node')}, {b} to {e['references_b']})")
+
+    t = rel.signal("tags")
+    e = t.evidence
+    out += ["", style.bold(f"  shared tags  {t.value:.2f}") + f"  (each tag weighs ln({e['notes']} / notes with it); weighted Jaccard;"
+            f" tag links: {tag_rule})"]
+    fmt = lambda tags: ", ".join(f"{tag_label(x['tag'])} {x['weight']:.2f}" for x in tags) or "none"
+    out.append(f"    shared: {fmt(e['shared'])}")
+    out.append(f"    only in {a}: {fmt(e['only_a'])}")
+    out.append(f"    only in {b}: {fmt(e['only_b'])}")
+    if e["union_weight"]:
+        out.append(f"    = {e['shared_weight']:.2f} / {e['union_weight']:.2f} = {t.value:.2f}")
+    if e["left_out"]:
+        out.append("    left out (on more than a third of the notes): "
+                   + ", ".join(f"{tag_label(x['tag'])} ({x['notes']} notes)" for x in e["left_out"]))
+
+    out += [""]
+    if not text.available:
+        out += [style.bold("  text  unavailable") + f"  ({text.unavailable})"]
+    else:
+        e = text.evidence
+        out.append(style.bold(f"  text  {text.value:.2f}") + f"  (centered cosine {e['cosine']:.3f} of the two embeddings,"
+                   f" {e['model_id']}; the vault's mean vector subtracted; 0 if negative)")
+        if "words" in e:
+            shown = e["words"]
+            out.append("    words in both notes, by their share of the cosine: "
+                       + (" · ".join(f"{x['word']} {x['share']:+.3f}" for x in shown) or "none"))
+            out.append(f"    = all {e['shared_words']} words in both {e['shared_total']:+.3f}, words in one note only"
+                       f" {e['one_note_total']:+.3f}, the vault's average note {e['baseline']:+.3f}"
+                       f"  (sum {e['shared_total'] + e['one_note_total'] + e['baseline']:.3f})")
+            if not e["matches_vectors"]:
+                out.append("    (a note changed since the last index: the words are read from it now, the cosine is the indexed one)")
+    return "\n".join(out)
+
+
+def _cmd_explain(args: argparse.Namespace) -> int:
+    from vaultengine.operations import OperationError
+
+    opened = _open_for_reading(args)
+    if opened is None:
+        return 2
+    index, info = opened
+    rule = _tag_rule(args)
+    if rule is None:
+        return 2
+    with index:
+        try:
+            data, rel = _workbench(args, index).explain(args.a, args.b, args.words)
+        except OperationError as exc:
+            return _operation_error(exc)
+    if args.json:
+        _print_json({"vault": str(Path(args.vault).resolve()), "index": info, **data})
+        return 0
+    header = (f"  {rel.a} ↔ {rel.b}\n  index {info['last_indexed_at']}"
+              + (" (OUT OF DATE)" if info["stale"] else " (up to date)"))
+    print(_format_explain(rel, header, _Style(_use_color(args.color)), args.vault, args.limit, rule.description))
+    return 0
+
+
+# ----- map and deepen ----------------------------------------------------------
+
+
+def _workbench(args: argparse.Namespace, index):
+    """The explore commands' operations (operations.py) on this vault, index and settings."""
+    from vaultengine.operations import Workbench
+
+    return Workbench(index.conn, args.vault, args.settings, getattr(args, "format", None) or args.settings.engine.format)
+
+
+def _operation_error(exc) -> int:
+    print(f"error: {exc.message}" + (f"\n  {exc.hint}" if exc.hint else ""), file=sys.stderr)
+    return 2
+
+
+def _short(name: str, room: int) -> str:
+    return name if len(name) <= room else name[: room - 1] + "…"
+
+
+def _cmd_map(args: argparse.Namespace) -> int:
+    from vaultengine.shape import percentile
+    from vaultengine.vault import link_name
+
+    opened = _open_for_reading(args)
+    if opened is None:
+        return 2
+    index, info = opened
+    rule = _tag_rule(args)
+    if rule is None:
+        return 2
+    explore = args.settings.engine.explore
+    if args.since:
+        return _map_since(args, index, info, rule)
+    with index:
+        work = _workbench(args, index)
+        pages_from = work.pages_from
+        if args.meaning is None:
+            args.meaning = explore.meaning
+        data, shape, engine = work.map(args.limit, args.meaning, args.record)
+        changes = data.get("meaning", {}).get("changes")
+        recorded = data.get("recorded")
+        uncached = len(engine.text.uncached) if engine is not None else 0
+        summary = shape.summary()
+        bridges = shape.bridges()
+        hub, auth = shape.hits
+        if args.json:
+            _print_json({"vault": str(Path(args.vault).resolve()), "index": info, **data})
+            return 0
+    sg = shape.sg
+    width = max(60, min(shutil.get_terminal_size((100, 24)).columns, 140))
+    style = _Style(_use_color(args.color))
+    p = explore.percentile
+    out = [style.bold(f"Map of {Path(args.vault).resolve()}"), f"  index {info['last_indexed_at']}"
+           + (" (OUT OF DATE)" if info["stale"] else " (up to date)"), ""]
+    left = ", ".join(f"{t['tag']} on {t['notes']} of {summary['notes']} notes" for t in summary["left_out_tags"])
+    out.append(f"  graph        {summary['notes']} notes, {summary['missing_notes']} missing notes, {summary['tags']} #tags"
+               + (f" (left out: {left})" if left else "") + f" · {summary['edges']} edges · tag links: {summary['tag_rule']}")
+    out.append(f"  communities  Louvain, seed {summary['seed']}, resolution {summary['resolution']:g} (the same every run)"
+               f" · modularity {summary['modularity']:.2f} · {summary['communities']} communities hold"
+               f" {summary['notes_in_communities']} notes; {_plural(summary['alone'], 'note')} in none")
+    out.append(f"  cutoffs      at or above the {p:g}th percentile of the vault (engine.explore.percentile)")
+    out.append(f"  topic pages  {pages_from}")
+    if args.meaning:
+        if shape.meaning_unavailable:
+            out.append(f"  meaning      unavailable: {shape.meaning_unavailable} (the communities are from links and tags only)")
+        else:
+            out.append(f"  meaning      {_plural(len(shape.meaning_edges), 'edge')} added for the communities: mutual nearest"
+                       f" neighbours by embedding at or above the {explore.meaning_percentile:g}th percentile of every note's"
+                       f" nearest-neighbour similarity ({shape.meaning_cutoff:.3f})")
+            out.extend("  " + line for line in _text_notes(None, uncached, args.vault))
+    communities = shape.communities
+    shown = communities if not args.limit else communities[: args.limit]
+    out += ["", style.bold("  Communities") + "  (largest first; key phrases: its notes with the phrase / all notes with it)"]
+    for c in shown:
+        head = f"  {c.number:>3}. {c.name}"
+        out += ["", style.bold(_short(head, width - 12)) + f"  {len(c.notes)} notes"]
+        phrases = " · ".join(f"{ph.phrase} {ph.in_community}/{ph.in_vault}" for ph in c.phrases[:5])
+        out.append(f"       key phrases  {_short(phrases, width - 20)}")
+        out.append(f"       hubs         {_short(', '.join(link_name(sg.labels[v]) for v in c.hubs), width - 20)}")
+        if shape.topic_page is not None:
+            pages = ", ".join(f"{link_name(sg.labels[v])} (links {n})" for v, n in c.topic_pages[:2])
+            more = f" +{len(c.topic_pages) - 2} more" if len(c.topic_pages) > 2 else ""
+            out.append(f"       topic pages  {_short(pages + more, width - 20) if pages else 'none'}")
+    if len(shown) < len(communities):
+        out.append(f"  … {len(communities) - len(shown)} more communities (--limit 0 shows all)")
+    if shape.topic_page is not None:
+        bare = [c for c in communities if not c.topic_pages]
+        out += ["", style.bold("  No topic page") + f"  ({len(bare)} of {len(communities)} communities; a topic page belongs to"
+                " the community most of its direct links go to)"]
+        out += [f"    {c.number:>3}. {_short(c.name, width - 24)}  {len(c.notes)} notes" for c in bare]
+    if changes is not None:
+        out += ["", style.bold("  What the meaning edges change") + f"  (communities {changes['communities_before']} →"
+                f" {changes['communities_after']}; notes in none {len(changes['stranded_before'])} →"
+                f" {len(changes['stranded_after'])})"]
+        for item in changes["placed"]:
+            out.append(f"    placed  {_short(link_name(item['note']), width - 40)}  → community {item['community']}")
+        for number, sources in sorted(changes["joined"].items()):
+            out.append(f"    joined  community {number} takes notes from communities {', '.join(map(str, sources))} of the"
+                       " map without meaning edges")
+        for source, numbers in sorted(changes["split"].items()):
+            out.append(f"    split   community {source} of the map without them is now {', '.join(map(str, numbers))}")
+        moved = changes["moved"]
+        out.append(f"    moved   {_plural(len(moved), 'note')} changed community"
+                   + (": " + ", ".join(f"{_short(link_name(m['note']), 40)} ({m['from']} → {m['to']})" for m in moved[:6])
+                      + (f" +{len(moved) - 6}" if len(moved) > 6 else "") if moved else ""))
+    b = shape.betweenness
+    values = [r["betweenness"] for r in bridges]
+    cut = percentile(values, p)
+    kept = [r for r in bridges if r["betweenness"] >= cut and r["betweenness"] > 0]
+    how = (f"exact, from all {b.sources} notes" if b.exact else
+           f"estimated from a seeded sample of {b.sources} of {summary['notes']} notes (exact would cost {b.visits:,} edge"
+           f" visits; engine.explore.path_budget is {b.budget:,})")
+    out += ["", style.bold("  Bridge notes") + f"  (betweenness between notes, {how}; {len(kept)} at or above the"
+            f" {p:g}th percentile, {cut:.3f}; constraint: low = its contacts are not tied to each other)"]
+    out.append(f"         {'betweenness':<13} {'constraint':<13} note  → communities its links reach")
+    for rank, r in enumerate(kept[: args.limit or None], 1):
+        con = f"{r['constraint']:.3f} (p{r['constraint_percentile']:.0f})" if r["constraint"] is not None else "—"
+        bet = f"{r['betweenness']:.3f} (p{r['betweenness_percentile']:.0f})"
+        spans = ", ".join(map(str, r["spans"][:5]))
+        out.append(f"    {rank:>3}. {bet:<13} {con:<13} {_short(link_name(r['path']), width - 50)}  → {spans}")
+    for title, scores, missing in (("Hubs", hub, False), ("Authorities", auth, True)):
+        ranked = sorted(scores.items(), key=lambda item: (-item[1], shape.graph.labels[item[0]]))
+        hcut = percentile([v for _, v in ranked], p)
+        top = [(v, x) for v, x in ranked if x >= hcut and x > 0]
+        what = "notes whose body links point at the best authorities" if title == "Hubs" else "what the best hubs link to"
+        out += ["", style.bold(f"  {title}") + f"  ({what}; HITS, largest 1.00; {len(top)} at or above the {p:g}th percentile)"]
+        for rank, (v, x) in enumerate(top[: args.limit or None], 1):
+            name = shape.graph.labels[v] if shape.graph.is_missing(v) else link_name(shape.graph.labels[v])
+            out.append(f"    {rank:>3}. {x:.2f}  {_short(name, width - 20)}" + ("  (no note yet)" if shape.graph.is_missing(v) else ""))
+    if recorded:
+        out += ["", f"  recorded     snapshot {recorded['at']} ({recorded['bytes']:,} bytes) in {recorded['memory']}:"
+                f" {recorded['communities']} communities, {recorded['gaps']} gaps ({recorded['basis']}),"
+                f" {recorded['missing']} missing notes · `vault map --since {recorded['at'][:10]}` compares"]
+    print("\n".join(out))
+    return 0
+
+
+def _map_since(args: argparse.Namespace, index, info, rule) -> int:
+    from vaultengine.operations import OperationError
+    from vaultengine.vault import link_name
+
+    with index:
+        try:
+            diff = _workbench(args, index).map_since(args.since)
+        except OperationError as exc:
+            return _operation_error(exc)
+    at, how = diff["snapshot"], diff["chosen"]
+    if args.json:
+        _print_json({"vault": str(Path(args.vault).resolve()), "index": info, **diff})
+        return 0
+    style = _Style(_use_color(args.color))
+    width = max(60, min(shutil.get_terminal_size((100, 24)).columns, 140))
+    n0, n1 = diff["notes"]
+    l0, l1 = diff["links"]
+    c0, c1 = diff["communities"]
+    out = [style.bold(f"Map of {Path(args.vault).resolve()} since {at}"),
+           f"  {how} · index {info['last_indexed_at']}" + (" (OUT OF DATE)" if info["stale"] else " (up to date)"),
+           f"  notes {n0} → {n1} · links between notes {l0} → {l1} · communities {c0} → {c1}"]
+    closed = [g for g in diff["gaps"] if g["status"] == "closed"]
+    out += ["", style.bold("  Gaps") + f"  ({len(closed)} of {len(diff['gaps'])} recorded gaps closed; by {diff['gap_basis']})"]
+    for g in diff["gaps"]:
+        x, y = g["communities"]
+        out.append(f"    {g['status']:<7} communities {x} and {y} then: {_short(g['names'][0], 40)} / {_short(g['names'][1], 40)}")
+        out.append(f"            {g['why']} (then {g['links_then']:g}, where chance predicted {g['expected_then']:.1f})")
+        for a, b in g["added"][:3]:
+            out.append(f"            new link {_short(link_name(a), 45)} ↔ {_short(link_name(b), 45)}")
+    if not diff["gaps"]:
+        out.append("    none were recorded")
+    out += ["", style.bold("  Communities") + f"  (formed {len(diff['formed'])}, gone {len(diff['gone'])}: matched by shared"
+            " notes, Jaccard below 0.5 = no match)"]
+    for c in diff["formed"]:
+        out.append(f"    formed  {c['community']}. {_short(c['name'], width - 40)}  {c['notes']} notes"
+                   f" (best match then: {c['best_match']}, {c['overlap']:.2f})")
+    for c in diff["gone"]:
+        out.append(f"    gone    {c['community']}. {_short(c['name'], width - 40)}  {c['notes']} notes then"
+                   f" (best match now {c['overlap']:.2f})")
+    if not diff["formed"] and not diff["gone"]:
+        out.append("    every community then has one now, and every one now had one then")
+    out += ["", style.bold("  Missing notes written") + f"  ({len(diff['written'])})"]
+    for w in diff["written"]:
+        out.append(f"    [[{w['name']}]] ({w['linked_from']} notes linked it) is now {w['note']}")
+    if not diff["written"]:
+        out.append("    none")
+    if diff["topic_pages"]:
+        n = len(diff["topic_pages"])
+        out += ["", style.bold("  Topic pages") + f"  ({_plural(n, 'community')} without one then {'has' if n == 1 else 'have'}"
+                " one now)".replace("communitys", "communities")]
+        for t in diff["topic_pages"]:
+            out.append(f"    community {t['community']} ({_short(t['name'], 40)}): {', '.join(link_name(p) for p in t['topic_pages'])}")
+    print("\n".join(out))
+    return 0
+
+
+from vaultengine.operations import DEEPEN_LENSES as LENSES  # noqa: E402
+
+
+def _cmd_deepen(args: argparse.Namespace) -> int:
+    from vaultengine.operations import OperationError
+    from vaultengine.vault import link_name
+
+    opened = _open_for_reading(args)
+    if opened is None:
+        return 2
+    index, info = opened
+    rule = _tag_rule(args)
+    if rule is None:
+        return 2
+    explore = args.settings.engine.explore
+    with index:
+        try:
+            data = _workbench(args, index).deepen(args.note, args.lens, args.limit)
+        except OperationError as exc:
+            return _operation_error(exc)
+    path, results = data["note"], data["lenses"]
+    if args.json:
+        _print_json({"vault": str(Path(args.vault).resolve()), "index": info, "note": path,
+                     "percentile": explore.percentile, "lenses": results})
+        return 0
+    style = _Style(_use_color(args.color))
+    width = max(60, min(shutil.get_terminal_size((100, 24)).columns, 140))
+    p = f"{explore.percentile:g}th percentile"
+    out = [style.bold(f"Deepen {link_name(path)}"), f"  {path} · index {info['last_indexed_at']}"
+           + (" (OUT OF DATE)" if info["stale"] else ""),
+           f"  cutoffs: at or above the {p} of the vault (engine.explore.percentile)"]
+    if "neighbourhood" in results:
+        r = results["neighbourhood"]
+        out += ["", style.bold("  Neighbourhood") + f"  (vault related: {r['kept']} of {r['compared']} notes at or above the {p}"
+                f" of this note's scores, {r['cutoff']:.2f})"]
+        out += ["  " + line for line in _text_notes(r["text_unavailable"], r["uncached"], args.vault)]
+        for rank, h in enumerate(r["hits"], 1):
+            status = "linked" if h["linked"] else "not linked"
+            out.append(f"    {rank:>3}. {_short(link_name(h['path']), width - 30)}  {h['score']:.2f}  {status}")
+            out.append(f"         {h['reason'] or '(only distant links)'}")
+        if r["kept"] > len(r["hits"]):
+            out.append(f"         … {r['kept'] - len(r['hits'])} more (--limit 0 shows all)")
+    for key, title, what in (("cited", "Cited together", "notes that link to both it and them"),
+                             ("foundations", "Same foundations", "what it and they both link to")):
+        if key not in results:
+            continue
+        r = results[key]
+        scope = "every pair" if r["exact"] else "a seeded sample"
+        out += ["", style.bold(f"  {title}") + f"  ({what}; {r['found']} found, {r['kept']} at or above the {p} of the vault's"
+                f" {r['pairs_in_vault']} values ({scope}), {r['cutoff']:.2f})"]
+        rows = r["notes"] or r["below_cutoff"]
+        if not r["notes"]:
+            out.append("    none stands out in this vault" + ("; the strongest:" if rows else ""))
+        for rank, row in enumerate(rows, 1):
+            ev = row["evidence"]
+            names = ", ".join(_short(e["name"], 40) for e in ev[:3]) + (f" +{len(ev) - 3}" if len(ev) > 3 else "")
+            out.append(f"    {rank:>3}. {_short(link_name(row['path']), width - 30)}  {row['value']:.2f} (p{row['percentile']:.0f})")
+            out.append(f"         {'by' if key == 'cited' else 'both link'} {names}")
+    if "backbone" in results:
+        r = results["backbone"]
+        out.append("")
+        if r["community"] is None:
+            out.append(style.bold("  Backbone") + "  (this note is in no community of two or more notes)")
+        else:
+            out.append(style.bold("  Backbone") + f"  (community {r['community']}: the longest path through the strongest ties"
+                       f" of its {r['community_notes']} notes, {r['length']} notes long)")
+            for i, note in enumerate(r["chain"]):
+                mark = "  ◀ this note" if note == path else ""
+                out.append(f"    {link_name(note)}{mark}")
+                if i < len(r["steps"]):
+                    out.append(f"      │ {r['steps'][i]}")
+            if r["note_on_chain"] is None and r["joins_at"]:
+                out.append(f"    this note is {_plural(r['steps_off'], 'step')} off it, joining at {link_name(r['joins_at'])}")
+    if "cluster" in results:
+        r = results["cluster"]
+        out.append("")
+        if r["community"] is None:
+            out.append(style.bold("  Cluster") + "  (this note is in no community of two or more notes)")
+        else:
+            out.append(style.bold("  Cluster") + f"  (community {r['community']}: {r['name']}, {r['notes']} notes)")
+            out.append("    key phrases  " + _short(" · ".join(f"{x['phrase']} {x['in_community']}/{x['in_vault']}"
+                                                            for x in r["phrases"][:5]), width - 18))
+            out.append("    hubs         " + ", ".join(link_name(h) for h in r["hubs"]))
+            if data["topic_pages_known"]:
+                pages = ", ".join(f"{link_name(t['path'])} (links {t['reaches']})" for t in r["topic_pages"][:2])
+                out.append("    topic page   " + (pages or "none"))
+            out.append(f"    this note    weight {r['weight_inside']:g} inside (p{r['inside_percentile']:.0f} of the members);"
+                       f" {r['outside_share']:.0%} of its weight goes to other communities (participation {r['participation']:.2f})")
+            for n in r["neighbours"]:
+                out.append(f"    next to      {n['community']}. {_short(n['name'], 50)}  (weight {n['weight']:g}, through "
+                           + ", ".join(_short(link_name(t), 40) for t in n["through"][:2]) + ")")
+    print("\n".join(out))
+    return 0
+
+
+from vaultengine.operations import DISCOVER_LENSES as DISCOVER  # noqa: E402
+
+
+def _cmd_discover(args: argparse.Namespace) -> int:
+    from vaultengine.operations import OperationError
+    from vaultengine.vault import link_name
+
+    opened = _open_for_reading(args)
+    if opened is None:
+        return 2
+    index, info = opened
+    rule = _tag_rule(args)
+    if rule is None:
+        return 2
+    explore = args.settings.engine.explore
+    with index:
+        try:
+            data, engine = _workbench(args, index).discover(args.note, args.lens, args.limit, args.steps, args.seed)
+        except OperationError as exc:
+            return _operation_error(exc)
+        uncached = len(engine.text.uncached)
+    results, seed = data["lenses"], data["seed"]
+    node_label = data["note"]
+    if args.json:
+        _print_json({"vault": str(Path(args.vault).resolve()), "index": info, "note": args.note and node_label,
+                     "percentile": explore.percentile, "seed": seed, "lenses": results})
+        return 0
+    style = _Style(_use_color(args.color))
+    width = max(60, min(shutil.get_terminal_size((100, 24)).columns, 140))
+    p = f"{explore.percentile:g}th percentile"
+    title = f"Discover around {link_name(node_label)}" if node_label is not None else f"Discover in {Path(args.vault).resolve()}"
+    out = [style.bold(title), f"  index {info['last_indexed_at']}" + (" (OUT OF DATE)" if info["stale"] else " (up to date)"),
+           f"  cutoffs: the {p} of the vault (engine.explore.percentile) · seed {seed} · tag links: {engine.graph.tag_rule}"]
+    out.extend(_text_notes(engine.text.unavailable, uncached, args.vault))
+
+    def items(rows, note_key=None):
+        for rank, row in enumerate(rows, 1):
+            head = f"    {rank:>3}. "
+            if note_key:
+                out.append(head + _short(link_name(row[note_key]), width - 10))
+                out.append(" " * len(head) + row["reason"])
+            else:
+                out.append(head + row["reason"])
+
+    if "hidden" in results:
+        r = results["hidden"]
+        scope = "" if r["exact"] else f" from a seeded sample of {r['sources']} notes (engine.explore.path_budget)"
+        out += ["", style.bold("  Hidden link") + f"  (notes it has no link with, reached through two or more middles: notes, missing"
+                f" notes, tags or key terms both have; {r['kept']} of {r['found']} at or above the {p} of {r['pairs_in_vault']}"
+                f" unlinked pairs{scope}, {r['cutoff']:.2f})"]
+        items(r["results"], "note") if r["results"] else out.append("    none stands out")
+    if "role" in results:
+        r = results["role"]
+        out += ["", style.bold("  Same role elsewhere") + f"  (notes in other communities whose ten link features sit at the same"
+                f" percentiles; {r['kept']} at or below the {100 - explore.percentile:g}th percentile of {r['pairs_in_vault']}"
+                f" pairs' role distances, {r['cutoff']:.3f})"]
+        items(r["results"], "note") if r["results"] else out.append("    none stands out")
+    if "bridge" in results:
+        r = results["bridge"]
+        reach = ", ".join(f"{x['community']} ({x['weight']:g})" for x in r["reaches"])
+        out += ["", style.bold("  Bridge") + f"  (betweenness {r['betweenness']:.3f}, p{r['betweenness_percentile']:.0f};"
+                f" constraint {r['constraint']:.3f}, p{r['constraint_percentile']:.0f}; in community {r['community']}; its links and"
+                f" tags reach {reach}; {'exact' if r['exact'] else f'sampled from {r['sources']} notes'})"]
+        items(r["brokers"]) if r["brokers"] else out.append("    no shortest path between notes runs through it")
+    for lens, title, what in (("gap", "Gap", "communities close in meaning with fewer links between them than chance predicts"),
+                              ("surprise", "Surprise", "links between notes far apart in meaning, in different communities"),
+                              ("unwritten", "Unwritten", "missing notes linked from the most communities; the same idea merged first")):
+        if lens not in results:
+            continue
+        out += ["", style.bold(f"  {title}") + f"  ({what})"]
+        for variant, label in (("with_embeddings", "with embeddings"), ("without_embeddings", "without them")):
+            r = results[lens][variant]
+            if "unavailable" in r:
+                out.append(f"    {label}: unavailable ({r['unavailable']})")
+                continue
+            if lens == "gap":
+                basis = "mean embeddings" if variant == "with_embeddings" else "key-term profiles"
+                out.append(f"    {label} (closeness of {basis} at or above the {p} of {r['pairs']} community pairs,"
+                           f" {r['cutoff']:.2f}; {r['found']} found)")
+                for rank, row in enumerate(r["results"], 1):
+                    x, y = row["communities"]
+                    out.append(f"    {rank:>3}. communities {x} and {y}: {_short(row['names'][0], 40)} / {_short(row['names'][1], 40)}")
+                    out.append(f"         {row['reason']}")
+                    for j in row["join"]:
+                        out.append(f"         join {_short(link_name(j['a']), 40)} ↔ {_short(link_name(j['b']), 40)}"
+                                   f" ({j['score']:.2f}, via {', '.join(_short(m, 30) for m in j['middles'][:3])})")
+            elif lens == "surprise":
+                basis = "embedding" if variant == "with_embeddings" else "key-term"
+                out.append(f"    {label} ({basis} similarity at or below the {100 - explore.percentile:g}th percentile of"
+                           f" {r['linked_pairs']} linked pairs, {r['cutoff']:.2f}; {r['found']} found)")
+                for rank, row in enumerate(r["results"], 1):
+                    out.append(f"    {rank:>3}. {_short(link_name(row['a']), 45)} → {_short(link_name(row['b']), 45)}")
+                    out.append(f"         {row['reason']}")
+            else:
+                merge = (f"merged by embedding of the names at or above the {p}, {r['merge_cutoff']:.2f}"
+                         if r["by"] != "name words" else "merged by name words")
+                out.append(f"    {label} ({merge}: {r['merged']} groups; linked from at least {r['cutoff']:g} communities,"
+                           f" the {p} of {r['groups']}; {r['found']} found)")
+                for rank, row in enumerate(r["results"], 1):
+                    out.append(f"    {rank:>3}. [[{row['names'][0]}]]" + (f" +{len(row['names']) - 1}" if len(row["names"]) > 1 else ""))
+                    out.append(f"         {row['reason']}")
+            if not r["results"]:
+                out.append("         none")
+    if "wander" in results:
+        r = results["wander"]
+        out += ["", style.bold("  Wander") + f"  (a random walk on links, seed {r['seed']}: the same seed, the same walk;"
+                f" {r['steps']} steps through {_plural(r['communities'], 'community', )})".replace("communitys", "communities")]
+        out.append(f"    {link_name(r['walk'][0])}")
+        for hop in r["hops"]:
+            out.append(f"      → {_short(link_name(hop['to']), width - 10)}")
+            out.append(f"        {hop['reason']}")
+    print("\n".join(out))
+    return 0
+
+
+# ----- explore, marks, link it, unlink -------------------------------------------
+
+
+def _memory(args: argparse.Namespace, must_exist: bool = False):
+    """The explore memory (engine.memory); None after printing an error when it must exist and does not."""
+    from vaultengine.memory import Memory
+
+    path = args.settings.engine.memory_path
+    if must_exist and not Path(path).is_file():
+        print(f"error: nothing remembered yet ({path} does not exist): run `vault explore` first", file=sys.stderr)
+        return None
+    return Memory(path)
+
+
+def _explorer(args: argparse.Namespace, index, rule, memory, per_lens: int | None = None, refresh: bool = False,
+              keep_stats: bool = True):
+    """The explorer for this vault and settings (``operations.Workbench.explorer``); ``rule`` is read from args."""
+    return _workbench(args, index).explorer(memory, per_lens, refresh, keep_stats)
+
+
+def _format_explore(out: dict, explorer, args: argparse.Namespace, info: dict, style: "_Style", width: int,
+                    memory_path: Path, lenses: list[str]) -> str:
+    from vaultengine.explore import space
+
+    seed, sections = out["seed"], out["sections"]
+    settings = explorer.settings
+    if seed is None:
+        title = f"Explore {Path(args.vault).resolve()}: where to start"
+    elif seed.path is None:
+        title = f"Explore {out['start']} (no note yet; {_plural(len(seed.linkers), 'note')} link to it)"
+    else:
+        title = f"Explore {_short(explorer.name(seed.path), width - 10)}"
+    lines = [style.bold(title), f"  {seed.path if seed is not None and seed.path else 'the whole vault'} · index "
+             f"{info['last_indexed_at']}" + (" (OUT OF DATE)" if info["stale"] else " (up to date)")]
+    used = space(sections)
+    if seed is None:
+        lines.append(f"  proposals from {len(sections)} vault-wide lenses (engine.explore.start_lenses), up to"
+                     f" {settings.per_lens} each; `vault explore <the start named>` goes there")
+    else:
+        budget = {s.lens.kind: s.budget for s in sections if s.applies}
+        lines.append(f"  {len(sections)} lenses (engine.explore.lenses) · equal space: deepen {used['deepen']} results,"
+                     f" discover {used['discover']} (up to {budget.get('deepen', settings.per_lens)} and"
+                     f" {budget.get('discover', settings.per_lens)} a section) · related: engine.related.unlinked_weights")
+    cut = out["duplicate_cutoff"]
+    basis = "embedding cosine" if out["meaning"] else "key-term cosine"
+    lines.append(f"  near-duplicates left out of a section: {basis} ≥ {cut:.2f} (the {settings.duplicate_percentile:g}th"
+                 " percentile of note pairs) or the same note")
+    lines.append("  sections ordered by the share of results you keep: (kept + 1) / (marked + 2), ties in config order"
+                 + (" · --fresh: what you saw or dismissed before is left out" if out["fresh"] else ""))
+    lines.append(f"  memory {memory_path} · `vault mark keep|dismiss 1.2` · `vault link-it 1.2` · `vault kept`")
+    st = out["stats"]
+    if st["mode"] == "reused":
+        lines.append(f"  vault-wide numbers (distributions, key terms) from {st['computed_at']}: {st['changed_since']} notes changed"
+                     f" since; recomputed when more than {st['threshold']} have, or with --refresh")
+    lines.extend(_text_notes(explorer.engine.text.unavailable, len(explorer.engine.text.uncached), args.vault))
+    for number, s in enumerate(sections, 1):
+        marked = s.kept + s.dismissed
+        rate = (f"kept {s.kept} of {marked} you marked ({s.kept / marked:.0%})" if marked else "no marks yet")
+        counts = f"{len(s.results)} of {s.candidates}"
+        if s.hidden:
+            counts += f", {s.hidden} seen or dismissed before"
+        if s.duplicates:
+            counts += f", {s.duplicates} near-duplicates"
+        lines += ["", style.bold(f"  {number}. {s.lens.title}") + f"  ({s.lens.kind} · {s.lens.what}; {counts} · {rate})"]
+        if not s.results:
+            lines.append(f"       {s.note or 'nothing found'}")
+        for r in s.results:
+            flag = f"  [{'kept' if r.mark == 'keep' else 'dismissed'}]" if r.mark else ""
+            go = f"  → explore {r.start_at}" if seed is None and r.start_at else ""
+            lines.append(f"    {r.ref:>5}  {_short(r.title, width - 12 - len(flag) - len(go))}{flag}" + style.dim(go))
+            lines.append(f"           {s.lens.name} · {r.evidence}")
+    return "\n".join(lines)
+
+
+def _cmd_explore(args: argparse.Namespace) -> int:
+    from contextlib import nullcontext
+
+    from vaultengine.operations import OperationError, explore_json
+
+    opened = _open_for_reading(args)
+    if opened is None:
+        return 2
+    index, info = opened
+    rule = _tag_rule(args)
+    if rule is None:
+        return 2
+    memory_path = args.settings.engine.memory_path
+    memory = _memory(args) if not args.no_record or Path(memory_path).is_file() else None  # --no-record creates nothing
+    with index, (memory or nullcontext()):
+        work = _workbench(args, index)
+        try:
+            out, explorer = work.explore(args.note, args.lens, memory, args.fresh, args.per_lens, args.refresh,
+                                         record=not args.no_record)
+        except OperationError as exc:
+            return _operation_error(exc)
+        if args.json:
+            _print_json({"vault": str(Path(args.vault).resolve()), "index": info,
+                         **explore_json(out, memory_path, args.fresh, args.timing, explorer.engine.text)})
+            return 0
+        width = max(60, min(shutil.get_terminal_size((100, 24)).columns, 140))
+        print(_format_explore(out, explorer, args, info, _Style(_use_color(args.color)), width, memory_path, out["lenses"]))
+    return 0
+
+
+def _cmd_mark(args: argparse.Namespace) -> int:
+    from vaultengine.operations import OperationError, mark
+
+    verdict, refs = args.words[0], args.words[1:]
+    if verdict not in ("keep", "dismiss", "clear") or not refs:
+        print("error: vault mark keep|dismiss|clear REF... (REF: a result of the last `vault explore`, e.g. 2.3)",
+              file=sys.stderr)
+        return 2
+    memory = _memory(args, must_exist=True)
+    if memory is None:
+        return 2
+    with memory:
+        try:
+            data = mark(memory, verdict, refs)
+        except OperationError as exc:
+            return _operation_error(exc)
+    if args.json:
+        _print_json({"vault": str(Path(args.vault).resolve()), **data})
+        return 0
+    done = {"keep": "kept", "dismiss": "dismissed", "clear": "cleared"}[verdict]
+    for r in data["marked"]:
+        print(f"{r['ref']:>5}  {done if r['changed'] else 'not marked'}  {r['lens']} · {r['title']}")
+    for rate in data["keep_rates"]:
+        print(f"  {rate['lens']}: kept {rate['kept']} of {rate['kept'] + rate['dismissed']} marked")
+    return 0
+
+
+def _cmd_kept(args: argparse.Namespace) -> int:
+    from vaultengine.operations import kept
+
+    data = kept(args.settings.engine.memory_path, args.lens)
+    if args.json:
+        _print_json({"vault": str(Path(args.vault).resolve()), **data})
+        return 0
+    rows = data["kept"]
+    width = max(60, min(shutil.get_terminal_size((100, 24)).columns, 140))
+    out = [f"Kept in {Path(args.vault).resolve()}", f"  memory {data['memory']} · {_plural(len(rows), 'result')}"]
+    for r in rows:
+        start = r["start"] or "no starting point"
+        out += ["", f"  {_short(r['title'], width - 4)}", f"    {r['lens']} · {r['evidence']}",
+                f"    from {start} · kept {r['at']}"]
+    if not rows:
+        out.append("  nothing kept yet (`vault mark keep 2.3` after `vault explore`)")
+    print("\n".join(out))
+    return 0
+
+
+def _cmd_link_it(args: argparse.Namespace) -> int:
+    from vaultengine.operations import LinkIt, OperationError
+
+    if len(args.words) not in (1, 2):
+        print("error: vault link-it REF (a result of the last `vault explore`), or vault link-it NOTE NOTE", file=sys.stderr)
+        return 2
+    ref, pair = (args.words[0], (None, None)) if len(args.words) == 1 else (None, tuple(args.words))
+    try:
+        write = LinkIt(args.settings.engine.memory_path, args.settings.engine.explore.link_section, ref, *pair, args.reason)
+    except OperationError as exc:
+        return _operation_error(exc)
+    args.dry_run = not args.write
+    outcome_of = {}
+
+    def after(outcome):
+        outcome_of["outcome"] = outcome
+        write.after(outcome)
+
+    def extra():
+        outcome = outcome_of["outcome"]
+        lines = []
+        if args.dry_run:
+            lines.append("`--write` writes it, through the same gate; `vault unlink` undoes it.")
+        elif write.result is not None and outcome.status == "written":
+            lines.append(f"Kept result {write.result['ref']} ({write.result['lens']}): a link made counts as a keep.")
+        return lines, write.extra(outcome)
+
+    return _run_write_command(args, write.build, extra, after)
+
+
+def _cmd_unlink(args: argparse.Namespace) -> int:
+    from vaultengine.operations import Unlink
+
+    if len(args.words) != 2:
+        print("error: vault unlink NOTE NOTE", file=sys.stderr)
+        return 2
+    section = args.settings.engine.explore.link_section
+    write = Unlink(args.settings.engine.memory_path, section, *args.words)
+    args.dry_run = not args.write
+    outcome_of = {}
+
+    def after(outcome):
+        outcome_of["outcome"] = outcome
+        write.after(outcome)
+
+    def extra():
+        lines = []
+        if args.dry_run:
+            lines.append("`--write` removes it.")
+        if not write.record:
+            lines.append(f"(no link-it record for these two: only list lines linking the other note under {section} are"
+                         " removed, and the section stays)")
+        return lines, write.extra(outcome_of["outcome"])
+
+    return _run_write_command(args, write.build, extra, after)
+
+
+# ----- experiment --------------------------------------------------------------
+
+
+def _cmd_experiment(args: argparse.Namespace) -> int:
+    import datetime
+    import shlex
+    import time as clock
+
+    from vaultengine import experiment
+    from vaultengine.embedding import EmbeddingError
+    from vaultengine.formats import BUNDLED_FORMATS_DIR, load_format, resolve_format_path
+
+    if args.seeds < 2:
+        print("error: --seeds must be 2 or more: with one seed there is no seed-to-seed noise to compare with", file=sys.stderr)
+        return 2
+    if not 0 < args.hide <= 0.5:
+        print("error: --hide must be above 0 and at most 0.5 (0.1 to 0.2 is meant)", file=sys.stderr)
+        return 2
+    if args.queries < 1:
+        print("error: --queries must be 1 or more", file=sys.stderr)
+        return 2
+    opened = _open_for_reading(args)
+    if opened is None:
+        return 2
+    index, info = opened
+    rule = _tag_rule(args)
+    if rule is None:
+        return 2
+    name = getattr(args, "format", None) or args.settings.engine.format
+    spec = load_format(resolve_format_path(name, [Path("formats"), BUNDLED_FORMATS_DIR])) if name else None
+    try:
+        provider = args.settings.provider()
+    except EmbeddingError as exc:
+        print(f"note: no embedding model ({exc}): the options that need text are left out", file=sys.stderr)
+        provider = None
+    engine = args.settings.engine
+    seeds = [engine.explore.seed + i for i in range(args.seeds)]
+    started = clock.perf_counter()
+    with index:
+        out = experiment.run(
+            index.conn, args.vault, tag_rule=rule, spec=spec, provider=provider,
+            related_weights=engine.related.unlinked_weights.model_dump(), text_variant="whole",
+            resolution=engine.explore.resolution, without=args.without or [], seeds=seeds, hide=args.hide,
+            meaning=(engine.explore.meaning_neighbours, engine.explore.meaning_percentile) if engine.explore.meaning else None,
+            queries=args.queries, questions=tuple(args.question or ("relatedness", "text", "communities")),
+            progress=lambda line: print(f"  {line}", file=sys.stderr) if not args.quiet else None,
+        )
+    seconds = clock.perf_counter() - started
+    date = datetime.date.today().isoformat()
+    command = "vault " + " ".join(shlex.quote(a) for a in (args.argv or ["experiment"]))
+    report = experiment.markdown(out, str(Path(args.vault).resolve()), date, seconds, command)
+    if args.output:
+        Path(args.output).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.output).write_text(report, encoding="utf-8")
+    if args.json:
+        _print_json({"vault": str(Path(args.vault).resolve()), "seconds": seconds, "decisions": out["decisions"]})
+    else:
+        print(report, end="")
     return 0
 
 
 # ----- suggest -----------------------------------------------------------------
 
 
-def _format_links(pairs, style: _Style, width: int, explain: bool) -> list[str]:
+def _format_links(pairs, style: _Style, width: int, explain: bool, weights: dict | None = None,
+                  text_notes: list[str] | None = None) -> list[str]:
     from vaultengine.connect import WEIGHTS
 
-    out = [style.bold("  Links to add") + f"  (notes with no link between them; score = {WEIGHTS['shared']:g} × shared neighbours"
-           f" + {WEIGHTS['cited']:g} × cited together + {WEIGHTS['text']:g} × similar text)"]
+    weights = weights or WEIGHTS
+    names = {"shared": "shared neighbours", "cited": "cited together", "tags": "shared tags", "text": "similar text"}
+    formula = " + ".join(f"{weights[k]:.2g} × {names[k]}" for k in ("shared", "cited", "tags", "text") if weights[k])
+    out = [style.bold("  Links to add") + f"  (notes with no link between them; score = {formula})"]
+    out.extend(text_notes or [])
     if not pairs:
         out.extend(["", "    nothing to suggest"])
     for rank, pair in enumerate(pairs, 1):
@@ -945,14 +1789,15 @@ def _format_links(pairs, style: _Style, width: int, explain: bool) -> list[str]:
         out.append(" " * len(prefix) + pair.reason)
         if explain:
             out.append(" " * len(prefix) + style.dim(
-                f"shared {pair.shared:.2f} · cited {pair.cited:.2f} · text {pair.text:.2f} · {pair.a} ↔ {pair.b}"))
+                f"shared {pair.shared:.2f} · cited {pair.cited:.2f} · tags {pair.tags:.2f} · text {pair.text:.2f} · {pair.a} ↔ {pair.b}"))
     return out
 
 
-def _format_suggestions(result, header: str, style: _Style, links=None, width: int = 100, explain: bool = False) -> str:
+def _format_suggestions(result, header: str, style: _Style, links=None, width: int = 100, explain: bool = False,
+                        weights: dict | None = None, text_notes: list[str] | None = None) -> str:
     out = [header, ""]
     if links is not None:
-        out.extend(_format_links(links, style, width, explain))
+        out.extend(_format_links(links, style, width, explain, weights, text_notes))
         if result is None:
             return "\n".join(out)
         out.append("")
@@ -980,14 +1825,19 @@ def _format_suggestions(result, header: str, style: _Style, links=None, width: i
 def _cmd_suggest(args: argparse.Namespace) -> int:
     from vaultengine.connect import LinkSuggester
     from vaultengine.querylang import QueryError
+    from vaultengine.related import Relatedness
     from vaultengine.suggest import Suggester
 
     opened = _open_for_reading(args)
     if opened is None:
         return 2
     index, info = opened
+    rule = _tag_rule(args)
+    if rule is None:
+        return 2
     with index:
-        suggester = Suggester(index.conn)
+        suggester = Suggester(index.conn, Relatedness(index.conn, lambda: args.settings.provider(), args.vault, rule, _related_weights(args)))
+        text = suggester.engine.text
         if args.draft is None:
             links = None
             if not args.notes:
@@ -1002,39 +1852,46 @@ def _cmd_suggest(args: argparse.Namespace) -> int:
                         print(f'error: "{args.for_note}" is not a note yet; only notes can be linked', file=sys.stderr)
                         return 2
                     for_note = suggester.engine.graph.note_ids[seed.node]
-                links = LinkSuggester(index.conn, suggester.engine).suggestions(
-                    limit=args.limit or None, for_note=for_note, path=args.path
-                )
+                link_suggester = LinkSuggester(index.conn, suggester.engine)
+                links = link_suggester.suggestions(limit=args.limit or None, for_note=for_note, path=args.path)
             result = None if args.links or args.for_note else suggester.suggestions(limit=args.limit or None, min_links=args.min_links)
             if args.json:
                 data = {"vault": str(Path(args.vault).resolve()), "index": info}
                 if links is not None:
                     data["links"] = [pair.to_dict() for pair in links]
+                    data["text"] = _text_status(text)
+                    data["weights"] = link_suggester.weights
                 if result is not None:
                     data.update(result.to_dict())
                 _print_json(data)
             else:
                 width = max(60, min(shutil.get_terminal_size((100, 24)).columns, 140))
                 header = _header("Suggestions", args.vault, info)
-                print(_format_suggestions(result, header, _Style(_use_color(args.color)), links, width, args.explain))
+                extra = {}
+                if links is not None:
+                    extra = {"weights": link_suggester.weights,
+                             "text_notes": _text_notes(text.unavailable, len(text.uncached), args.vault)}
+                print(_format_suggestions(result, header, _Style(_use_color(args.color)), links, width, args.explain, **extra))
             return 0
         try:
-            path, text = suggester.draft(args.draft)
+            path, draft = suggester.draft(args.draft)
         except KeyError:
             print(f'error: no link points to a missing note called "{args.draft}"', file=sys.stderr)
             print("  run `vault suggest` to list them", file=sys.stderr)
             return 2
+        for line in _text_notes(text.unavailable, len(text.uncached), args.vault):  # the draft's "See Also" used it
+            print("note:" + line[1:], file=sys.stderr)
     if args.folder is not None:
         path = f"{args.folder.strip('/')}/{path.rsplit('/', 1)[-1]}" if args.folder.strip("/") else path.rsplit("/", 1)[-1]
     if not args.write:
         print(f"# would be written to {path} (add --write to create it)\n")
-        print(text, end="")
+        print(draft, end="")
         return 0
     target = Path(args.vault) / path
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
         with open(target, "x", encoding="utf-8") as handle:
-            handle.write(text)
+            handle.write(draft)
     except FileExistsError:
         print(f"error: {path} already exists; nothing written", file=sys.stderr)
         return 2
@@ -1107,6 +1964,149 @@ def _cmd_unlinked(args: argparse.Namespace) -> int:
     return 0
 
 
+# ----- embed -------------------------------------------------------------------
+
+
+def _provider(args: argparse.Namespace):
+    """The configured embedding provider, or None after printing what to fix."""
+    from vaultengine.embedding import EmbeddingError
+
+    try:
+        return args.settings.provider()
+    except EmbeddingError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        print("  the embedding model is set in config/config.yaml (engine.embedding); see `vault config show`", file=sys.stderr)
+        return None
+
+
+def _size(n: int) -> str:
+    return f"{n} B" if n < 1024 else f"{n / 1024:.1f} KiB" if n < 1024 * 1024 else f"{n / 1024 / 1024:.1f} MiB"
+
+
+def _cmd_embed_status(args: argparse.Namespace) -> int:
+    from vaultengine.embedding.store import status
+
+    opened = _open_for_reading(args)
+    if opened is None:
+        return 2
+    index, info = opened
+    engine = args.settings.engine
+    model_path = engine.embedding.model_path
+    with index:
+        data = status(index.conn, engine.model_id)
+    data["provider"] = engine.embedding.provider
+    data["model_path"] = str(model_path) if model_path else None
+    data["model_found"] = bool(model_path and Path(model_path).is_dir())
+    if args.json:
+        _print_json({"vault": str(Path(args.vault).resolve()), "index": info, **data})
+        return 0
+    found = "found" if data["model_found"] else "NOT FOUND"
+    out = [_header("Embeddings", args.vault, info), ""]
+    out.append(f"  model      {data['model_id']} · {data['provider']} · {data['model_path']} ({found})")
+    dims = f" ({data['dim']} dims)" if data["dim"] else ""
+    pending = info["pending"]
+    waiting = len(pending["added"]) + len(pending["changed"])
+    if data["missing"]:
+        state = f"{data['missing']} missing: run `vault embed {args.vault}`"
+    elif info["stale"]:
+        state = "every indexed note has one, but the index is out of date"
+    else:
+        state = "all up to date"
+    out.append(f"  vectors    {data['with_vector']} of {data['notes']} indexed notes{dims} · {state}")
+    if info["stale"]:
+        detail = pending["reason"] or f"{len(pending['added'])} added, {len(pending['changed'])} changed, {len(pending['deleted'])} deleted"
+        out.append(f"  pending    {detail} since the last index: `vault embed {args.vault}` indexes"
+                   + (f" and embeds {'it' if waiting == 1 else 'them'}" if waiting else " first"))
+    shown, more = _shown(data["missing_paths"] if data["with_vector"] else [], args.limit)  # all missing: no list
+    out.extend(f"    - {path}" for path in shown)
+    if more:
+        out.append(more)
+    if data["other_models"]:
+        others = " · ".join(f"{m['model_id']}: {m['vectors']} vectors ({m['dim']} dims)" for m in data["other_models"])
+        out.append(f"  other ids  {others}  (kept for switching back; `vault embed --prune` drops them)")
+    else:
+        out.append("  other ids  none")
+    out.append(f"  cache      {data['cache_vectors']} vectors, {_size(data['cache_bytes'])} in {args.db}")
+    print("\n".join(out))
+    return 0
+
+
+def _cmd_embed(args: argparse.Namespace) -> int:
+    from vaultengine.embedding.store import embed_notes
+
+    if args.status:
+        return _cmd_embed_status(args)
+    provider = _provider(args)  # before touching the index: a missing model changes nothing
+    if provider is None:
+        return 2
+    with VaultIndex(args.db) as index:
+        indexed = index.update(args.vault)
+        report = embed_notes(index.conn, args.vault, provider, full=args.full, prune=args.prune)
+    if args.json:
+        _print_json({"vault": str(Path(args.vault).resolve()), "index": indexed.to_dict(), **report.to_dict()})
+        return 0
+    out = [f"Embedded {Path(args.vault).resolve()} in {indexed.seconds + report.seconds:.2f}s",
+           f"  model      {provider.describe()} · {provider.source}"]
+    parsed = len(indexed.parsed)
+    if parsed or indexed.deleted:
+        out.append(f"  index      {parsed} parsed ({len(indexed.added)} added, {len(indexed.changed)} changed, "
+                   f"{len(indexed.deleted)} deleted)" + (f" · all re-parsed: {indexed.full_reason}" if indexed.full_reason else ""))
+    else:
+        out.append("  index      already up to date")
+    out.append(f"  vectors    {len(report.embedded)} embedded, {report.cached} cached ({report.notes} notes)"
+               + (" · --full: every note embedded again" if args.full else ""))
+    shown, more = _shown(report.embedded, args.limit)
+    out.extend(f"    + {path}" for path in shown)
+    if more:
+        out.append(more)
+    if report.empty:
+        out.append(f"  empty      {_plural(len(report.empty), 'note')} with no word the model knows (a zero vector:"
+                   " never similar to anything)")
+    if report.changed_since_index:
+        out.append(f"  changed    {_plural(len(report.changed_since_index), 'note')} changed while embedding; "
+                   "run `vault embed` again")
+    if report.unreadable:
+        out.append(f"  unreadable {', '.join(report.unreadable)}")
+    if args.prune:
+        out.append(f"  pruned     {_plural(report.pruned, 'vector')} of other model ids")
+    print("\n".join(out))
+    return 0
+
+
+# ----- config ------------------------------------------------------------------
+
+
+def _cmd_config_show(args: argparse.Namespace) -> int:
+    settings = args.settings
+    data = settings.to_dict()
+    if args.json:
+        _print_json(data)
+        return 0
+    found = {"--config": "from --config", "$VAULTENGINE_CONFIG": "from $VAULTENGINE_CONFIG",
+             "repository default": "the repository's; --config FILE or $VAULTENGINE_CONFIG for another"}
+    config = f"{settings.config_file}  ({found[settings.config_found_by]})" if settings.config_file else "none found"
+    out = ["Engine settings · precedence: flag > env > file > default", f"  config file  {config}", ""]
+    rows = data["settings"]
+    key_width = max(len(r["key"]) for r in rows)
+    value_width = max(len(r["value"] or "(not set)") for r in rows)
+    for row in rows:
+        if row["key"] == "explore":
+            out.append(f"  {'explore':<{key_width}}  (no settings yet: the explore engine's go here)")
+            continue
+        value = row["value"] or "(not set)"
+        source = row["source"]
+        if source.startswith("file "):
+            source = "file"
+        note = ""
+        if row["key"] in ("vault", "embedding.model_path") and row["value"] and not Path(row["value"]).is_dir():
+            note = "  ✗ not found"
+        out.append(f"  {row['key']:<{key_width}}  {value:<{value_width}}  {source}{note}")
+    out += ["", "  env: VAULTENGINE_<KEY>, \"__\" between levels (VAULTENGINE_EMBEDDING__MODEL_PATH)",
+            "  flags: the vault argument, --db, --format, and --setting KEY=VALUE for any key"]
+    print("\n".join(out))
+    return 0
+
+
 # ----- rpc ---------------------------------------------------------------------
 
 
@@ -1123,7 +2123,7 @@ def _cmd_serve(args: argparse.Namespace) -> int:
         except FormatError as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 2
-    return serve_stdio(VaultService(args.vault, args.db, format_path))
+    return serve_stdio(VaultService(args.vault, args.db, format_path, settings=args.settings))
 
 
 def _cmd_rpc_schema(args: argparse.Namespace) -> int:
@@ -1144,17 +2144,33 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="vault", description="Index and inspect an Obsidian vault.")
     commands = parser.add_subparsers(dest="command", required=True)
 
-    def add(name: str, help_text: str, handler, json_flag: bool = True, vault_required: bool = False) -> argparse.ArgumentParser:
-        sub = commands.add_parser(name, help=help_text, description=help_text)
-        if vault_required:  # writes name their vault; also lets options sit between positionals
+    def settings_args(sub: argparse.ArgumentParser) -> None:
+        sub.add_argument("--config", metavar="FILE", help="config file (default: $VAULTENGINE_CONFIG, else config/config.yaml)")
+        sub.add_argument("--setting", action="append", metavar="KEY=VALUE", default=[],
+                         help="any engine setting, e.g. embedding.model_id=x (repeatable; see `vault config show`)")
+
+    def add(name: str, help_text: str, handler, json_flag: bool = True, vault_required: bool = False,
+            parent=commands, words: str | None = None) -> argparse.ArgumentParser:
+        sub = parent.add_parser(name, help=help_text, description=help_text)
+        if words:  # `vault mark [VAULT] keep 2.3`: the vault, when given, is the first word (a folder)
+            sub.add_argument("words", nargs="+", metavar="ARG", help=words)
+            sub.set_defaults(vault=None, vault_in_words=True)
+        elif vault_required:  # writes name their vault; also lets options sit between positionals
             sub.add_argument("vault", help="vault folder")
         else:
-            sub.add_argument("vault", nargs="?", default=".", help="vault folder (default: current folder)")
-        sub.add_argument("--db", help="index file (default: VAULT/.vaultengine/index.sqlite)")
+            sub.add_argument("vault", nargs="?", default=None,
+                             help="vault folder (default: engine.vault in the config, else the current folder)")
+        sub.add_argument("--db", help="index file (default: engine.index in the config, else VAULT/.vaultengine/index.sqlite)")
+        settings_args(sub)
         if json_flag:
             sub.add_argument("--json", action="store_true", help="print JSON instead of text")
         sub.set_defaults(handler=handler, needs_vault=True)
         return sub
+
+    def format_arg(sub: argparse.ArgumentParser, required: bool = True, help_text: str | None = None) -> None:
+        sub.add_argument("--format", "-f", help=help_text or "format file, or a name in ./formats/ or the bundled formats/"
+                         " (default: engine.format in the config)")
+        sub.set_defaults(needs_format=required)
 
     index = add("index", "Create or incrementally update the index.", _cmd_index)
     index.add_argument("--full", action="store_true", help="re-parse every note and re-resolve every link")
@@ -1183,13 +2199,123 @@ def build_parser() -> argparse.ArgumentParser:
     related = add("related", "Notes related to a note: links, tags and text, each with a reason.", _cmd_related)
     related.description = (
         "Notes related to a note, including ones it does not link to yet: personalized PageRank over the "
-        "link graph (missing notes included), blended with text similarity and shared tags. Each result says why."
+        "link graph (missing notes included), blended with text similarity (embeddings from the model in "
+        "engine.embedding, see `vault embed`) and shared tags. Each result says why."
     )
     related.add_argument("note", help="note name, path or alias (as in a link), or the target of a link to a missing note")
     related.add_argument("--limit", type=int, default=10, help="number of results (0 = all)")
     related.add_argument("--unlinked", action="store_true", help="only notes with no link to or from the note")
     related.add_argument("--explain", action="store_true", help="show the three signals behind each score")
     related.add_argument("--color", choices=("auto", "always", "never"), default="auto", help="colour output (default: auto)")
+    format_arg(related, required=False, help_text="format whose tag fields say which links are tags (default: engine.format;"
+               " without one, fields named tags)")
+    explain = add("explain", "How two notes relate, signal by signal, with the evidence for each.", _cmd_explain)
+    explain.description = (
+        "How two notes relate: direct links, co-citation (notes that link to both), bibliographic coupling (what both "
+        "link to), shared tags and embedding similarity, each with its weight (engine.explore.weights), its contribution "
+        "to the score, and what it rests on. Without the embedding model the text signal is marked unavailable."
+    )
+    explain.add_argument("a", help="a note: name, path or alias")
+    explain.add_argument("b", help="another note")
+    explain.add_argument("--words", type=int, default=8, help="words listed behind the text score")
+    explain.add_argument("--limit", type=int, default=8, help="notes listed per signal (0 = all)")
+    explain.add_argument("--color", choices=("auto", "always", "never"), default="auto", help="colour output (default: auto)")
+    format_arg(explain, required=False, help_text="format whose tag fields say which links are tags (default: engine.format;"
+               " without one, fields named tags)")
+    vmap = add("map", "The shape of the vault from links and tags: communities, bridge notes, hubs and authorities.", _cmd_map)
+    vmap.description = (
+        "Communities (Louvain, seeded: the same every run) named by their key phrases and hub notes, the ones with no "
+        "topic page (notes the format types as topic or page), bridge notes (betweenness and Burt's constraint) and hubs vs "
+        "authorities (HITS). From links and tags only; cutoffs are percentiles of the vault (engine.explore.percentile)."
+    )
+    vmap.add_argument("--limit", type=int, default=10, help="items per list (0 = all)")
+    vmap.add_argument("--meaning", action=argparse.BooleanOptionalAction, default=None,
+                      help="also join notes that are each other's nearest neighbours by embedding, for the communities,"
+                           " and show what that changes (default: engine.explore.meaning)")
+    vmap.add_argument("--record", action="store_true", help="also save a small snapshot of the map in engine.memory"
+                      " (for --since later); without it the map writes nothing")
+    vmap.add_argument("--since", metavar="DATE", help="instead of the map: what changed since the snapshot of DATE"
+                      " (2026-11-10 or 2026-11-10T14:30): gaps closed, communities formed, missing notes written")
+    vmap.add_argument("--color", choices=("auto", "always", "never"), default="auto", help="colour output (default: auto)")
+    format_arg(vmap, required=False, help_text="format whose tag fields say which links are tags (default: engine.format)")
+    deepen = add("deepen", "Five lenses on one note: neighbourhood, cited together, same foundations, backbone, cluster.",
+                 _cmd_deepen)
+    deepen.add_argument("note", help="note name, path or alias")
+    deepen.add_argument("--lens", action="append", choices=LENSES, help="only this lens (repeatable; default: all five)")
+    deepen.add_argument("--limit", type=int, default=8, help="notes per lens (0 = all that stand out)")
+    deepen.add_argument("--color", choices=("auto", "always", "never"), default="auto", help="colour output (default: auto)")
+    format_arg(deepen, required=False, help_text="format whose tag fields say which links are tags (default: engine.format)")
+    disc = add("discover", "What the vault does not say yet: hidden links, same roles, bridges, gaps, surprises,"
+               " unwritten notes, a seeded wander.", _cmd_discover)
+    disc.description = (
+        "Discover lenses. With a note: hidden link (Swanson's A-B-C), same role elsewhere, bridge, wander, and the gaps, "
+        "surprises and unwritten notes around it; without one: gaps, surprises and unwritten notes in the whole vault. "
+        "Every result says why; every cutoff is a percentile of the vault (engine.explore.percentile); embeddings only "
+        "measure distance (gap, surprise) and merge names (unwritten), and those lenses also show what they find without "
+        "them. The same index, settings and seed give the same output."
+    )
+    disc.add_argument("note", nargs="?", help="note name, path or alias (default: lenses over the whole vault)")
+    disc.add_argument("--lens", action="append", choices=DISCOVER, help="only this lens (repeatable)")
+    disc.add_argument("--limit", type=int, default=3, help="results per lens (0 = all that stand out)")
+    disc.add_argument("--steps", type=int, default=8, help="wander: steps to take")
+    disc.add_argument("--seed", type=int, help="seed for wander and sampling (default: engine.explore.seed)")
+    disc.add_argument("--color", choices=("auto", "always", "never"), default="auto", help="colour output (default: auto)")
+    format_arg(disc, required=False, help_text="format: which links are tags, which notes are topic pages (default: engine.format)")
+    from vaultengine.explore import REGISTRY as EXPLORE_LENSES
+
+    expl = add("explore", "Explore from a note (or a missing note): the deepen and discover lenses, a section each;"
+               " without one, where to start.", _cmd_explore)
+    expl.description = (
+        "The deepen and discover lenses through one registry: a section per lens (engine.explore.lenses), 3 to 5 results "
+        "each (engine.explore.per_lens), every result with its lens and one line of evidence, near-duplicates left out, "
+        "deepen and discover given equal space. Without a note it proposes where to start from what the vault-wide lenses "
+        "find (engine.explore.start_lenses). Remembers what it showed (engine.memory): --fresh hides what you saw or "
+        "dismissed; your keep rate per lens orders the sections. Never writes a note."
+    )
+    expl.add_argument("note", nargs="?", help="note name, path or alias, or a missing note (default: where to start)")
+    expl.add_argument("--lens", action="append", choices=list(EXPLORE_LENSES), help="only this lens (repeatable)")
+    expl.add_argument("--per-lens", type=int, choices=(3, 4, 5), help="results per section (default: engine.explore.per_lens)")
+    expl.add_argument("--fresh", action="store_true", help="leave out what you saw or dismissed before, from this start")
+    expl.add_argument("--no-record", action="store_true", help="do not remember this run (not seen, no refs for mark/link-it)")
+    expl.add_argument("--timing", action="store_true", help="with --json: each lens's seconds (the only part that varies)")
+    expl.add_argument("--refresh", action="store_true", help="recompute the stored vault-wide numbers now (see stats.py)")
+    expl.add_argument("--color", choices=("auto", "always", "never"), default="auto", help="colour output (default: auto)")
+    format_arg(expl, required=False, help_text="format: which links are tags, which notes are topic pages (default: engine.format)")
+    mark = add("mark", "Keep or dismiss results of the last `vault explore` (remembered in engine.memory, never in notes).",
+               _cmd_mark, words="[VAULT] keep|dismiss|clear REF... (REF: 2.3 = section 2, result 3 of the last explore)")
+    kept = add("kept", "What you kept from `vault explore`, with its lens and evidence.", _cmd_kept)
+    kept.add_argument("--lens", choices=list(EXPLORE_LENSES), help="only this lens")
+    linkit = add("link-it", "Make an explore result a real link: [[other note]] and a reason under See Also, in both notes.",
+                 _cmd_link_it, words="[VAULT] REF (a result of the last explore), or [VAULT] NOTE NOTE")
+    linkit.description = (
+        "Write `- [[other]] — reason` under the section engine.explore.link_section (See Also) in both notes, through "
+        "the safe write path (refused if vault check would get worse). A dry run unless --write; `vault unlink` undoes it."
+    )
+    format_arg(linkit)
+    linkit.add_argument("--write", action="store_true", help="write it (default: a dry run that shows the diff)")
+    linkit.add_argument("--diff", action="store_true", help="with --write: also print the diff")
+    linkit.add_argument("--reason", help="the one-line reason (default: the result's lens and evidence)")
+    unlink = add("unlink", "Undo `vault link-it`: remove the See Also lines linking the two notes, in both.", _cmd_unlink,
+                 words="[VAULT] NOTE NOTE")
+    format_arg(unlink)
+    unlink.add_argument("--write", action="store_true", help="write it (default: a dry run that shows the diff)")
+    unlink.add_argument("--diff", action="store_true", help="with --write: also print the diff")
+    exp = add("experiment", "Compare relatedness, community and text options on the vault's own notes, seeded.",
+              _cmd_experiment)
+    exp.description = (
+        "Hide a seeded share of the links (and everything derived from them) and see which relatedness signals and "
+        "which embedded text recover them (recall at 5 and 10, MRR); find communities with and without meaning edges "
+        "and compare them with the Tags: topics and topic pages (NMI, ARI), stranded notes and stability; time each. "
+        "Writes a table per question with the winner, the margin, and whether it beats the seed-to-seed noise."
+    )
+    exp.add_argument("--seeds", type=int, default=5, help="seeds (hidden links, Louvain); from engine.explore.seed on")
+    exp.add_argument("--hide", type=float, default=0.15, help="share of the linked note pairs hidden per seed (0.1-0.2)")
+    exp.add_argument("--queries", type=int, default=200, help="hidden links scored per seed at most")
+    exp.add_argument("--without", action="append", metavar="PATH", help="also run without the notes under PATH (repeatable)")
+    exp.add_argument("--question", action="append", choices=("relatedness", "text", "communities"), help="only this question")
+    exp.add_argument("--output", metavar="FILE", help="also write the report here (e.g. docs/experiments/<date>.md)")
+    exp.add_argument("--quiet", action="store_true", help="no progress lines on stderr")
+    format_arg(exp, required=False, help_text="format: tag links, template headings, topic pages (default: engine.format)")
     suggest = add("suggest", "Links to add between notes, notes to write, and drafts of them.", _cmd_suggest)
     suggest.add_argument("--limit", type=int, default=10, help="items per list (0 = all)")
     only = suggest.add_mutually_exclusive_group()
@@ -1203,6 +2329,8 @@ def build_parser() -> argparse.ArgumentParser:
     suggest.add_argument("--write", action="store_true", help="with --draft: create the note (never overwrites)")
     suggest.add_argument("--folder", help="with --draft: folder for the note (default: where most linking notes are)")
     suggest.add_argument("--color", choices=("auto", "always", "never"), default="auto", help="colour output (default: auto)")
+    format_arg(suggest, required=False, help_text="format whose tag fields say which links are tags (default: engine.format;"
+               " without one, fields named tags)")
     unlinked = add("unlinked", "Plain-text mentions of notes (titles and aliases) that are not links yet.", _cmd_unlinked)
     unlinked.description = (
         "Plain-text mentions of a note's title or alias that are not links yet. Titles match as words, so "
@@ -1220,8 +2348,10 @@ def build_parser() -> argparse.ArgumentParser:
         description="Type every note with a format file and report where notes depart from it. "
         "Reads the vault files directly; no index is needed.",
     )
-    formats.add_argument("vault", nargs="?", default=".", help="vault folder (default: current folder)")
-    formats.add_argument("--format", "-f", required=True, help="format file, or a name in ./formats/ or the bundled formats/ (e.g. brain)")
+    formats.add_argument("vault", nargs="?", default=None,
+                         help="vault folder (default: engine.vault in the config, else the current folder)")
+    format_arg(formats)
+    settings_args(formats)
     formats.add_argument("--type", help="only this note type")
     formats.add_argument("--note", help="show one note as the format sees it (vault path or note name)")
     formats.add_argument("--limit", type=int, default=10, help="max issues and untyped notes listed (0 = all)")
@@ -1229,14 +2359,14 @@ def build_parser() -> argparse.ArgumentParser:
     formats.add_argument("--json", action="store_true", help="print JSON instead of text")
     formats.set_defaults(handler=_cmd_formats, needs_vault=True, uses_index=False)
     check = add("check", "Report every violation of a format file, per note, with line numbers (exit 1 if any).", _cmd_check)
-    check.add_argument("--format", "-f", required=True, help="format file, or a name in ./formats/ or the bundled formats/")
+    format_arg(check)
     check.add_argument(
         "--changed", action="store_true",
         help="only notes added or changed since the last `vault index`, plus violations they cause in other notes",
     )
     def writer(name: str, help_text: str, handler) -> argparse.ArgumentParser:
         sub = add(name, help_text, handler, vault_required=True)
-        sub.add_argument("--format", "-f", required=True, help="format file, or a name in ./formats/ or the bundled formats/")
+        format_arg(sub)
         sub.add_argument("--dry-run", "-n", action="store_true", help="check and show the diff; write nothing")
         sub.add_argument("--diff", action="store_true", help="also print the diff of what is written")
         return sub
@@ -1269,26 +2399,79 @@ def build_parser() -> argparse.ArgumentParser:
     ingest.add_argument("--folder", help="folder for the note (default: the type's match folder)")
     ingest.add_argument("--set", action="append", metavar="KEY=VALUE", help="a metadata value (repeatable)")
     cov = add("coverage", "Sources nothing links to, and notes that cite no source.", _cmd_coverage)
-    cov.add_argument("--format", "-f", required=True, help="format file, or a name in ./formats/ or the bundled formats/")
+    format_arg(cov)
     cov.add_argument("--limit", type=int, default=10, help="max notes listed per list (0 = all)")
     cov.set_defaults(uses_index=False)
     serve = add("serve", "Serve the JSON-RPC 2.0 API on stdin/stdout (one JSON message per line).", _cmd_serve, json_flag=False)
-    serve.add_argument("--format", "-f", help="format for vault.check/fix/coverage and the note.* writes (name or file)")
+    format_arg(serve, required=False, help_text="format for vault.check/fix/coverage and the note.* writes (name or file;"
+               " default: engine.format in the config)")
+    embed = add("embed", "Embed the notes that have no vector for the configured model, and cache the vectors in the index.",
+                _cmd_embed)
+    embed.description = (
+        "Bring the index up to date, then embed every note whose text has no cached vector for the configured "
+        "model (engine.embedding in config/config.yaml): new and edited notes, or all of them when the model id "
+        "changed. Vectors are cached in the index by the hash of the note's text and the model id."
+    )
+    embed.add_argument("--status", action="store_true", help="only report how many notes have a vector; change nothing")
+    embed.add_argument("--full", action="store_true", help="embed every note again, cached or not")
+    embed.add_argument("--prune", action="store_true", help="drop the cached vectors of other model ids")
+    embed.add_argument("--limit", type=int, default=10, help="max paths listed (0 = all)")
+    config = commands.add_parser("config", help="Show the engine settings and where each comes from.",
+                                 description="Engine settings: flag > env (VAULTENGINE_*) > config file (engine:) > default.")
+    config_commands = config.add_subparsers(dest="config_command", required=True)
+    show = add("show", "Print every engine setting with its value and where it came from (flag, env, file or default).",
+               _cmd_config_show, parent=config_commands)
+    format_arg(show, required=False)
+    show.set_defaults(uses_index=False, vault_may_be_missing=True)
     schema = commands.add_parser("rpc-schema", help="Print the JSON Schema of the JSON-RPC API.")
     schema.add_argument("--output", help="write to this file instead of stdout")
     schema.set_defaults(handler=_cmd_rpc_schema, needs_vault=False)
     return parser
 
 
+def _settings(args: argparse.Namespace):
+    """The engine settings for this command: its flags over env over the config file over defaults."""
+    from vaultengine.settings import SettingsError, load_settings
+
+    flags = [("vault", args.vault, "<vault>"), ("index", getattr(args, "db", None), "--db"),
+             ("format", getattr(args, "format", None), "--format")]
+    for item in getattr(args, "setting", None) or []:
+        key, sep, value = item.partition("=")
+        if not sep or not key.strip():
+            raise SettingsError(f"--setting {item!r}: expected KEY=VALUE, e.g. embedding.model_id=potion-base-8M")
+        flags.insert(0, (key.strip(), value, f"--setting {key.strip()}"))  # the dedicated flags win over --setting
+    return load_settings(flags, config_file=getattr(args, "config", None))
+
+
 def main(argv: Sequence[str] | None = None) -> int:
+    from vaultengine.settings import SettingsError
+
     args = build_parser().parse_args(argv)
+    args.argv = list(sys.argv[1:] if argv is None else argv)
     if not args.needs_vault:
         return args.handler(args)
-    if not Path(args.vault).is_dir():
+    if getattr(args, "command", None) in ("discover", "explore") and args.note is None and args.vault and not Path(args.vault).is_dir():
+        args.note, args.vault = args.vault, None  # `vault discover NOTE` with the vault from the settings
+    if getattr(args, "vault_in_words", False) and len(args.words) > 1 and Path(args.words[0]).is_dir():
+        args.vault, args.words = args.words[0], args.words[1:]
+    try:
+        args.settings = _settings(args)
+    except SettingsError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    engine = args.settings.engine
+    args.vault = str(engine.vault)
+    if hasattr(args, "needs_format"):
+        args.format = engine.format
+        if args.needs_format and not args.format:
+            print("error: no format: give --format NAME (e.g. --format brain), or set engine.format in "
+                  "config/config.yaml or VAULTENGINE_FORMAT", file=sys.stderr)
+            return 2
+    if not Path(args.vault).is_dir() and not getattr(args, "vault_may_be_missing", False):
         print(f"error: vault folder not found: {args.vault}", file=sys.stderr)
         return 2
     if getattr(args, "uses_index", True):
-        args.db = Path(args.db) if args.db else default_db_path(args.vault)
+        args.db = engine.index_path
     return args.handler(args)
 
 

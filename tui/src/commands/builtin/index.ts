@@ -1,6 +1,7 @@
 import type {Command} from '../registry.js';
 import {check} from './check.js';
 import {coverage} from './coverage.js';
+import {config, explore, kept, map} from './explore.js';
 import {fix} from './fix.js';
 import {related, suggest, unlinked} from './connect.js';
 import {health} from './health.js';
@@ -13,4 +14,23 @@ import {search} from './search.js';
 import {stats} from './stats.js';
 
 /** Register new commands by adding them here (or calling registry.register elsewhere). */
-export const builtinCommands: Command[] = [help, stats, health, note, search, related, suggest, unlinked, check, fix, newNote, link, ingest, coverage];
+export const builtinCommands: Command[] = [
+	help,
+	stats,
+	health,
+	note,
+	search,
+	related,
+	suggest,
+	unlinked,
+	explore,
+	kept,
+	map,
+	config,
+	check,
+	fix,
+	newNote,
+	link,
+	ingest,
+	coverage,
+];

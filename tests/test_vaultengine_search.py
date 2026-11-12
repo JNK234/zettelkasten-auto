@@ -472,6 +472,15 @@ class SampleVaultReferenceTests(unittest.TestCase):
             cls._tmp = tempfile.TemporaryDirectory()
             cls._shared = VaultIndex(Path(cls._tmp.name) / "index.sqlite")
             cls._shared.update(FIXTURES / "vault")
+            # Cache the vectors once, as `vault embed` would: readers would otherwise embed every note in memory
+            # for each test that asks for related notes or link suggestions.
+            from embedding_model import HAVE_MODEL, MODEL_DIR
+
+            if HAVE_MODEL:
+                from vaultengine.embedding import load_provider
+                from vaultengine.embedding.store import embed_notes
+
+                embed_notes(cls._shared.conn, FIXTURES / "vault", load_provider("model2vec", MODEL_DIR))
         return cls._shared
 
     @classmethod

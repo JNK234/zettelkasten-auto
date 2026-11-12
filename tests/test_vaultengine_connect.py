@@ -12,6 +12,7 @@ from vaultengine.cli import main as cli_main
 from vaultengine.connect import WEIGHTS, LinkSuggester, MentionFinder
 from vaultengine.index import VaultIndex, default_db_path
 
+from embedding_model import requires_model
 from test_vaultengine_search import FIXTURES, TempVault
 
 TARGET = "Notes/reward-hacking.md"
@@ -125,6 +126,7 @@ PAIR_NOTES = {
 }
 
 
+@requires_model
 class LinkSuggestionTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -168,11 +170,23 @@ class LinkSuggestionTests(unittest.TestCase):
         self.assertEqual(pair.reason, "cited together by C")
 
     def test_similar_text(self):
+        # F and G say the same thing in other word order, and have no link evidence at all.
         pair = self.pairs[("F.md", "G.md")]
         self.assertEqual((pair.shared, pair.cited), (0.0, 0.0))
-        self.assertGreater(pair.text, 0.9)
-        self.assertTrue(pair.reason.startswith("similar text ("))
+        self.assertGreater(pair.text, 0.8)  # centered cosine of their embeddings
+        self.assertTrue(pair.reason.startswith("similar text ("), pair.reason)
         self.assertAlmostEqual(pair.score, WEIGHTS["text"] * pair.text, delta=1e-12)
+        both = set(PAIR_NOTES["F.md"].lower().rstrip(".").split()) & set(PAIR_NOTES["G.md"].lower().rstrip(".").split())
+        self.assertTrue(pair.terms and set(pair.terms) <= both, pair.terms)
+        # G is F's closest note by text.
+        text = self.suggester.text_similarity()
+        f = next(i for i, p in self.suggester.paths.items() if p == "F.md")
+        closest = max((c, self.suggester.paths[b if a == f else a]) for (a, b), c in text.items() if f in (a, b))
+        self.assertEqual(closest[1], "G.md")
+
+    def test_near_empty_notes_are_not_similar_text(self):
+        # "d" and "e": a positive cosine, but no word in common to name, so no "similar text" reason.
+        self.assertNotIn("similar text", self.pairs[("D.md", "E.md")].reason)
 
     def test_path_filter(self):
         pairs = self.suggester.suggestions(limit=None, path="one/")
@@ -186,6 +200,7 @@ class LinkSuggestionTests(unittest.TestCase):
         self.assertTrue(pairs and all("D.md" in (s.a, s.b) for s in pairs))
 
 
+@requires_model
 class SampleVaultRules(unittest.TestCase):
     """The rules on the whole sample vault, checked against the raw links table and the raw files."""
 

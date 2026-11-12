@@ -48,9 +48,17 @@ class InvalidQuery(ServiceError):
     """A search query that does not parse; data says where (start/end offsets in the query) and how to fix it."""
 
 
+class NotAvailable(ServiceError):
+    """Nothing to act on: no explore run yet, a ref that is not in it, a result that is not two notes to link, no map
+    snapshot, a lens that does not run from this start. The message says what there is instead."""
+
+
 class VaultService:
-    def __init__(self, vault_root: str | Path, db_path: str | Path | None = None, format_path: str | Path | None = None) -> None:
+    def __init__(self, vault_root: str | Path, db_path: str | Path | None = None, format_path: str | Path | None = None,
+                 settings: Any = None) -> None:
+        """``settings``: engine settings (``vaultengine.settings``) for the embedding model; default: the configured ones."""
         self.root = Path(vault_root).resolve()
+        self._settings = settings
         self.db_path = Path(db_path).resolve() if db_path else default_db_path(self.root)
         self.format_path = Path(format_path).resolve() if format_path else None
         self._format: tuple[int, Any] | None = None  # (mtime_ns, FormatSpec): reloaded when the file changes
@@ -58,7 +66,7 @@ class VaultService:
         self._index: VaultIndex | None = None
         # Prepared pick candidates, keyed by the index generation they were built from.
         self._pick_cache: tuple[str | None, list[tuple[str, str, Prepared]]] | None = None
-        # Link graph, term profiles and tag weights for related/suggest, keyed by the index generation.
+        # Link graph, tag weights and note vectors for related/suggest, keyed by the index generation.
         self._relatedness: tuple[str | None, Any] | None = None
 
     def close(self) -> None:
@@ -233,7 +241,8 @@ class VaultService:
         report["limit"] = limit
         return report
 
-    def _write(self, build, dry_run: bool) -> dict[str, Any]:
+    def _write(self, build, dry_run: bool, after=None) -> dict[str, Any]:
+        """``after(outcome)``: called once the write is done (or planned); what it returns is added to the result."""
         from vaultengine.formats.write import NoteMissing, WriteError, WriteFailed, outcome_to_dict, run_write
 
         spec = self._spec()
@@ -245,7 +254,8 @@ class VaultService:
             raise WriteRejected(str(exc)) from None
         except WriteFailed as exc:
             raise WriteFailedError(str(exc)) from None
-        return outcome_to_dict(outcome, dry_run)
+        extra = after(outcome) if after is not None else None
+        return {**outcome_to_dict(outcome, dry_run), **(extra or {})}
 
     def new(self, type: str, title: str, *, folder: str | None = None, name: str | None = None,
             values: dict[str, str] | None = None, relations: list[tuple[str, str]] | None = None,
@@ -320,20 +330,45 @@ class VaultService:
 
     # ----- search, related notes, suggestions, unlinked mentions ----------
 
-    def _engine(self):
+    def _provider(self):
+        """The embedding provider, loaded once for the life of the service.
+
+        Raises EmbeddingError or SettingsError; ``TextSimilarity`` turns that into "text unavailable"."""
+        from vaultengine.settings import load_settings
+
+        if self._settings is None:
+            self._settings = load_settings()
+        return self._settings.provider()
+
+    @staticmethod
+    def _text_status(text) -> dict[str, Any]:
+        on = text.available()
+        return {"available": on, "model_id": text.vectors.model_id if on else None, "unavailable": text.unavailable,
+                "uncached": len(text.uncached)}
+
+    def _engine(self, text: bool = True):
+        """Relatedness for the current index generation (vectors are computed in memory, never written)."""
         from vaultengine.related import Relatedness
 
         index = self._built_index()
         stamp = index.meta().get("generation")
         if self._relatedness is None or self._relatedness[0] != stamp:
-            self._relatedness = (stamp, Relatedness(index.conn))
+            from vaultengine.formats import FormatError
+            from vaultengine.tagrule import default_rule, rule_for_format
+
+            try:  # which links are tags: the format's tag fields, else fields named tags
+                rule = rule_for_format(self.format_path) if self.format_path else default_rule()
+            except FormatError as exc:
+                raise FormatNotConfigured(f"Invalid format file: {exc}", format=str(self.format_path)) from None
+            weights = self._settings.engine.related.weights.model_dump() if self._settings is not None else None
+            self._relatedness = (stamp, Relatedness(index.conn, self._provider, self.root, rule, weights))
         return self._relatedness[1]
 
     def _note_id(self, ref: str, missing_ok: bool = False) -> tuple[int | None, Any]:
         """(file id, seed) for a note reference; a missing link target gives (None, seed) when missing_ok."""
         from vaultengine.querylang import QueryError
 
-        engine = self._engine()
+        engine = self._engine(text=False)  # resolving a name needs no embeddings
         try:
             seed = engine.seed(ref)
         except QueryError as exc:
@@ -437,30 +472,38 @@ class VaultService:
 
     def related(self, note: str, limit: int = 10, unlinked: bool = False) -> dict[str, Any]:
         _, seed = self._note_id(note, missing_ok=True)
-        result = self._engine().related(seed, limit=limit, unlinked_only=unlinked)
+        from vaultengine.related import UNLINKED_WEIGHTS
+
+        unlinked_weights = (self._settings.engine.related.unlinked_weights.model_dump() if self._settings is not None
+                            else UNLINKED_WEIGHTS)
+        result = self._engine().related(seed, limit=limit, unlinked_only=unlinked,
+                                        weights=unlinked_weights if unlinked else None)
         return {
             "seed": {"label": seed.label, "path": seed.path, "linkers": seed.linkers},
             "compared": result.compared,
             "hits": [
                 {"path": h.path, "title": h.title, "score": h.score, "graph": h.graph, "text": h.text, "tags": h.tags,
-                 "linked": h.linked, "hops": h.hops, "reason": h.reason}
+                 "cocitation": h.cocitation, "coupling": h.coupling, "linked": h.linked, "hops": h.hops, "reason": h.reason}
                 for h in result.hits
             ],
+            "text_signal": self._text_status(self._engine().text),
+            "weights": result.weights,
         }
 
     def suggest_links(self, limit: int = 10, note: str | None = None, path: str | None = None) -> dict[str, Any]:
         from vaultengine.connect import LinkSuggester
 
         for_note = self._note_id(note)[0] if note else None
-        pairs = LinkSuggester(self._built_index().conn, self._engine()).suggestions(limit=limit, for_note=for_note, path=path)
-        keys = ("a", "b", "score", "shared", "cited", "text", "shared_with", "cited_by", "terms", "reason")
-        return {"note": note, "path": path, "links": [{key: getattr(p, key) for key in keys} for p in pairs]}
+        suggester = LinkSuggester(self._built_index().conn, self._engine())
+        pairs = suggester.suggestions(limit=limit, for_note=for_note, path=path)
+        keys = ("a", "b", "score", "shared", "cited", "tags", "text", "shared_with", "cited_by", "shared_tags", "terms", "reason")
+        return {"note": note, "path": path, "links": [{key: getattr(p, key) for key in keys} for p in pairs],
+                "text_signal": self._text_status(self._engine().text), "weights": suggester.weights}
 
     def suggest_notes(self, limit: int = 10, min_links: int = 2) -> dict[str, Any]:
         from vaultengine.suggest import Suggester
 
-        suggester = Suggester(self._built_index().conn)
-        suggester.engine = self._engine()
+        suggester = Suggester(self._built_index().conn, self._engine(text=False))  # missing notes need no embeddings
         result = suggester.suggestions(limit=limit, min_links=min_links)
         return {
             "total_missing": result.total_missing,
@@ -505,3 +548,128 @@ class VaultService:
                 for t in (order if limit is None else order[:limit])
             ],
         }
+
+    # ----- explore: explore.*, map.*, note.deepen, vault.discover, notes.explain, embed.status, config.show -------
+
+    def _engine_settings(self):
+        from vaultengine.settings import load_settings
+
+        if self._settings is None:
+            self._settings = load_settings()
+        return self._settings
+
+    def memory_path(self) -> Path:
+        """The explore memory: engine.memory, else <vault>/.vaultengine/memory.sqlite (this server's vault)."""
+        memory = self._engine_settings().engine.memory
+        return Path(memory) if memory is not None else self.root / ".vaultengine" / "memory.sqlite"
+
+    def _workbench(self):
+        from vaultengine.formats import FormatError
+        from vaultengine.operations import Workbench
+
+        settings = self._engine_settings()
+        try:
+            return Workbench(self._built_index().conn, self.root, settings,
+                             self.format_path or settings.engine.format, self.memory_path())
+        except FormatError as exc:
+            raise FormatNotConfigured(f"Invalid format file: {exc}", format=str(self.format_path)) from None
+
+    @staticmethod
+    def _operation(run):
+        from vaultengine.operations import OperationError
+
+        try:
+            return run()
+        except OperationError as exc:
+            data = {**exc.data, **({"hint": exc.hint} if exc.hint else {})}
+            if exc.kind == "not_found":
+                raise NoteNotFound(exc.message, **data) from None
+            raise NotAvailable(exc.message, **data) from None
+
+    def explore(self, note: str | None = None, lenses: list[str] | None = None, per_lens: int | None = None,
+                fresh: bool = False, record: bool = True, refresh: bool = False) -> dict[str, Any]:
+        from contextlib import nullcontext
+
+        from vaultengine.memory import Memory
+        from vaultengine.operations import explore_json
+
+        path = self.memory_path()
+        memory = Memory(path) if record or path.is_file() else None
+        with memory or nullcontext():
+            out, explorer = self._operation(lambda: self._workbench().explore(note, lenses, memory, fresh, per_lens, refresh, record))
+            return explore_json(out, path, fresh, text=explorer.engine.text)
+
+    def explore_mark(self, verdict: str, refs: list[str]) -> dict[str, Any]:
+        from vaultengine.memory import Memory
+        from vaultengine.operations import mark
+
+        path = self.memory_path()
+        if not path.is_file():
+            raise NotAvailable(f"nothing remembered yet ({path} does not exist)", hint="call explore.run first")
+        with Memory(path) as memory:
+            return self._operation(lambda: mark(memory, verdict, refs))
+
+    def explore_kept(self, lens: str | None = None) -> dict[str, Any]:
+        from vaultengine.operations import kept
+
+        return kept(self.memory_path(), lens)
+
+    def explore_link(self, ref: str | None = None, a: str | None = None, b: str | None = None, reason: str | None = None,
+                     dry_run: bool = True) -> dict[str, Any]:
+        from vaultengine.operations import LinkIt
+
+        write = self._operation(lambda: LinkIt(self.memory_path(), self._engine_settings().engine.explore.link_section,
+                                               ref, a, b, reason))
+
+        def after(outcome):
+            write.after(outcome)
+            return write.extra(outcome)
+
+        return self._write(write.build, dry_run, after)
+
+    def explore_unlink(self, a: str, b: str, dry_run: bool = True) -> dict[str, Any]:
+        from vaultengine.operations import Unlink
+
+        write = Unlink(self.memory_path(), self._engine_settings().engine.explore.link_section, a, b)
+
+        def after(outcome):
+            write.after(outcome)
+            return write.extra(outcome)
+
+        return self._write(write.build, dry_run, after)
+
+    def map(self, limit: int = 10, meaning: bool | None = None, record: bool = False) -> dict[str, Any]:
+        data, _, _ = self._workbench().map(limit, meaning, record)
+        return data
+
+    def map_since(self, since: str) -> dict[str, Any]:
+        return self._operation(lambda: self._workbench().map_since(since))
+
+    def deepen(self, note: str, lenses: list[str] | None = None, limit: int = 8) -> dict[str, Any]:
+        data = self._operation(lambda: self._workbench().deepen(note, lenses, limit))
+        data.pop("topic_pages_known", None)
+        return data
+
+    def discover(self, note: str | None = None, lenses: list[str] | None = None, limit: int = 3, steps: int = 8,
+                 seed: int | None = None) -> dict[str, Any]:
+        from vaultengine.operations import text_signal
+
+        data, engine = self._operation(lambda: self._workbench().discover(note, lenses, limit, steps, seed))
+        return {**data, "text_signal": text_signal(engine.text)}
+
+    def explain(self, a: str, b: str, words: int = 8) -> dict[str, Any]:
+        data, _ = self._operation(lambda: self._workbench().explain(a, b, words))
+        return data
+
+    def embed_status(self) -> dict[str, Any]:
+        from vaultengine.embedding.store import status
+
+        engine = self._engine_settings().engine
+        model_path = engine.embedding.model_path
+        data = status(self._built_index().conn, engine.model_id)
+        data.update(provider=engine.embedding.provider, model_path=str(model_path) if model_path else None,
+                    model_found=bool(model_path and Path(model_path).is_dir()))
+        return data
+
+    def config_show(self) -> dict[str, Any]:
+        return self._engine_settings().to_dict()

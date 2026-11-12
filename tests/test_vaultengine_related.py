@@ -5,6 +5,7 @@ from datetime import datetime
 import json
 import os
 import random
+import struct
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from fractions import Fraction
@@ -14,8 +15,9 @@ from vaultengine.cli import main as cli_main
 from vaultengine.graphrank import ALPHA, build_graph, component, hop_paths, personalized_pagerank
 from vaultengine.index import VaultIndex, default_db_path
 from vaultengine.querylang import QueryError
-from vaultengine.related import WEIGHTS, Relatedness
+from vaultengine.related import TEXT_REASON, WEIGHTS, Relatedness
 
+from embedding_model import requires_model
 from test_vaultengine_search import TempVault
 
 EXACT_ALPHA = Fraction(3, 20)
@@ -164,6 +166,7 @@ class VaultGraphTests(unittest.TestCase):
 #
 # Seed links [[Linked]] twice and the missing [[topic-x]]; Linked links [[Two hops]];
 # Same topic also links [[topic-x]]. Similar text shares the seed's words but no links.
+# The text signal comes from the embedding model in models/ (see embedding_model.py).
 # #baby is on 6 of 10 notes (too common to count); #rl is on 3. "Related zettels" is a
 # heading in 3 notes (a template).
 
@@ -181,6 +184,7 @@ RELATED_NOTES = {
 }
 
 
+@requires_model
 class RelatedVaultCase(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -206,12 +210,18 @@ class RelatedTests(RelatedVaultCase):
         self.assertEqual(hits["Linked"].reason.split(" · ")[0], "linked from it")
         self.assertTrue(hits["Linked"].linked)
         self.assertEqual(hits["Two hops"].reason, "2 hops via Linked · shares #rl")
-        self.assertEqual(hits["Same topic"].reason, "2 hops via topic-x (no note yet)")
-        self.assertFalse(hits["Similar text"].linked)
-        self.assertTrue(hits["Similar text"].reason.startswith("similar text ("), hits["Similar text"].reason)
-        self.assertEqual(hits["Similar text"].text, 1.0)  # the closest text of all
+        # Both link [[topic-x]], so "topic" is in both texts: the reason may add "similar text (topic)".
+        self.assertTrue(hits["Same topic"].reason.startswith("2 hops via topic-x (no note yet)"), hits["Same topic"].reason)
+        similar = hits["Similar text"]
+        self.assertFalse(similar.linked)
+        self.assertTrue(similar.reason.startswith("similar text ("), similar.reason)
+        self.assertGreaterEqual(similar.text, TEXT_REASON)
+        # Closer in text than every note that shares none of the seed's words (bananas, apples, trust regions).
+        for other in ("Two hops", "Tagged", "Far", "Other", "Filler 1", "Filler 2"):
+            self.assertGreater(similar.text, hits[other].text if other in hits else 0.0, other)
         words = lambda text: set(text.lower().replace(".", " ").split())
-        for term in hits["Similar text"].shared_terms:  # the terms named are in both notes
+        self.assertTrue(similar.shared_terms)
+        for term in similar.shared_terms:  # the words named are in both notes
             self.assertIn(term, words(RELATED_NOTES["Seed.md"]) & words(RELATED_NOTES["Similar text.md"]))
         self.assertEqual(hits["Tagged"].reason, "shares #rl")
         self.assertEqual(self.hits("Linked")["Seed"].reason.split(" · ")[0], "links to it")
@@ -219,8 +229,9 @@ class RelatedTests(RelatedVaultCase):
     def test_blend_and_scaling(self):
         hits = self.hits("Seed").values()
         for hit in hits:
-            self.assertAlmostEqual(hit.score, WEIGHTS["graph"] * hit.graph + WEIGHTS["text"] * hit.text + WEIGHTS["tags"] * hit.tags, delta=1e-12)
-            self.assertTrue(all(0 <= v <= 1 for v in (hit.graph, hit.text, hit.tags)))
+            expected = sum(WEIGHTS[name] * getattr(hit, name) for name in ("graph", "cocitation", "coupling", "tags", "text"))
+            self.assertAlmostEqual(hit.score, expected, delta=1e-12)
+            self.assertTrue(all(0 <= v <= 1 for v in (hit.graph, hit.cocitation, hit.coupling, hit.text, hit.tags)))
         for signal in ("graph", "text", "tags"):
             self.assertEqual(max(getattr(h, signal) for h in hits), 1.0)
         self.assertEqual(max(hits, key=lambda h: h.graph).title, "Linked")
@@ -235,15 +246,28 @@ class RelatedTests(RelatedVaultCase):
         for title, hit in self.hits("Seed").items():
             self.assertAlmostEqual(hit.graph, raw.get(f"{title}.md", 0) / top, delta=1e-12)
 
-    def test_common_tags_and_template_headings_do_not_count(self):
+    def test_common_tags_do_not_count_and_tags_are_not_text(self):
+        from vaultengine.embedding.store import note_text
+
         seed = self.engine.seed("Seed")
         self.assertEqual(seed.tags, {"rl"})  # #baby is on 6 of 10 notes
-        self.assertNotIn("zettels", seed.terms)
-        self.assertNotIn("related", seed.terms)
-        self.assertNotIn("baby", seed.terms)
-        self.assertNotIn("status", seed.terms)  # a property key, not text
-        self.assertIn("kl", seed.terms)
         self.assertEqual(self.hits("Seed")["Far"].tags if "Far" in self.hits("Seed") else 0, 0)
+        # What the seed is embedded as: tags have their own signal, property keys are structure.
+        text = note_text(self.vault.root, "Seed.md").split()
+        self.assertEqual(text[:4], ["Seed", "Seed", "Related", "zettels"])  # title, then the headings
+        self.assertIn("penalty", text)
+        for absent in ("Status:", "Status", "#baby", "#rl", "baby"):
+            self.assertNotIn(absent, text)
+
+    def test_key_terms_leave_out_template_headings_tags_and_keys(self):
+        # The keywords `suggest` shows ("about", a draft's "Key terms"); they no longer score any similarity.
+        from vaultengine.suggest import KeyTerms
+
+        seed_file = self.engine.graph.note_ids[self.engine.seed("Seed").node]
+        terms = KeyTerms(self.ix.conn, self.engine.n_notes).of(seed_file)
+        for absent in ("zettels", "related", "baby", "status"):  # template heading (3 notes), tag, property key
+            self.assertNotIn(absent, terms)
+        self.assertIn("kl", terms)
 
     def test_unlinked_only(self):
         hits = self.hits("Seed", unlinked_only=True)
@@ -271,6 +295,61 @@ class RelatedTests(RelatedVaultCase):
             vault.cleanup()
 
 
+class RelatedWithoutModelTests(RelatedVaultCase):
+    """A missing or broken model switches off the text signal only: links and tags still rank."""
+
+    def test_graph_and_tags_still_rank_and_the_weights_are_rescaled(self):
+        from vaultengine.embedding import EmbeddingError
+
+        def broken():
+            raise EmbeddingError("/m/model.safetensors: not a safetensors file (header length 9 for a 64-byte file)")
+
+        engine = Relatedness(self.ix.conn, broken, self.vault.root)
+        result = engine.related(engine.seed("Seed"), limit=None)
+        self.assertEqual(result.text_unavailable, "/m/model.safetensors: not a safetensors file (header length 9 for a 64-byte file)")
+        links = ("graph", "cocitation", "coupling", "tags")
+        rest = sum(WEIGHTS[k] for k in links)  # the weights without text, rescaled to sum to 1
+        self.assertEqual(sorted(result.weights), sorted(WEIGHTS))
+        self.assertEqual(result.weights["text"], 0.0)
+        for k in links:
+            self.assertAlmostEqual(result.weights[k], WEIGHTS[k] / rest, delta=1e-12)
+        self.assertIsNone(result.model_id)
+        with_model = {h.title: h for h in self.engine.related(self.engine.seed("Seed"), limit=None).hits}
+        without_text = lambda h: sum(WEIGHTS[k] * getattr(h, k) for k in links) / rest
+        for hit in result.hits:
+            self.assertEqual((hit.text, hit.cosine), (0.0, 0.0))
+            self.assertNotIn("similar text", hit.reason)
+            self.assertAlmostEqual(hit.score, without_text(hit), delta=1e-12)
+            self.assertEqual([getattr(hit, k) for k in links], [getattr(with_model[hit.title], k) for k in links])
+        # The order is the one the link signals and tags alone give; "Similar text" was related by text only.
+        expected = sorted((h for h in with_model.values() if without_text(h)), key=lambda h: (-without_text(h), h.path))
+        self.assertEqual([h.title for h in result.hits], [h.title for h in expected])
+        self.assertNotIn("Similar text", [h.title for h in result.hits])
+
+    def test_a_broken_model_folder(self):
+        import tempfile
+        from pathlib import Path
+
+        from test_vaultengine_embedding import make_model
+
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp) / "broken"
+            make_model(folder)
+            (folder / "model.safetensors").write_bytes(struct.pack("<Q", 9) + b"not json!" + b"\x00" * 47)
+            out, err = io.StringIO(), io.StringIO()
+            env = {k: v for k, v in os.environ.items() if not k.startswith("VAULTENGINE_")}
+            with patch.dict(os.environ, {**env, "VAULTENGINE_EMBEDDING__MODEL_PATH": str(folder), "COLUMNS": "80"}, clear=True), \
+                    redirect_stdout(out), redirect_stderr(err):
+                code = cli_main(["related", str(self.vault.root), "Seed", "--color", "never"])
+        self.assertEqual((code, err.getvalue()), (0, ""))
+        lines = out.getvalue().splitlines()
+        self.assertIn("  score = 0.71 × graph + 0.29 × tags · 9 notes compared", lines)
+        self.assertIn(f"  text signal unavailable: {folder}/model.safetensors: unreadable safetensors header"
+                      " (Expecting value: line 1 column 1 (char 0))", lines)
+        self.assertIn("   2. Linked                                                    0.71      linked", lines)
+        self.assertIn("      linked from it", lines)
+
+
 class RelatedCliTests(RelatedVaultCase):
     def run_cli(self, *args):
         out, err = io.StringIO(), io.StringIO()
@@ -282,11 +361,11 @@ class RelatedCliTests(RelatedVaultCase):
         code, out, err = self.run_cli("Seed", "--color", "never")
         self.assertEqual((code, err), (0, ""))
         lines = out.splitlines()
-        self.assertIn("  score = 0.5 × graph + 0.3 × text + 0.2 × tags · 9 notes compared", lines)
+        self.assertIn("  score = 0.5 × graph + 0.3 × text + 0.2 × tags · 9 notes compared · text: potion-base-8M embeddings", lines)
         linked = next(i for i, line in enumerate(lines) if line.startswith("   1. Linked"))
         self.assertTrue(lines[linked].endswith("linked"))
         self.assertEqual(lines[linked + 1].split(" · ")[0], "      linked from it")
-        self.assertIn("      2 hops via topic-x (no note yet)", lines)
+        self.assertTrue(any(line.startswith("      2 hops via topic-x (no note yet)") for line in lines))
         self.assertTrue(any(line.startswith("   ") and "Similar text" in line and line.endswith("not linked") for line in lines))
 
     def test_options_and_errors(self):
@@ -295,6 +374,7 @@ class RelatedCliTests(RelatedVaultCase):
         self.assertTrue(all(line.endswith("not linked") for line in out.splitlines() if line[4:6] == ". "))
         _, out, _ = self.run_cli("Seed", "--explain", "--color", "never", "--limit", "1")
         self.assertIn("      graph 1.00 · text ", out)
+        self.assertIn(" (cosine 0.", out)
         _, out, _ = self.run_cli("topic-x", "--color", "never")
         self.assertIn("Related to topic-x (no note yet; 2 notes link to it)", out)
         _, out, _ = self.run_cli("Seed", "--json")
@@ -335,6 +415,7 @@ SUGGEST_NOTES = {
 }
 
 
+@requires_model
 class SuggestTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

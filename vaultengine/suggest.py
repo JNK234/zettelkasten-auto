@@ -2,10 +2,11 @@
 
 Every link to a note that does not exist is a vote for writing it. ``suggest``
 ranks those missing notes by how many notes link to them and, for each, says
-where the linking notes live, what they are about (the terms they share most,
-as in ``related.py``), and how many other notes mention the name without linking
-it (a phrase search for the name's words). "About" lists the terms that come
-up most among the linking notes' distinctive terms.
+where the linking notes live, what they are about, and how many other notes
+mention the name without linking it (a phrase search for the name's words).
+"About" lists the terms that come up most among the linking notes' distinctive
+terms (``KeyTerms``: keywords to show a person; no similarity is computed from them,
+that is the embeddings' job in ``related.py``).
 
 It also flags two kinds of cleanup:
 
@@ -40,6 +41,7 @@ from pathlib import Path
 from vaultengine.parser import normalize_text
 from vaultengine.querylang import Phrase, Word
 from vaultengine.related import Relatedness
+from vaultengine.search import FIELD_WEIGHTS
 from vaultengine.tokenize import tokenize
 from vaultengine.vault import link_name, lookup_key
 
@@ -47,6 +49,7 @@ SMALL_WORDS = {"a", "an", "and", "as", "at", "by", "for", "from", "in", "is", "o
 MAX_EXTRA_WORDS = 2  # a name extending another by up to this many words is grouped with it
 ABOUT_SAMPLE = 30  # linking notes read to say what a missing note is about
 EXISTING_COVERAGE = 0.75  # share of an existing title's words a link must have to be "probably that note"
+KEY_TERMS = 30  # distinctive terms kept per note
 _HEADER_LINE = re.compile(r"[ \t]*[A-Za-z][A-Za-z0-9_-]*:(?:[ \t].*)?")
 _SPACE = re.compile(r"\s+")
 
@@ -59,6 +62,77 @@ def name_words(name: str) -> frozenset[str]:
         if term not in SMALL_WORDS:
             words.add(term)
     return frozenset(words)
+
+
+class KeyTerms:
+    """The most distinctive terms of a note, as keywords to show ("about", "Key terms" of a draft).
+
+    A term's weight: its count in the note, weighted by field as in search, sublinear
+    (1 + ln tf), times ln(N / df); only terms of 2+ characters in 2 to N/2 notes. The tags
+    field is left out, and so are words of template headings (a heading written the same
+    way in 3 or more notes, like "Related zettels"): they say which template a note uses,
+    not what it is about. TeX math ($...$, $$...$$) is left out too, as for embeddings:
+    ``mathrm`` and ``o_t`` are not what a note is about (the index keeps math terms apart,
+    ``math_terms``). The top ``KEY_TERMS`` are kept, scaled so the first is 1.
+    """
+
+    def __init__(self, conn: sqlite3.Connection, n_notes: int) -> None:
+        self.conn = conn
+        self.n_notes = n_notes
+        self.df = dict(conn.execute("SELECT term, df FROM terms"))
+        headings = defaultdict(set)
+        for file_id, text in conn.execute("SELECT file_id, text FROM headings"):
+            headings[file_id].add(text)
+        template_count = Counter(lookup_key(text) for texts in headings.values() for text in texts)
+        self.template_terms: dict[int, Counter[str]] = {
+            file_id: Counter(term for text in texts if template_count[lookup_key(text)] >= 3 for term in tokenize(text))
+            for file_id, texts in headings.items()
+        }
+        self._cache: dict[int, dict[str, float]] = {}
+        self.math: dict[int, Counter[tuple[str, str]]] = defaultdict(Counter)  # note -> (field, term) -> tf inside math
+        for file_id, name, term, tf in conn.execute("SELECT file_id, field, term, tf FROM math_terms"):
+            self.math[file_id][(name, term)] = tf
+
+    def all(self) -> dict[int, dict[str, float]]:
+        """The key terms of every note, from one pass over the index (``of`` one note at a time)."""
+        weighted: dict[int, Counter[str]] = defaultdict(Counter)
+        for file_id, term, name, tf in self.conn.execute("SELECT file_id, term, field, tf FROM postings WHERE field != 'tags'"):
+            if file_id in self._cache:
+                continue
+            if name == "headings":
+                tf -= self.template_terms.get(file_id, Counter())[term]
+            tf -= self.math[file_id][(name, term)] if file_id in self.math else 0
+            if tf > 0:
+                weighted[file_id][term] += FIELD_WEIGHTS[name] * tf
+        for file_id, counts in weighted.items():
+            self._cache[file_id] = self._top(counts)
+        for (file_id,) in self.conn.execute("SELECT file_id FROM notes"):
+            self._cache.setdefault(file_id, {})
+        return dict(self._cache)
+
+    def of(self, file_id: int) -> dict[str, float]:
+        if file_id not in self._cache:
+            weighted: Counter[str] = Counter()
+            rows = self.conn.execute("SELECT term, field, tf FROM postings WHERE file_id = ? AND field != 'tags'", (file_id,))
+            for term, name, tf in rows:
+                if name == "headings":
+                    tf -= self.template_terms.get(file_id, Counter())[term]
+                tf -= self.math[file_id][(name, term)] if file_id in self.math else 0
+                if tf > 0:
+                    weighted[term] += FIELD_WEIGHTS[name] * tf
+            self._cache[file_id] = self._top(weighted)
+        return self._cache[file_id]
+
+    def _top(self, weighted: Counter[str]) -> dict[str, float]:
+        """The top ``KEY_TERMS`` of weighted term counts, as tf-idf scaled so the first is 1."""
+        scores = {}
+        for term, tf in weighted.items():
+            df = self.df.get(term, 0)
+            if 2 <= df <= self.n_notes / 2 and len(term) >= 2 and any(char.isalpha() for char in term):
+                scores[term] = (1 + math.log(tf)) * math.log(self.n_notes / df)
+        top = sorted(scores.items(), key=lambda item: (-item[1], item[0]))[:KEY_TERMS]
+        best = top[0][1] if top else 1.0
+        return {term: weight / best for term, weight in top}
 
 
 @dataclass
@@ -84,9 +158,10 @@ class Suggestions:
 
 
 class Suggester:
-    def __init__(self, conn: sqlite3.Connection) -> None:
+    def __init__(self, conn: sqlite3.Connection, engine: Relatedness | None = None) -> None:
         self.conn = conn
-        self.engine = Relatedness(conn)
+        self.engine = engine or Relatedness(conn)
+        self.key_terms = KeyTerms(conn, self.engine.n_notes)
         self.spellings: dict[str, Counter[str]] = defaultdict(Counter)
         self.linkers: dict[str, set[int]] = defaultdict(set)
         self.link_count: Counter[str] = Counter()
@@ -113,14 +188,14 @@ class Suggester:
         return len(set(matches) - self.linkers[key])
 
     def about(self, key: str, count: int = 6) -> list[str]:
-        """Terms that recur among the linking notes' most distinctive terms (``related.py`` profiles).
+        """Terms that recur among the linking notes' most distinctive terms (``KeyTerms``).
 
         At most ``ABOUT_SAMPLE`` linking notes are read (the first by path), which bounds the cost
         for topics linked from hundreds of notes.
         """
         combined: Counter[str] = Counter()
         for linker in sorted(self.linkers[key], key=lambda f: self.engine.paths[f])[:ABOUT_SAMPLE]:
-            for term, weight in self.engine._top(self.engine.term_profile(linker)).items():
+            for term, weight in self.key_terms.of(linker).items():
                 combined[term] += weight
         own = set(tokenize(self.name(key)))
         # Shown to a person: words only (no model sizes, versions or formula fragments like 7b, qwen2.5, pi_).
@@ -205,7 +280,7 @@ class Suggester:
     def contexts(self, key: str, limit: int = 8) -> list[tuple[str, str]]:
         """(linking note path, what it says around its first link in prose), best first."""
         seed = self.engine.seed(self.name(key))
-        order = {hit.path: i for i, hit in enumerate(self.engine.related(seed, limit=None).hits)}
+        order = {hit.path: i for i, hit in enumerate(self.engine.related(seed, limit=None, words=False).hits)}
         rows = self.conn.execute(
             """SELECT f.path, l.start_offset, l.end_offset FROM links l JOIN files f ON f.id = l.source_id
                WHERE l.status = 'unresolved' AND l.target_key = ? ORDER BY f.path, l.start_offset""",
@@ -243,7 +318,7 @@ class Suggester:
             targets = {t for (t,) in self.conn.execute("SELECT DISTINCT target FROM links WHERE source_id = ? AND target != ''", (file_id,))}
             shared.update(t for t in targets if lookup_key(t) != key)
         tags = [t for t, n in shared.most_common() if n >= max(2, 0.3 * len(linkers))][:4]
-        related = [h for h in self.engine.related(self.engine.seed(name), limit=None).hits if not h.linked][:5]
+        related = self.engine.related(self.engine.seed(name), limit=5, unlinked_only=True).hits
         sources = [p for p in linkers if "source" in p.split("/")[0].lower()]
         when = (now or datetime.now()).strftime("%d-%m-%Y %H:%M")
 

@@ -39,3 +39,6 @@ coverage/
 
 # Terminal UI
 tui/dist/
+
+# Local embedding model (shipped with the upload, not in git)
+models/

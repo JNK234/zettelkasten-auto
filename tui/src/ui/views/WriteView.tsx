@@ -11,6 +11,8 @@ const WHAT: Record<WriteResult['operation'], string> = {
 	set: 'change',
 	fix: 'fix',
 	ingest: 'ingest',
+	'link-it': 'link',
+	unlink: 'unlink',
 };
 
 function headline(result: WriteResult): {title: string; detail?: string} {
@@ -97,7 +99,18 @@ export function CheckLines({result}: {result: WriteResult}) {
 	);
 }
 
-export function WriteView({result, maxFiles = 6, maxLines = 40}: {result: WriteResult; maxFiles?: number; maxLines?: number}) {
+export function WriteView({
+	result,
+	maxFiles = 6,
+	maxLines = 40,
+	dryRunHint = 'run it again without --dry-run to write',
+}: {
+	result: WriteResult;
+	maxFiles?: number;
+	maxLines?: number;
+	/** What to do to write it, shown under a dry run. */
+	dryRunHint?: string;
+}) {
 	const {title, detail} = headline(result);
 	const refused = result.status === 'refused';
 	const files = result.files.slice(0, maxFiles);
@@ -112,7 +125,7 @@ export function WriteView({result, maxFiles = 6, maxLines = 40}: {result: WriteR
 			</Text>
 			<Body>
 				<CheckLines result={result} />
-				{result.status === 'dry-run' ? <Text dimColor>run it again without --dry-run to write</Text> : null}
+				{result.status === 'dry-run' ? <Text dimColor>{dryRunHint}</Text> : null}
 			</Body>
 			{refused ? (
 				<Group title="Violations it would add">

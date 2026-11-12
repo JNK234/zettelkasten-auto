@@ -19,7 +19,14 @@ cd tui && npm ci && npm run build && npm link && cd ..   # puts `vault-tui` on P
 ```
 
 `uv sync` also installs `torch`/`sentence-transformers` for the zettel tool's embeddings (several GB on Linux, about 5 minutes).
-The engine, CLI and app don't need them. 
+The engine, CLI and app don't need them. The engine's own embeddings (`vault embed`, `vault related`, link suggestions)
+use `numpy` and `tokenizers` and the static model in `models/potion-base-8M/` (about 30 MB: `tokenizer.json`,
+`model.safetensors`, `config.json`), which is shipped next to the repository rather than in git and is never
+downloaded; `engine.embedding.model_path` in `config/config.yaml` points at it (`vault config show` shows where it is
+looked for). Without it, everything else works and those commands say what is missing.
+
+`source scripts/setup.sh` (from the repository root, or by its path from anywhere) runs both installs (with the
+offline `npm_config_nodedir=/usr` below when the Node headers are there) and activates `.venv`.
 Offline or behind a proxy: `npm ci` builds `node-pty` with node-gyp, which downloads the Node.js headers from nodejs.org.
 If that fails (`gyp ERR! … ENOTFOUND`), point it at the headers installed with Node: `npm_config_nodedir=/usr npm ci`
 (the folder that contains `include/node/node.h`).

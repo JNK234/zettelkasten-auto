@@ -23,6 +23,9 @@ or with `$VAULT_TUI_OPENER` (any program taking the URL as its argument).
 | in the list | ↑↓ PgUp/PgDn Home/End move · Enter preview · `o` open in Obsidian · Esc (or q) close |
 | in the preview | ↑↓ PgUp/PgDn scroll · `n`/`N` next/previous match · `o` open in Obsidian · Esc back to the list |
 | `/related @note` `/suggest [links\|notes\|@note]` `/unlinked [@note]` | related notes, links to add and notes to write, unlinked mentions |
+| `/explore [@note \| <name>] [--fresh]` | explore from a note (or where to start): a section per lens; opens the explore list |
+| in the explore list | ↑↓ move · Enter open (full evidence) · `k` keep · `d` dismiss · `c` clear · `l` link it (dry run, then `w`) · `p` pivot · `b` back · `r` again · `f` fresh · Esc close |
+| `/kept [lens]` `/map [record]` `/map since <date>` `/config` | what you kept; the map, a snapshot of it, what changed since; the engine settings |
 | `/` | command suggestions (Tab completes, Enter runs) |
 | `@` | note picker (↑↓, Tab/Enter insert, Esc close) |
 | ↑ ↓ | history · ctrl+a/e/u/k edit · ctrl+c/ctrl+d quit |
@@ -38,20 +41,22 @@ src/rpc/schema.ts           GENERATED from vaultengine/rpc/schema.json (npm run 
 src/commands/registry.ts    Command type + CommandRegistry (the extension point); a command returns
                             transcript output, or an InteractiveView that has the keys until closed
 src/commands/mentions.ts    @-mention parsing
-src/commands/builtin/       /help /stats /health /note /search /related /suggest /unlinked /check /fix /new /link /ingest /coverage
+src/commands/builtin/       /help /stats /health /note /search /related /suggest /unlinked /explore /kept /map /config
+                            /check /fix /new /link /ingest /coverage
 src/commands/args.ts        quote-aware argument splitting (words, "quoted", @mentions)
 src/system/open.ts          obsidian:// URLs and the system opener
 src/ui/                     App, Prompt (history, / suggestions, @ picker), StatusLine, views
 src/ui/views/SearchView.tsx the /search list and preview (an InteractiveView)
+src/ui/views/ExploreView.tsx the /explore list, result, link dry run (an InteractiveView)
 ```
 
 ## Tests
 
 | Command | Runs | Ends with |
 |---|---|---|
-| `npm test` | generated-types check, unit tests, ink-testing-library frame tests (the App fed with responses recorded from the real server), integration tests against the real Python server | `Tests  90 passed (90)` |
+| `npm test` | generated-types check, unit tests, ink-testing-library frame tests (the App fed with responses recorded from the real server), integration tests against the real Python server | `Tests  103 passed (103)` |
 | `npm run typecheck` | `tsc` over sources and tests | exit code 0 |
-| `npm run test:e2e` | builds, then launches `dist/cli.js` in a real pseudo-terminal with node-pty: the `/health` report; `/search` with move, preview, `o` and back; and with `--format brain` `/check`, `/coverage`, a `/link` that writes both notes and `/check changed` | `Tests  4 passed (4)` |
+| `npm run test:e2e` | builds, then launches `dist/cli.js` in a real pseudo-terminal with node-pty: the `/health` report; `/search` with move, preview, `o` and back; and with `--format brain` `/check`, `/coverage`, a `/link` that writes both notes and `/check changed`; an `/explore` session (`/map record`, keep, link it dry run then `w`, fresh, `/kept`, `/map since`) | `Tests  5 passed (5)` |
 
 `node-pty` is a native module: on Linux `npm ci` compiles it (needs `build-essential` and `python3`);
 macOS uses a prebuilt binary. Only the end-to-end tests use it. Offline, node-gyp cannot download the Node.js headers;

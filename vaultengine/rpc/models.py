@@ -27,6 +27,7 @@ FORMAT_NOT_CONFIGURED = -32003
 WRITE_REJECTED = -32004
 WRITE_FAILED = -32005
 INVALID_QUERY = -32006
+NOT_AVAILABLE = -32007
 
 ERROR_MESSAGES = {
     PARSE_ERROR: "Parse error",
@@ -40,6 +41,7 @@ ERROR_MESSAGES = {
     WRITE_REJECTED: "Write rejected",
     WRITE_FAILED: "Write failed",
     INVALID_QUERY: "Invalid query",
+    NOT_AVAILABLE: "Not available",
 }
 
 RequestId = Union[StrictInt, StrictStr, None]
@@ -402,7 +404,7 @@ class IndexSync(Result):
 
 
 class WriteResult(Result):
-    operation: Literal["new", "link", "set", "fix", "ingest"]
+    operation: Literal["new", "link", "set", "fix", "ingest", "link-it", "unlink"]
     status: WriteStatus = Field(description="written; refused (would add violations, nothing written); dry-run; unchanged.")
     dry_run: bool
     written: bool
@@ -750,19 +752,33 @@ class RelatedSeed(Result):
 class RelatedHit(Result):
     path: str
     title: str
-    score: float = Field(description="0.5 graph + 0.3 text + 0.2 tags.")
+    score: float = Field(description="The weighted sum of the scaled signals (engine.related.weights; default 0.7 text + 0.1 graph + 0.1 tags + 0.05 co-citation + 0.05 coupling); see `weights`.")
     graph: float
-    text: float
+    text: float = Field(description="Centered cosine of the two notes' embeddings, over the best one (0 to 1).")
     tags: float
+    cocitation: float = Field(description="Notes that link to both, scaled (0 unless engine.related.weights.cocitation > 0).")
+    coupling: float = Field(description="What both link to, scaled (0 unless engine.related.weights.coupling > 0).")
     linked: bool
     hops: int | None
-    reason: str = Field(description='E.g. "2 hops via kl-penalty-in-rlhf · shares #rl · similar text (kl, ppo)".')
+    reason: str = Field(description='E.g. "2 hops via kl-penalty-in-rlhf · shares #rl · similar text (kl, ppo)"; the words are'
+                        " those in both notes that add most to their embedding cosine.")
+
+
+class TextSignal(Result):
+    """The state of the text (embedding) signal for this answer."""
+
+    available: bool = Field(description="False when the embedding model cannot be loaded; the other signals still rank.")
+    model_id: str | None = Field(description="The embedding model behind the text signal.")
+    unavailable: str | None = Field(description="Why the text signal is off (e.g. the model folder is missing).")
+    uncached: int = Field(description="Notes without a cached vector, embedded in memory for this answer (`vault embed` caches them).")
 
 
 class NoteRelatedResult(Result):
     seed: RelatedSeed
     compared: int
     hits: list[RelatedHit]
+    text_signal: TextSignal
+    weights: dict[str, float] = Field(description="The weights used: graph, cocitation, coupling, tags, text (engine.related.weights, rescaled to sum to 1 without the text signal).")
 
 
 # ----- links.suggest -------------------------------------------------------------
@@ -777,13 +793,15 @@ class LinksSuggestParams(Params):
 class LinkSuggestion(Result):
     a: str
     b: str
-    score: float = Field(description="0.4 shared + 0.3 cited + 0.3 text.")
+    score: float = Field(description="(0.4 shared + 0.3 cited + 0.2 tags + 0.3 text) / 1.2; without the text signal, the rescaled `weights`.")
     shared: float
     cited: float
-    text: float
+    tags: float = Field(description="Weighted Jaccard of the two notes' #tags and tag links (Tags: [[topic]]), as in note.related.")
+    text: float = Field(description="Centered cosine of the two notes' embeddings (0 if negative).")
     shared_with: list[str]
     cited_by: list[str]
-    terms: list[str]
+    shared_tags: list[str] = Field(description="The #tags and [[tag links]] both notes have, rarest first.")
+    terms: list[str] = Field(description="Words in both notes that add most to their embedding cosine.")
     reason: str
 
 
@@ -791,6 +809,8 @@ class LinksSuggestResult(Result):
     note: str | None
     path: str | None
     links: list[LinkSuggestion] = Field(description="Never a pair that is already linked, or a note with itself.")
+    text_signal: TextSignal
+    weights: dict[str, float] = Field(description="The weights used: shared, cited, tags, text (rescaled to sum to 1 without the text signal).")
 
 
 # ----- notes.suggest -------------------------------------------------------------
@@ -864,6 +884,803 @@ class MentionsUnlinkedResult(Result):
     targets: list[MentionedNote] = Field(description="By number of mentioning notes.")
 
 
+# ----- explore: explore.run, explore.mark, explore.kept, explore.link, explore.unlink ----------------------------------
+
+ExploreLensName = Literal["neighbourhood", "cited", "foundations", "backbone", "cluster", "hidden", "role", "bridge", "gap",
+                          "surprise", "unwritten", "wander", "topicless"]
+
+
+class ExploreRunParams(Params):
+    note: str | None = Field(None, min_length=1, description="A note (name, path or alias) or a missing note; null: where to start.")
+    lenses: list[ExploreLensName] | None = Field(None, min_length=1, description="Null: engine.explore.lenses (or start_lenses without a note).")
+    per_lens: int | None = Field(None, ge=3, le=5, description="Results per section; null: engine.explore.per_lens.")
+    fresh: bool = Field(False, description="Leave out what was seen or dismissed before from this start.")
+    record: bool = Field(True, description="Remember the run: its results become refs for explore.mark/link, and count as seen.")
+    refresh: bool = Field(False, description="Recompute the stored vault-wide numbers now.")
+
+
+class ExploreItem(Result):
+    ref: str = Field(description="'2.3': section 2, result 3 of this run; what explore.mark and explore.link take.")
+    lens: ExploreLensName
+    kind: Literal["note", "pair", "link", "missing", "community"] = Field(
+        description="note: a note; pair: two notes not linked (a gap's joiners); link: a link that is there (surprise); "
+                    "missing: a missing note; community: a community or a pair of them.")
+    target: str = Field(description="What it is about, as remembered: a path, 'a ↔ b', '[[name]]', 'community: …'.")
+    title: str
+    evidence: str = Field(description="One line: why the lens found it, with the numbers it rests on.")
+    notes: list[str] = Field(description="The notes it is about (vault paths).")
+    link: list[str] | None = Field(description="The two notes explore.link would link; null when it is not two notes to link.")
+    start_at: str | None = Field(description="Without a start: where explore would start for it (pass it as note).")
+    mark: Literal["keep", "dismiss"] | None = Field(description="Your earlier mark for this result from this start.")
+
+
+class ExploreSection(Result):
+    lens: ExploreLensName
+    kind: Literal["deepen", "discover", "map"]
+    title: str
+    what: str
+    budget: int = Field(description="Results this section may show (3 to 5; deepen and discover get the same total).")
+    found: int = Field(description="Candidates the lens found.")
+    hidden: int = Field(description="Left out: seen or dismissed before (fresh).")
+    duplicates: int = Field(description="Left out: near-duplicates of a result shown.")
+    kept: int = Field(description="Your keeps of this lens's results, over every start.")
+    dismissed: int
+    keep_score: float = Field(description="(kept + 1) / (kept + dismissed + 2): the sections are ordered by it.")
+    applies: bool = Field(description="False: the lens does not apply to this start (e.g. a missing note) and takes no space.")
+    note: str | None = Field(description="Why there are no results, when there are none.")
+    results: list[ExploreItem]
+
+
+class ExploreNumbers(Result):
+    source: Literal["current", "reused"] = Field(description="current: computed for the vault as it is; reused: the vault-wide "
+                                                            "distributions are from a few notes ago (see computed_at).")
+    computed_at: str | None = None
+    changed_since: int | None = None
+    threshold: int | None = None
+
+
+class ExploreRunResult(Result):
+    start: str | None = Field(description="The start's path, '[[missing note]]', or null (proposals).")
+    start_kind: Literal["note", "missing"] | None
+    fresh: bool
+    duplicate_cutoff: float | None = Field(description="Similarity at or above which two notes are near-duplicates.")
+    similarity: Literal["embedding", "key terms"]
+    memory: str = Field(description="The memory file (marks, seen, links made, map snapshots).")
+    numbers: ExploreNumbers
+    text_signal: TextSignal
+    sections: list[ExploreSection] = Field(description="Ordered by keep_score, ties in the configured order.")
+
+
+class ExploreMarkParams(Params):
+    verdict: Literal["keep", "dismiss", "clear"]
+    refs: list[str] = Field(min_length=1, description="Refs of the last explore.run ('2.3').")
+
+
+class MarkedItem(Result):
+    ref: str
+    lens: ExploreLensName
+    target: str
+    title: str
+    verdict: Literal["keep", "dismiss", "clear"]
+    changed: bool = Field(description="False for a clear of a result that was not marked.")
+
+
+class KeepRate(Result):
+    lens: ExploreLensName
+    kept: int
+    dismissed: int
+
+
+class ExploreMarkResult(Result):
+    marked: list[MarkedItem]
+    keep_rates: list[KeepRate] = Field(description="For the lenses marked here, over every start.")
+
+
+class ExploreKeptParams(Params):
+    lens: ExploreLensName | None = None
+
+
+class KeptItem(Result):
+    start: str | None
+    lens: ExploreLensName
+    target: str
+    kind: Literal["note", "pair", "link", "missing", "community"]
+    title: str
+    evidence: str
+    link: list[str] | None
+    at: str
+
+
+class ExploreKeptResult(Result):
+    memory: str
+    kept: list[KeptItem] = Field(description="Oldest first.")
+
+
+class ExploreLinkParams(Params):
+    ref: str | None = Field(None, description="A result of the last explore.run; or give a and b.")
+    a: str | None = None
+    b: str | None = None
+    reason: str | None = Field(None, description="The one-line reason; default: the result's lens and evidence.")
+    dry_run: bool = Field(True, description="True (the default): return the diff and write nothing.")
+
+    @model_validator(mode="after")
+    def _one_way(self) -> "ExploreLinkParams":
+        if (self.ref is None) == (self.a is None or self.b is None):
+            raise ValueError("give ref, or a and b")
+        return self
+
+
+class ExploreLinkResult(WriteResult):
+    ref: str | None
+    lens: ExploreLensName | None
+    notes: list[str] = Field(description="The two notes, as given or from the result.")
+    reason: str
+    kept: bool = Field(description="The result counted as a keep (a link made from a result).")
+
+
+class ExploreUnlinkParams(Params):
+    a: str = Field(min_length=1)
+    b: str = Field(min_length=1)
+    dry_run: bool = Field(True, description="True (the default): return the diff and write nothing.")
+
+
+class ExploreUnlinkResult(WriteResult):
+    recorded: bool = Field(description="link-it made this link: its section goes too when nothing else is left in it.")
+
+
+# ----- map.get, map.since ---------------------------------------------------------------------------------------------
+
+
+class MapParams(Params):
+    limit: int = Field(10, ge=0, description="Items per list (0 = all).")
+    meaning: bool | None = Field(None, description="Add meaning edges for the communities (null: engine.explore.meaning).")
+    record: bool = Field(False, description="Also save a snapshot in the memory (for map.since).")
+
+
+class TagCountItem(Result):
+    tag: str
+    notes: int
+
+
+class MapPhrase(Result):
+    phrase: str
+    in_community: int
+    in_vault: int
+    score: float
+
+
+class MapTopicPage(Result):
+    path: str
+    reaches: int
+
+
+class MapCommunity(Result):
+    number: int
+    name: str
+    notes: list[str]
+    phrases: list[MapPhrase]
+    hubs: list[str]
+    topic_pages: list[MapTopicPage]
+
+
+class MapBetweenness(Result):
+    exact: bool
+    sources: int
+    visits: int
+    budget: int
+
+
+class MapBridge(Result):
+    path: str
+    betweenness: float
+    betweenness_percentile: float
+    constraint: float | None
+    constraint_percentile: float | None
+    community: int
+    spans: list[int]
+
+
+class MapHub(Result):
+    path: str
+    score: float
+
+
+class MapAuthority(Result):
+    target: str
+    missing: bool
+    score: float
+
+
+class MeaningEdge(Result):
+    a: str
+    b: str
+    cosine: float
+
+
+class MovedNote(Result):
+    note: str
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    from_: int = Field(alias="from")
+    to: int
+
+
+class PlacedNote(Result):
+    note: str
+    community: int
+
+
+class MeaningChanges(Result):
+    stranded_before: list[str]
+    stranded_after: list[str]
+    placed: list[PlacedNote]
+    moved: list[MovedNote]
+    match: dict[int, int | None]
+    split: dict[int, list[int]]
+    joined: dict[int, list[int]]
+    communities_before: int
+    communities_after: int
+
+
+class MapMeaning(Result):
+    edges: list[MeaningEdge]
+    cutoff: float | None
+    percentile: float
+    unavailable: str | None
+    changes: MeaningChanges | None
+
+
+class MapRecorded(Result):
+    at: str
+    bytes: int
+    memory: str
+    communities: int
+    gaps: int
+    basis: str
+    missing: int
+
+
+class MapResult(Result):
+    percentile: float
+    topic_pages: str = Field(description="How topic pages were decided (the format's types), or why there are none.")
+    notes: int
+    missing_notes: int
+    tags: int
+    left_out_tags: list[TagCountItem]
+    nodes: int
+    edges: int
+    communities: list[MapCommunity]
+    notes_in_communities: int
+    alone: int
+    modularity: float
+    seed: int
+    resolution: float
+    tag_rule: str
+    meaning_edges: int
+    meaning_cutoff: float | None
+    meaning_unavailable: str | None
+    betweenness: MapBetweenness
+    bridges: list[MapBridge]
+    hubs: list[MapHub]
+    authorities: list[MapAuthority]
+    meaning: MapMeaning | None = None
+    recorded: MapRecorded | None = None
+
+
+class MapSinceParams(Params):
+    since: str = Field(min_length=1, description="A date (2026-11-10) or a time (2026-11-10T14:30).")
+
+
+class SinceGap(Result):
+    communities: list[int]
+    names: list[str]
+    links_then: float
+    expected_then: float
+    links_now: float
+    expected_now: float
+    added: list[list[str]] = Field(description="Links between the two sides made since (pairs of paths).")
+    status: Literal["open", "closed", "gone"]
+    why: str
+
+
+class SinceCommunity(Result):
+    community: int
+    name: str
+    notes: int
+    best_match: int | None = None
+    overlap: float
+
+
+class SinceWritten(Result):
+    name: str
+    linked_from: int
+    note: str
+
+
+class SinceTopicPage(Result):
+    community_then: int
+    name: str
+    community: int
+    topic_pages: list[str]
+
+
+class MapSinceResult(Result):
+    since: str
+    snapshot: str = Field(description="When the snapshot compared with was recorded.")
+    chosen: str = Field(description="How it was chosen.")
+    notes: list[int] = Field(description="[then, now]")
+    links: list[int]
+    communities: list[int]
+    formed: list[SinceCommunity]
+    gone: list[SinceCommunity]
+    gaps: list[SinceGap]
+    gap_basis: str | None
+    written: list[SinceWritten]
+    topic_pages: list[SinceTopicPage]
+
+
+# ----- note.deepen ----------------------------------------------------------------------------------------------------
+
+DeepenLensName = Literal["neighbourhood", "cited", "foundations", "backbone", "cluster"]
+
+
+class NoteDeepenParams(Params):
+    note: str = Field(min_length=1)
+    lenses: list[DeepenLensName] | None = Field(None, min_length=1)
+    limit: int = Field(8, ge=0, description="Notes per lens (0 = all that stand out).")
+
+
+class DeepenHit(Result):
+    path: str
+    score: float
+    linked: bool
+    reason: str
+
+
+class DeepenNeighbourhood(Result):
+    cutoff: float
+    percentile: float
+    compared: int
+    kept: int
+    text_unavailable: str | None
+    uncached: int
+    hits: list[DeepenHit]
+
+
+class EvidenceName(Result):
+    name: str
+    weight: float
+
+
+class DeepenPairNote(Result):
+    path: str
+    value: float
+    percentile: float
+    evidence: list[EvidenceName]
+
+
+class DeepenPairs(Result):
+    cutoff: float
+    percentile: float
+    pairs_in_vault: int
+    exact: bool
+    found: int
+    kept: int
+    notes: list[DeepenPairNote]
+    below_cutoff: list[DeepenPairNote]
+
+
+class DeepenBackbone(Result):
+    community: int | None
+    chain: list[str]
+    steps: list[str] = []
+    note_on_chain: int | None
+    steps_off: int | None
+    joins_at: str | None
+    length: int | None = None
+    community_notes: int | None = None
+
+
+class ClusterPhrase(Result):
+    phrase: str
+    in_community: int
+    in_vault: int
+
+
+class ClusterNeighbour(Result):
+    community: int
+    name: str
+    weight: float
+    through: list[str]
+
+
+class DeepenCluster(Result):
+    community: int | None
+    name: str | None = None
+    notes: int | None = None
+    phrases: list[ClusterPhrase] = []
+    hubs: list[str] = []
+    topic_pages: list[MapTopicPage] = []
+    weight_inside: float | None = None
+    inside_percentile: float | None = None
+    weight: float
+    outside_share: float | None = None
+    participation: float
+    neighbours: list[ClusterNeighbour] = []
+
+
+class DeepenLenses(Result):
+    neighbourhood: DeepenNeighbourhood | None = None
+    cited: DeepenPairs | None = None
+    foundations: DeepenPairs | None = None
+    backbone: DeepenBackbone | None = None
+    cluster: DeepenCluster | None = None
+
+
+class NoteDeepenResult(Result):
+    note: str
+    percentile: float
+    lenses: DeepenLenses
+
+
+# ----- vault.discover -------------------------------------------------------------------------------------------------
+
+DiscoverLensName = Literal["hidden", "role", "bridge", "gap", "surprise", "unwritten", "wander"]
+
+
+class VaultDiscoverParams(Params):
+    note: str | None = Field(None, min_length=1, description="Null: the lenses over the whole vault (gap, surprise, unwritten).")
+    lenses: list[DiscoverLensName] | None = Field(None, min_length=1)
+    limit: int = Field(3, ge=0, description="Results per lens (0 = all that stand out).")
+    steps: int = Field(8, ge=1, le=200, description="wander: steps to take.")
+    seed: int | None = Field(None, description="wander and sampling; null: engine.explore.seed.")
+
+
+class Middle(Result):
+    middle: str
+    kind: str
+    notes: int
+    weight: float
+
+
+class HiddenResult(Result):
+    note: str
+    score: float
+    percentile: float
+    middles: list[Middle]
+    reason: str
+
+
+class HiddenLens(Result):
+    cutoff: float
+    pairs_in_vault: int
+    exact: bool
+    sources: int
+    found: int
+    kept: int
+    results: list[HiddenResult]
+
+
+class RoleResult(Result):
+    note: str
+    community: int
+    distance: float
+    percentile: float
+    features: dict[str, list[float]] = Field(description="feature -> [this note's, that note's] raw value.")
+    reason: str
+
+
+class RoleLens(Result):
+    cutoff: float
+    pairs_in_vault: int
+    exact: bool
+    found: int
+    kept: int
+    results: list[RoleResult]
+
+
+class CommunityWeight(Result):
+    community: int
+    weight: float
+
+
+class Broker(Result):
+    communities: list[int]
+    share: float
+    pairs: int
+    reason: str
+
+
+class BridgeLens(Result):
+    betweenness: float
+    betweenness_percentile: float
+    constraint: float | None
+    constraint_percentile: float | None
+    community: int
+    reaches: list[CommunityWeight]
+    exact: bool
+    sources: int
+    brokers: list[Broker]
+
+
+class Unavailable(Result):
+    unavailable: str | None
+
+
+class GapJoin(Result):
+    a: str
+    b: str
+    score: float
+    middles: list[str]
+
+
+class GapResult(Result):
+    communities: list[int]
+    names: list[str]
+    closeness: float
+    closeness_percentile: float
+    links: int
+    expected: float
+    ratio: float
+    join: list[GapJoin]
+    reason: str
+
+
+class GapFound(Result):
+    cutoff: float
+    pairs: int
+    found: int
+    results: list[GapResult]
+
+
+class GapLens(Result):
+    with_embeddings: GapFound | Unavailable
+    without_embeddings: GapFound | Unavailable
+
+
+class SurpriseResult(Result):
+    a: str
+    b: str
+    lines: list[int]
+    similarity: float
+    percentile: float
+    communities: list[int]
+    ratio: float | None
+    reason: str
+
+
+class SurpriseFound(Result):
+    cutoff: float
+    linked_pairs: int
+    found: int
+    results: list[SurpriseResult]
+
+
+class SurpriseLens(Result):
+    with_embeddings: SurpriseFound | Unavailable
+    without_embeddings: SurpriseFound | Unavailable
+
+
+class UnwrittenResult(Result):
+    names: list[str]
+    linking_notes: int
+    communities: dict[int, int] = Field(description="community -> notes in it that link the missing note.")
+    spread: int
+    reason: str
+
+
+class UnwrittenFound(Result):
+    cutoff: float
+    groups: int
+    found: int
+    by: str
+    merge_cutoff: float | None
+    merged: int
+    results: list[UnwrittenResult]
+
+
+class UnwrittenLens(Result):
+    with_embeddings: UnwrittenFound | Unavailable
+    without_embeddings: UnwrittenFound | Unavailable
+
+
+class WanderHop(Result):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    from_: str = Field(alias="from")
+    to: str
+    lines_out: list[int]
+    lines_back: list[int]
+    community: int
+    new_community: bool
+    revisit: bool
+    reason: str
+
+
+class WanderLens(Result):
+    seed: int
+    steps: int
+    walk: list[str]
+    hops: list[WanderHop]
+    communities: int
+
+
+class DiscoverLenses(Result):
+    hidden: HiddenLens | None = None
+    role: RoleLens | None = None
+    bridge: BridgeLens | None = None
+    gap: GapLens | None = None
+    surprise: SurpriseLens | None = None
+    unwritten: UnwrittenLens | None = None
+    wander: WanderLens | None = None
+
+
+class VaultDiscoverResult(Result):
+    note: str | None
+    percentile: float
+    seed: int
+    text_signal: TextSignal
+    lenses: DiscoverLenses
+
+
+# ----- notes.explain --------------------------------------------------------------------------------------------------
+
+
+class NotesExplainParams(Params):
+    a: str = Field(min_length=1)
+    b: str = Field(min_length=1)
+    words: int = Field(8, ge=0, le=100, description="Words listed behind the text score.")
+
+
+class CitingNote(Result):
+    note: str
+    weight: float
+    links_to: int
+
+
+class SharedReference(Result):
+    target: str
+    missing: bool
+    weight: float
+    linked_from: int
+
+
+class WeightedTag(Result):
+    tag: str
+    weight: float
+
+
+class LeftOutTag(Result):
+    tag: str
+    notes: int
+
+
+class SharedWord(Result):
+    word: str
+    share: float
+
+
+class DirectEvidence(Result):
+    a_to_b: list[int] = Field(description="Lines of a with a link to b.")
+    b_to_a: list[int]
+    a_to_b_tag_lines: list[int]
+    b_to_a_tag_lines: list[int]
+
+
+class CocitationEvidence(Result):
+    both: list[CitingNote]
+    citing_a: int
+    citing_b: int
+    total_a: float
+    total_b: float
+
+
+class CouplingEvidence(Result):
+    both: list[SharedReference]
+    references_a: int
+    references_b: int
+    total_a: float
+    total_b: float
+
+
+class TagsEvidence(Result):
+    shared: list[WeightedTag]
+    only_a: list[WeightedTag]
+    only_b: list[WeightedTag]
+    shared_weight: float
+    union_weight: float
+    left_out: list[LeftOutTag]
+    notes: int
+    common_over: float
+
+
+class TextEvidence(Result):
+    cosine: float
+    model_id: str
+    words: list[SharedWord] | None = None
+    shared_words: int | None = None
+    shared_total: float | None = None
+    one_note_total: float | None = None
+    baseline: float | None = None
+    matches_vectors: bool | None = None
+
+
+class NoEvidence(Result):
+    pass
+
+
+class ExplainSignal(Result):
+    name: Literal["direct", "cocitation", "coupling", "tags", "text"]
+    value: float
+    weight: float
+    contribution: float = Field(description="weight x value; the score is their sum.")
+    available: bool
+    unavailable: str | None
+    evidence: DirectEvidence | CocitationEvidence | CouplingEvidence | TagsEvidence | TextEvidence | NoEvidence
+
+
+class ExplainWeights(Result):
+    direct: float
+    cocitation: float
+    coupling: float
+    tags: float
+    text: float
+
+
+class NotesExplainResult(Result):
+    configured_weights: ExplainWeights
+    a: str
+    b: str
+    score: float
+    signals: list[ExplainSignal]
+    model_id: str | None
+    uncached: int
+
+
+# ----- embed.status, config.show --------------------------------------------------------------------------------------
+
+
+class EmbedStatusParams(Params):
+    pass
+
+
+class OtherModel(Result):
+    model_id: str
+    vectors: int
+    dim: int | None
+
+
+class EmbedStatusResult(Result):
+    model_id: str | None
+    notes: int
+    with_vector: int
+    missing: int
+    missing_paths: list[str]
+    dim: int | None
+    other_models: list[OtherModel]
+    cache_vectors: int
+    cache_bytes: int
+    provider: str
+    model_path: str | None
+    model_found: bool
+
+
+class ConfigShowParams(Params):
+    pass
+
+
+class SettingRow(Result):
+    key: str
+    value: str | None
+    source: str = Field(description="default, file, env NAME or flag --x.")
+    env: str = Field(description="The environment variable that sets it.")
+
+
+class ConfigShowResult(Result):
+    config_file: str | None
+    config_found_by: str
+    precedence: list[str]
+    settings: list[SettingRow]
+
+
 # ----- registry ------------------------------------------------------------------
 
 
@@ -901,5 +1718,25 @@ METHODS: dict[str, MethodSpec] = {
                    NotesSuggestParams, NotesSuggestResult),
         MethodSpec("mentions.unlinked", "Plain-text mentions of note titles and aliases that are not links yet.",
                    MentionsUnlinkedParams, MentionsUnlinkedResult),
+        MethodSpec("explore.run", "Explore from a note (or where to start): a section per lens, each result with its lens and "
+                   "evidence; remembered for explore.mark and explore.link.", ExploreRunParams, ExploreRunResult),
+        MethodSpec("explore.mark", "Keep, dismiss or clear results of the last explore.run (the memory, never the notes).",
+                   ExploreMarkParams, ExploreMarkResult),
+        MethodSpec("explore.kept", "What was kept from explore, with its lens and evidence.", ExploreKeptParams, ExploreKeptResult),
+        MethodSpec("explore.link", "A result (or two notes) made a link under See Also in both notes; dry run unless dry_run=false.",
+                   ExploreLinkParams, ExploreLinkResult),
+        MethodSpec("explore.unlink", "Undo explore.link: remove the See Also lines linking the two notes; dry run unless dry_run=false.",
+                   ExploreUnlinkParams, ExploreUnlinkResult),
+        MethodSpec("map.get", "The map: communities, topic pages, bridges, hubs and authorities; record=true saves a snapshot.",
+                   MapParams, MapResult),
+        MethodSpec("map.since", "What changed since a recorded map: gaps closed, communities formed or gone, missing notes written.",
+                   MapSinceParams, MapSinceResult),
+        MethodSpec("note.deepen", "Five lenses on one note: neighbourhood, cited together, same foundations, backbone, cluster.",
+                   NoteDeepenParams, NoteDeepenResult),
+        MethodSpec("vault.discover", "Discover lenses: hidden links, same roles, bridges, gaps, surprises, unwritten notes, a wander.",
+                   VaultDiscoverParams, VaultDiscoverResult),
+        MethodSpec("notes.explain", "How two notes relate, signal by signal, with the evidence.", NotesExplainParams, NotesExplainResult),
+        MethodSpec("embed.status", "How many notes have a cached vector for the configured model.", EmbedStatusParams, EmbedStatusResult),
+        MethodSpec("config.show", "Every engine setting, its value and where it came from.", ConfigShowParams, ConfigShowResult),
     )
 }

@@ -2,7 +2,7 @@
 # ABOUTME: Edit vault.root to point to your Obsidian vault
 
 vault:
-  root: "/Users/jnk789/Library/Mobile Documents/iCloud~md~obsidian/Documents/Brain/"
+  root: "/path/to/your/vault/"
   sources_dir: "10_SOURCES"
   zettel_dir: "20_ZETTLEKASTEN"
   bundles_dir: "110_BUNDLES"
@@ -18,7 +18,7 @@ llm:
   # Anthropic models: claude-sonnet-4-5, claude-haiku-4-5, claude-opus-4-6
 
 embeddings:
-  db_path: "/Users/jnk789/Developer/zettelkasten-auto/chromastores/zettledb_stf"
+  db_path: "chromastores/zettledb_stf"
   provider: "sentence-transformer"  # "openai" or "sentence-transformer"
   model: "all-MiniLM-L6-v2"  # Optional: override default model
   # OpenAI default: text-embedding-3-small
@@ -35,3 +35,66 @@ processing:
   duplicate_max_distance: 0.25  # Duplicate threshold for candidate concepts (lower = stricter)
   chunk_target_chars: 4000  # Preferred chunk size for long source notes
   chunk_max_chars: 6000  # Hard cap before paragraph-level splitting
+
+# ----- vault engine (the `vault` CLI, `vault serve` and vault-tui) -----------------------------------
+# The one place for every engine setting. Each can be overridden, highest first:
+#   a flag      the vault argument, --db, --format, or --setting KEY=VALUE (e.g. --setting embedding.model_id=x)
+#   env         VAULTENGINE_<KEY>, "__" between levels: VAULTENGINE_FORMAT, VAULTENGINE_EMBEDDING__MODEL_PATH
+#   this file   (another file: --config FILE or VAULTENGINE_CONFIG=FILE)
+#   default     shown by `vault config show`, with where each value came from
+# Relative paths here are relative to this file's folder (config/); from a flag or env, to the current folder.
+engine:
+  vault: null                  # vault folder; null = the current folder
+  index: null                  # index file; null = <vault>/.vaultengine/index.sqlite
+  format: null                 # format for check/fix/coverage/new/link/set/ingest/serve, e.g. brain; null = give --format
+  memory: null                 # what explore remembers (marks, seen, links made, map snapshots); null = <vault>/.vaultengine/memory.sqlite
+  embedding:
+    provider: model2vec        # static Model2Vec models: tokenizer.json + model.safetensors
+    model_path: ../models/potion-base-8M
+    model_id: null             # names the vector space of cached vectors; null = the model folder's name.
+                               # Another model is a change here: point model_path at it (its id follows).
+  related:                     # how related notes are ranked (each mix is rescaled to sum to 1; text left out without the model)
+    weights:                   # plain `vault related`, deepen, drafts: the notes you already link stay where they were
+      graph: 0.5               # personalized PageRank over links and tags
+      cocitation: 0            # notes that link to both
+      coupling: 0              # notes (and missing notes) both link to
+      tags: 0.2                # shared tags, weighted by rarity
+      text: 0.3                # embedding similarity
+    unlinked_weights:          # finding what is not linked yet: `related --unlinked`, `discover`, `explore`
+      # Set from `vault experiment` (docs/experiments/2026-11-10.md), which measures exactly this: with links
+      # hidden, which mix finds them among the notes not linked. On the sample vault, whole and without
+      # 50_MOC/discourse, this mix beat graph 0.5 / tags 0.2 / text 0.3 on all 5 seeds: MRR +0.034 (± 0.008)
+      # and +0.042 (± 0.010). Text 0.5 to 0.8 were within the seed noise of each other; what is clear is more
+      # text, less graph. It says nothing about linked notes (the experiment never ranks them), so plain
+      # `related` keeps the mix above. 180 notes: re-run on a bigger vault.
+      graph: 0.1
+      cocitation: 0.05
+      coupling: 0.05
+      tags: 0.1
+      text: 0.7
+  explore:                     # the explore engine
+    weights:                   # `vault explain`: how much each signal between two notes counts (rescaled to sum to 1)
+      direct: 0.3              # a link between the two, either way
+      cocitation: 0.15         # notes that link to both
+      coupling: 0.15           # notes (and missing notes) both link to
+      tags: 0.1                # shared tags, weighted by rarity
+      text: 0.3                # embedding similarity (left out, and the rest rescaled, without the model)
+    percentile: 90             # what stands out (bridges, lens results): at or above this percentile of the vault
+    topic_types: [topic, page] # note types (from the format) that are topic pages; `vault map` lists communities with none
+    meaning: false             # vault map: add meaning edges (--meaning). Kept off: in `vault experiment` (2026-11-10)
+                               # no neighbour count/percentile beat no meaning edges on both ARI and NMI in both datasets
+    meaning_neighbours: 1      # vault map --meaning: join notes that are among each other's this many nearest neighbours
+    meaning_percentile: 50     # vault map --meaning: join mutual nearest neighbours at or above this percentile
+    seed: 42                   # communities and sampling: the same seed gives the same result on every run
+    resolution: 1.0            # Louvain: above 1 more, smaller communities; below 1 fewer, larger ones. Kept: in
+                               # `vault experiment` 0.5 matched the Tags: topics better by ARI, not by NMI (a matter
+                               # of how coarse the reference is, not a clear win)
+    path_budget: 20000000      # edge visits for exact betweenness; above it, a seeded sample of source notes
+    lenses:                    # `vault explore`: the lenses it runs (the keep rates then order the sections)
+      [neighbourhood, cited, foundations, backbone, cluster,   # deepen: around the note
+       hidden, role, gap, surprise, unwritten]                 # discover (also: bridge, wander); as many of each: equal space
+    start_lenses: [gap, surprise, unwritten, topicless]       # `vault explore` with no start: where its proposals come from
+    per_lens: 4                # `vault explore`: results per section, 3 to 5
+    duplicate_percentile: 99   # `vault explore`: near-duplicates (left out of a section) at or above this percentile of note-pair similarity
+    link_section: See Also     # `vault link-it`: the section both notes get the link and its reason under
+    stats_refresh: 0.02        # `vault explore`: reuse the stored vault-wide numbers until more than this share of notes changed

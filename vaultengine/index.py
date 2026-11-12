@@ -24,8 +24,14 @@ per-note like headings and tags: written when a note is parsed, deleted with it.
 The ``terms`` vocabulary keeps a document frequency per term, adjusted by the
 notes that are re-parsed or deleted (never recounted over the whole vault).
 
-Stored versions (schema, parser, search, resolver, alias setting, vault root)
-force a rebuild, full re-parse or full re-resolution when they change.
+Embeddings (``embedding/``): when a note is parsed, the hash of the text it is
+embedded as is stored in ``notes.embed_hash``. Vectors live in ``embeddings``, keyed
+by that hash and the model id, and are written by ``vault embed`` only (readers such as
+``related`` compute missing ones in memory), never by ``update``: indexing needs no model. ``update``
+only drops vectors whose text no note has any more.
+
+Stored versions (schema, parser, search, embedding text, resolver, alias setting,
+vault root) force a rebuild, full re-parse or full re-resolution when they change.
 """
 
 from __future__ import annotations
@@ -42,14 +48,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
+from vaultengine.embedding.text import EMBED_TEXT_VERSION, embedding_text, text_hash
 from vaultengine.model import BlockId, Heading, Link, ParsedNote
 from vaultengine.parser import PARSER_VERSION, NoteLayout, normalize_text, parse_note_with_layout
 from vaultengine.resolver import RESOLVER_VERSION, Resolver
 from vaultengine.properties import body_fields
-from vaultengine.search import SEARCH_VERSION, note_fields, postings
+from vaultengine.embedding.text import without_math
+from vaultengine.search import SEARCH_VERSION, field_segments, note_fields, postings
+from vaultengine.tokenize import tokenize
 from vaultengine.vault import Vault, is_markdown, iter_vault_files, link_name, lookup_key
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 7
 DEFAULT_DB_RELATIVE = Path(".vaultengine") / "index.sqlite"
 RACY_WINDOW_NS = 2_000_000_000
 RACY_MTIME = -1
@@ -76,8 +85,10 @@ CREATE TABLE notes (
     frontmatter_error TEXT,
     body_start_line   INTEGER NOT NULL,
     body_chars        INTEGER NOT NULL,     -- non-whitespace characters after frontmatter
-    line_count        INTEGER NOT NULL
+    line_count        INTEGER NOT NULL,
+    embed_hash        TEXT NOT NULL         -- SHA-256 of the text the note is embedded as (embedding/text.py)
 );
+CREATE INDEX notes_embed_hash ON notes (embed_hash);
 
 CREATE TABLE properties (
     file_id    INTEGER NOT NULL REFERENCES files (id) ON DELETE CASCADE,
@@ -145,6 +156,8 @@ CREATE TABLE links (
     matched_by      TEXT,                   -- 'self' | 'path' | 'name' | 'alias'
     candidates      TEXT NOT NULL,          -- JSON array of paths when ambiguous
     subpath_status  TEXT,                   -- NULL | 'found' | 'missing' | 'not_checked'
+    field_source    TEXT,                   -- 'header' (Key: value at the top) | 'inline' (key:: value) | NULL
+    field_key       TEXT,                   -- the key of that field as written, e.g. 'Tags'; NULL outside fields
     UNIQUE (source_id, ordinal)
 );
 CREATE INDEX links_target ON links (target_id);
@@ -171,10 +184,30 @@ CREATE TABLE field_lengths (
     PRIMARY KEY (file_id, field)
 ) WITHOUT ROWID;
 
+-- Terms that occur inside TeX math ($...$, $$...$$), per note and field, with how often: search keeps them,
+-- key terms (suggest.KeyTerms) subtract them, as embeddings leave math out (embedding/text.py).
+CREATE TABLE math_terms (
+    file_id INTEGER NOT NULL REFERENCES files (id) ON DELETE CASCADE,
+    field   TEXT NOT NULL,
+    term    TEXT NOT NULL,
+    tf      INTEGER NOT NULL,
+    PRIMARY KEY (file_id, field, term)
+) WITHOUT ROWID;
+
 -- Every indexed term with the number of notes containing it (spelling variants, idf).
 CREATE TABLE terms (
     term TEXT PRIMARY KEY,
     df   INTEGER NOT NULL
+) WITHOUT ROWID;
+
+-- Note vectors, by the hash of the embedded text and the model that made them (embedding/store.py).
+-- Not tied to a note: notes with the same text share a row, and a row outlives a rename back and forth.
+CREATE TABLE embeddings (
+    content_hash TEXT NOT NULL,             -- notes.embed_hash
+    model_id     TEXT NOT NULL,
+    dim          INTEGER NOT NULL,
+    vector       BLOB NOT NULL,             -- dim float32, little-endian, unit length (zeros: no known tokens)
+    PRIMARY KEY (content_hash, model_id)
 ) WITHOUT ROWID;
 
 -- Resolved note-to-note edges with multiplicity (self-links excluded):
@@ -192,7 +225,8 @@ class IndexNeedsRebuild(RuntimeError):
     """A partial update was asked for, but the index must first be rebuilt with `vault index`."""
 
 
-_NOTE_CHILD_TABLES = ("notes", "properties", "aliases", "tags", "headings", "blocks", "postings", "field_lengths")
+_NOTE_CHILD_TABLES = ("notes", "properties", "aliases", "tags", "headings", "blocks", "postings", "field_lengths",
+                      "math_terms")
 
 
 def default_db_path(vault_root: str | Path) -> Path:
@@ -322,6 +356,8 @@ class VaultIndex:
             reparse = f"parser version {meta['parser_version']} -> {PARSER_VERSION}"
         elif meta.get("search_version") != SEARCH_VERSION:
             reparse = f"search index version {meta.get('search_version')} -> {SEARCH_VERSION}"
+        elif meta.get("embed_text_version") != str(EMBED_TEXT_VERSION):
+            reparse = f"embedding text version {meta.get('embed_text_version')} -> {EMBED_TEXT_VERSION}"
         elif meta.get("vault_root") != str(root):
             reparse = f"vault root changed from {meta.get('vault_root')}"
         reresolve = reparse
@@ -436,12 +472,14 @@ class VaultIndex:
                         (size, kept_mtime(mtime_ns), mtime_ns, digest, file_id),
                     )
                     (report.forced if unchanged else report.changed).append(path)
-                self._write_note(file_id, note, text)
+                self._write_note(file_id, note, text, text_hash(embedding_text(path, note, layout)))
                 self._write_postings(file_id, path, note, layout)
                 affected_keys |= _name_keys(path) | {lookup_key(alias) for alias in note.aliases}
                 reparsed_ids.append(file_id)
 
             self._apply_term_delta()
+            if reparsed_ids or report.deleted:  # vectors of texts no note has any more
+                conn.execute("DELETE FROM embeddings WHERE content_hash NOT IN (SELECT embed_hash FROM notes)")
             if reresolve_reason or affected_keys or reparsed_ids:
                 report.links_checked, report.links_changed_elsewhere = self._resolve(
                     everything=reresolve_reason is not None,
@@ -463,6 +501,7 @@ class VaultIndex:
                 schema_version=SCHEMA_VERSION,
                 parser_version=PARSER_VERSION,
                 search_version=SEARCH_VERSION,
+                embed_text_version=EMBED_TEXT_VERSION,
                 resolver_version=RESOLVER_VERSION,
                 resolve_aliases=resolve_aliases,
                 vault_root=root,
@@ -501,13 +540,14 @@ class VaultIndex:
             self.conn.execute(f"DELETE FROM {table} WHERE file_id = ?", (file_id,))
         self.conn.execute("DELETE FROM links WHERE source_id = ?", (file_id,))
 
-    def _write_note(self, file_id: int, note: ParsedNote, text: str) -> None:
+    def _write_note(self, file_id: int, note: ParsedNote, text: str, embed_hash: str) -> None:
         conn = self.conn
         body = "\n".join(text.split("\n")[note.body_start_line - 1 :])
         conn.execute(
-            "INSERT INTO notes (file_id, has_frontmatter, frontmatter_error, body_start_line, body_chars, line_count) VALUES (?, ?, ?, ?, ?, ?)",
+            """INSERT INTO notes (file_id, has_frontmatter, frontmatter_error, body_start_line, body_chars, line_count, embed_hash)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
             (file_id, note.has_frontmatter, note.frontmatter_error, note.body_start_line,
-             sum(1 for char in body if not char.isspace()), text.count("\n") + 1 if text else 0),
+             sum(1 for char in body if not char.isspace()), text.count("\n") + 1 if text else 0, embed_hash),
         )
         conn.executemany(
             "INSERT INTO properties (file_id, key, value_json) VALUES (?, ?, ?)",
@@ -530,14 +570,18 @@ class VaultIndex:
             [(file_id, block.id, block.line) for block in note.block_ids],
         )
         links = sorted(note.links + note.embeds, key=lambda link: link.start)
+        fields = {link.start: ("header", f.key) for f in note.header_fields for link in f.links}
+        fields.update({link.start: ("inline", f.key) for f in note.inline_fields for link in f.links})
         conn.executemany(
             """INSERT INTO links (source_id, ordinal, syntax, is_embed, raw, target, heading_path, block_id, display,
-                                  line, start_offset, end_offset, target_key, target_name_key, status, candidates)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'unresolved', '[]')""",
+                                  line, start_offset, end_offset, target_key, target_name_key, status, candidates,
+                                  field_source, field_key)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'unresolved', '[]', ?, ?)""",
             [
                 (file_id, index, link.syntax, link.is_embed, link.raw, link.target,
                  json.dumps(list(link.heading_path), ensure_ascii=False), link.block_id, link.display,
-                 link.line, link.start, link.end, lookup_key(link.target), _target_name_key(link.target))
+                 link.line, link.start, link.end, lookup_key(link.target), _target_name_key(link.target),
+                 *fields.get(link.start, (None, None)))
                 for index, link in enumerate(links)
             ],
         )
@@ -547,7 +591,21 @@ class VaultIndex:
             "INSERT INTO properties (file_id, key, value_json, source) VALUES (?, ?, ?, ?)",
             [(file_id, f.key, json.dumps(f.value, ensure_ascii=False), f.source) for f in body_fields(layout.text, layout.masked)],
         )
-        positions, lengths = postings(note_fields(path, note, layout))
+        fields = note_fields(path, note, layout)
+        positions, lengths = postings(fields)
+        # What math adds to each field: its terms with math, minus its terms without (key terms leave it out).
+        math: Counter[tuple[str, str]] = Counter()
+        for name, values in field_segments(path, note, layout).items():
+            if name not in ("body", "headings"):
+                continue
+            for text, _ in values:
+                if "$" in text:
+                    math.update((name, t) for t in tokenize(text))
+                    math.subtract((name, t) for t in tokenize(without_math(text)))
+        self.conn.executemany(
+            "INSERT INTO math_terms (file_id, field, term, tf) VALUES (?, ?, ?, ?)",
+            [(file_id, name, term, n) for (name, term), n in math.items() if n > 0],
+        )
         self.conn.executemany(
             "INSERT INTO postings (term, file_id, field, tf, positions) VALUES (?, ?, ?, ?, ?)",
             [(term, file_id, name, len(where), "[" + ",".join(map(str, where)) + "]")  # a JSON array

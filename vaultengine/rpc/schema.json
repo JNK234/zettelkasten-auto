@@ -314,6 +314,186 @@
       "response": {
         "$ref": "#/$defs/MentionsUnlinkedResponse"
       }
+    },
+    "explore.run": {
+      "summary": "Explore from a note (or where to start): a section per lens, each result with its lens and evidence; remembered for explore.mark and explore.link.",
+      "params": {
+        "$ref": "#/$defs/ExploreRunParams"
+      },
+      "result": {
+        "$ref": "#/$defs/ExploreRunResult"
+      },
+      "request": {
+        "$ref": "#/$defs/ExploreRunRequest"
+      },
+      "response": {
+        "$ref": "#/$defs/ExploreRunResponse"
+      }
+    },
+    "explore.mark": {
+      "summary": "Keep, dismiss or clear results of the last explore.run (the memory, never the notes).",
+      "params": {
+        "$ref": "#/$defs/ExploreMarkParams"
+      },
+      "result": {
+        "$ref": "#/$defs/ExploreMarkResult"
+      },
+      "request": {
+        "$ref": "#/$defs/ExploreMarkRequest"
+      },
+      "response": {
+        "$ref": "#/$defs/ExploreMarkResponse"
+      }
+    },
+    "explore.kept": {
+      "summary": "What was kept from explore, with its lens and evidence.",
+      "params": {
+        "$ref": "#/$defs/ExploreKeptParams"
+      },
+      "result": {
+        "$ref": "#/$defs/ExploreKeptResult"
+      },
+      "request": {
+        "$ref": "#/$defs/ExploreKeptRequest"
+      },
+      "response": {
+        "$ref": "#/$defs/ExploreKeptResponse"
+      }
+    },
+    "explore.link": {
+      "summary": "A result (or two notes) made a link under See Also in both notes; dry run unless dry_run=false.",
+      "params": {
+        "$ref": "#/$defs/ExploreLinkParams"
+      },
+      "result": {
+        "$ref": "#/$defs/ExploreLinkResult"
+      },
+      "request": {
+        "$ref": "#/$defs/ExploreLinkRequest"
+      },
+      "response": {
+        "$ref": "#/$defs/ExploreLinkResponse"
+      }
+    },
+    "explore.unlink": {
+      "summary": "Undo explore.link: remove the See Also lines linking the two notes; dry run unless dry_run=false.",
+      "params": {
+        "$ref": "#/$defs/ExploreUnlinkParams"
+      },
+      "result": {
+        "$ref": "#/$defs/ExploreUnlinkResult"
+      },
+      "request": {
+        "$ref": "#/$defs/ExploreUnlinkRequest"
+      },
+      "response": {
+        "$ref": "#/$defs/ExploreUnlinkResponse"
+      }
+    },
+    "map.get": {
+      "summary": "The map: communities, topic pages, bridges, hubs and authorities; record=true saves a snapshot.",
+      "params": {
+        "$ref": "#/$defs/MapParams"
+      },
+      "result": {
+        "$ref": "#/$defs/MapResult"
+      },
+      "request": {
+        "$ref": "#/$defs/MapGetRequest"
+      },
+      "response": {
+        "$ref": "#/$defs/MapGetResponse"
+      }
+    },
+    "map.since": {
+      "summary": "What changed since a recorded map: gaps closed, communities formed or gone, missing notes written.",
+      "params": {
+        "$ref": "#/$defs/MapSinceParams"
+      },
+      "result": {
+        "$ref": "#/$defs/MapSinceResult"
+      },
+      "request": {
+        "$ref": "#/$defs/MapSinceRequest"
+      },
+      "response": {
+        "$ref": "#/$defs/MapSinceResponse"
+      }
+    },
+    "note.deepen": {
+      "summary": "Five lenses on one note: neighbourhood, cited together, same foundations, backbone, cluster.",
+      "params": {
+        "$ref": "#/$defs/NoteDeepenParams"
+      },
+      "result": {
+        "$ref": "#/$defs/NoteDeepenResult"
+      },
+      "request": {
+        "$ref": "#/$defs/NoteDeepenRequest"
+      },
+      "response": {
+        "$ref": "#/$defs/NoteDeepenResponse"
+      }
+    },
+    "vault.discover": {
+      "summary": "Discover lenses: hidden links, same roles, bridges, gaps, surprises, unwritten notes, a wander.",
+      "params": {
+        "$ref": "#/$defs/VaultDiscoverParams"
+      },
+      "result": {
+        "$ref": "#/$defs/VaultDiscoverResult"
+      },
+      "request": {
+        "$ref": "#/$defs/VaultDiscoverRequest"
+      },
+      "response": {
+        "$ref": "#/$defs/VaultDiscoverResponse"
+      }
+    },
+    "notes.explain": {
+      "summary": "How two notes relate, signal by signal, with the evidence.",
+      "params": {
+        "$ref": "#/$defs/NotesExplainParams"
+      },
+      "result": {
+        "$ref": "#/$defs/NotesExplainResult"
+      },
+      "request": {
+        "$ref": "#/$defs/NotesExplainRequest"
+      },
+      "response": {
+        "$ref": "#/$defs/NotesExplainResponse"
+      }
+    },
+    "embed.status": {
+      "summary": "How many notes have a cached vector for the configured model.",
+      "params": {
+        "$ref": "#/$defs/EmbedStatusParams"
+      },
+      "result": {
+        "$ref": "#/$defs/EmbedStatusResult"
+      },
+      "request": {
+        "$ref": "#/$defs/EmbedStatusRequest"
+      },
+      "response": {
+        "$ref": "#/$defs/EmbedStatusResponse"
+      }
+    },
+    "config.show": {
+      "summary": "Every engine setting, its value and where it came from.",
+      "params": {
+        "$ref": "#/$defs/ConfigShowParams"
+      },
+      "result": {
+        "$ref": "#/$defs/ConfigShowResult"
+      },
+      "request": {
+        "$ref": "#/$defs/ConfigShowRequest"
+      },
+      "response": {
+        "$ref": "#/$defs/ConfigShowResponse"
+      }
     }
   },
   "x-errors": {
@@ -327,7 +507,8 @@
     "-32003": "Format not configured",
     "-32004": "Write rejected",
     "-32005": "Write failed",
-    "-32006": "Invalid query"
+    "-32006": "Invalid query",
+    "-32007": "Not available"
   },
   "$defs": {
     "AmbiguousLink": {
@@ -379,6 +560,112 @@
         "line"
       ],
       "title": "BlockItem",
+      "type": "object"
+    },
+    "BridgeLens": {
+      "additionalProperties": false,
+      "properties": {
+        "betweenness": {
+          "title": "Betweenness",
+          "type": "number"
+        },
+        "betweenness_percentile": {
+          "title": "Betweenness Percentile",
+          "type": "number"
+        },
+        "constraint": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Constraint"
+        },
+        "constraint_percentile": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Constraint Percentile"
+        },
+        "community": {
+          "title": "Community",
+          "type": "integer"
+        },
+        "reaches": {
+          "items": {
+            "$ref": "#/$defs/CommunityWeight"
+          },
+          "title": "Reaches",
+          "type": "array"
+        },
+        "exact": {
+          "title": "Exact",
+          "type": "boolean"
+        },
+        "sources": {
+          "title": "Sources",
+          "type": "integer"
+        },
+        "brokers": {
+          "items": {
+            "$ref": "#/$defs/Broker"
+          },
+          "title": "Brokers",
+          "type": "array"
+        }
+      },
+      "required": [
+        "betweenness",
+        "betweenness_percentile",
+        "constraint",
+        "constraint_percentile",
+        "community",
+        "reaches",
+        "exact",
+        "sources",
+        "brokers"
+      ],
+      "title": "BridgeLens",
+      "type": "object"
+    },
+    "Broker": {
+      "additionalProperties": false,
+      "properties": {
+        "communities": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Communities",
+          "type": "array"
+        },
+        "share": {
+          "title": "Share",
+          "type": "number"
+        },
+        "pairs": {
+          "title": "Pairs",
+          "type": "integer"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "communities",
+        "share",
+        "pairs",
+        "reason"
+      ],
+      "title": "Broker",
       "type": "object"
     },
     "CheckScope": {
@@ -537,6 +824,30 @@
       "title": "CheckedNote",
       "type": "object"
     },
+    "CitingNote": {
+      "additionalProperties": false,
+      "properties": {
+        "note": {
+          "title": "Note",
+          "type": "string"
+        },
+        "weight": {
+          "title": "Weight",
+          "type": "number"
+        },
+        "links_to": {
+          "title": "Links To",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "note",
+        "weight",
+        "links_to"
+      ],
+      "title": "CitingNote",
+      "type": "object"
+    },
     "ClauseMatch": {
       "additionalProperties": false,
       "properties": {
@@ -583,6 +894,99 @@
       "title": "ClauseMatch",
       "type": "object"
     },
+    "ClusterNeighbour": {
+      "additionalProperties": false,
+      "properties": {
+        "community": {
+          "title": "Community",
+          "type": "integer"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "weight": {
+          "title": "Weight",
+          "type": "number"
+        },
+        "through": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Through",
+          "type": "array"
+        }
+      },
+      "required": [
+        "community",
+        "name",
+        "weight",
+        "through"
+      ],
+      "title": "ClusterNeighbour",
+      "type": "object"
+    },
+    "ClusterPhrase": {
+      "additionalProperties": false,
+      "properties": {
+        "phrase": {
+          "title": "Phrase",
+          "type": "string"
+        },
+        "in_community": {
+          "title": "In Community",
+          "type": "integer"
+        },
+        "in_vault": {
+          "title": "In Vault",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "phrase",
+        "in_community",
+        "in_vault"
+      ],
+      "title": "ClusterPhrase",
+      "type": "object"
+    },
+    "CocitationEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "both": {
+          "items": {
+            "$ref": "#/$defs/CitingNote"
+          },
+          "title": "Both",
+          "type": "array"
+        },
+        "citing_a": {
+          "title": "Citing A",
+          "type": "integer"
+        },
+        "citing_b": {
+          "title": "Citing B",
+          "type": "integer"
+        },
+        "total_a": {
+          "title": "Total A",
+          "type": "number"
+        },
+        "total_b": {
+          "title": "Total B",
+          "type": "number"
+        }
+      },
+      "required": [
+        "both",
+        "citing_a",
+        "citing_b",
+        "total_a",
+        "total_b"
+      ],
+      "title": "CocitationEvidence",
+      "type": "object"
+    },
     "CodeCount": {
       "additionalProperties": false,
       "properties": {
@@ -602,6 +1006,148 @@
       "title": "CodeCount",
       "type": "object"
     },
+    "CommunityWeight": {
+      "additionalProperties": false,
+      "properties": {
+        "community": {
+          "title": "Community",
+          "type": "integer"
+        },
+        "weight": {
+          "title": "Weight",
+          "type": "number"
+        }
+      },
+      "required": [
+        "community",
+        "weight"
+      ],
+      "title": "CommunityWeight",
+      "type": "object"
+    },
+    "ConfigShowParams": {
+      "additionalProperties": false,
+      "properties": {},
+      "title": "ConfigShowParams",
+      "type": "object"
+    },
+    "ConfigShowRequest": {
+      "additionalProperties": false,
+      "description": "Every engine setting, its value and where it came from. Omit \"id\" to send a notification (no response).",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "method": {
+          "const": "config.show",
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/ConfigShowParams"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "method"
+      ],
+      "title": "ConfigShowRequest",
+      "type": "object"
+    },
+    "ConfigShowResponse": {
+      "additionalProperties": false,
+      "description": "Successful response to config.show.",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Id"
+        },
+        "result": {
+          "$ref": "#/$defs/ConfigShowResult"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "result"
+      ],
+      "title": "ConfigShowResponse",
+      "type": "object"
+    },
+    "ConfigShowResult": {
+      "additionalProperties": false,
+      "properties": {
+        "config_file": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Config File"
+        },
+        "config_found_by": {
+          "title": "Config Found By",
+          "type": "string"
+        },
+        "precedence": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Precedence",
+          "type": "array"
+        },
+        "settings": {
+          "items": {
+            "$ref": "#/$defs/SettingRow"
+          },
+          "title": "Settings",
+          "type": "array"
+        }
+      },
+      "required": [
+        "config_file",
+        "config_found_by",
+        "precedence",
+        "settings"
+      ],
+      "title": "ConfigShowResult",
+      "type": "object"
+    },
     "Count": {
       "additionalProperties": false,
       "properties": {
@@ -619,6 +1165,43 @@
         "notes"
       ],
       "title": "Count",
+      "type": "object"
+    },
+    "CouplingEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "both": {
+          "items": {
+            "$ref": "#/$defs/SharedReference"
+          },
+          "title": "Both",
+          "type": "array"
+        },
+        "references_a": {
+          "title": "References A",
+          "type": "integer"
+        },
+        "references_b": {
+          "title": "References B",
+          "type": "integer"
+        },
+        "total_a": {
+          "title": "Total A",
+          "type": "number"
+        },
+        "total_b": {
+          "title": "Total B",
+          "type": "number"
+        }
+      },
+      "required": [
+        "both",
+        "references_a",
+        "references_b",
+        "total_a",
+        "total_b"
+      ],
+      "title": "CouplingEvidence",
       "type": "object"
     },
     "CoverageCitation": {
@@ -774,6 +1357,584 @@
       "title": "CoverageSources",
       "type": "object"
     },
+    "DeepenBackbone": {
+      "additionalProperties": false,
+      "properties": {
+        "community": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Community"
+        },
+        "chain": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Chain",
+          "type": "array"
+        },
+        "steps": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Steps",
+          "type": "array"
+        },
+        "note_on_chain": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Note On Chain"
+        },
+        "steps_off": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Steps Off"
+        },
+        "joins_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Joins At"
+        },
+        "length": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Length"
+        },
+        "community_notes": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Community Notes"
+        }
+      },
+      "required": [
+        "community",
+        "chain",
+        "note_on_chain",
+        "steps_off",
+        "joins_at"
+      ],
+      "title": "DeepenBackbone",
+      "type": "object"
+    },
+    "DeepenCluster": {
+      "additionalProperties": false,
+      "properties": {
+        "community": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Community"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        },
+        "notes": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Notes"
+        },
+        "phrases": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ClusterPhrase"
+          },
+          "title": "Phrases",
+          "type": "array"
+        },
+        "hubs": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Hubs",
+          "type": "array"
+        },
+        "topic_pages": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/MapTopicPage"
+          },
+          "title": "Topic Pages",
+          "type": "array"
+        },
+        "weight_inside": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Weight Inside"
+        },
+        "inside_percentile": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Inside Percentile"
+        },
+        "weight": {
+          "title": "Weight",
+          "type": "number"
+        },
+        "outside_share": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Outside Share"
+        },
+        "participation": {
+          "title": "Participation",
+          "type": "number"
+        },
+        "neighbours": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ClusterNeighbour"
+          },
+          "title": "Neighbours",
+          "type": "array"
+        }
+      },
+      "required": [
+        "community",
+        "weight",
+        "participation"
+      ],
+      "title": "DeepenCluster",
+      "type": "object"
+    },
+    "DeepenHit": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "score": {
+          "title": "Score",
+          "type": "number"
+        },
+        "linked": {
+          "title": "Linked",
+          "type": "boolean"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "score",
+        "linked",
+        "reason"
+      ],
+      "title": "DeepenHit",
+      "type": "object"
+    },
+    "DeepenLenses": {
+      "additionalProperties": false,
+      "properties": {
+        "neighbourhood": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DeepenNeighbourhood"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "cited": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DeepenPairs"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "foundations": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DeepenPairs"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "backbone": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DeepenBackbone"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "cluster": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DeepenCluster"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "DeepenLenses",
+      "type": "object"
+    },
+    "DeepenNeighbourhood": {
+      "additionalProperties": false,
+      "properties": {
+        "cutoff": {
+          "title": "Cutoff",
+          "type": "number"
+        },
+        "percentile": {
+          "title": "Percentile",
+          "type": "number"
+        },
+        "compared": {
+          "title": "Compared",
+          "type": "integer"
+        },
+        "kept": {
+          "title": "Kept",
+          "type": "integer"
+        },
+        "text_unavailable": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Text Unavailable"
+        },
+        "uncached": {
+          "title": "Uncached",
+          "type": "integer"
+        },
+        "hits": {
+          "items": {
+            "$ref": "#/$defs/DeepenHit"
+          },
+          "title": "Hits",
+          "type": "array"
+        }
+      },
+      "required": [
+        "cutoff",
+        "percentile",
+        "compared",
+        "kept",
+        "text_unavailable",
+        "uncached",
+        "hits"
+      ],
+      "title": "DeepenNeighbourhood",
+      "type": "object"
+    },
+    "DeepenPairNote": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "value": {
+          "title": "Value",
+          "type": "number"
+        },
+        "percentile": {
+          "title": "Percentile",
+          "type": "number"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/$defs/EvidenceName"
+          },
+          "title": "Evidence",
+          "type": "array"
+        }
+      },
+      "required": [
+        "path",
+        "value",
+        "percentile",
+        "evidence"
+      ],
+      "title": "DeepenPairNote",
+      "type": "object"
+    },
+    "DeepenPairs": {
+      "additionalProperties": false,
+      "properties": {
+        "cutoff": {
+          "title": "Cutoff",
+          "type": "number"
+        },
+        "percentile": {
+          "title": "Percentile",
+          "type": "number"
+        },
+        "pairs_in_vault": {
+          "title": "Pairs In Vault",
+          "type": "integer"
+        },
+        "exact": {
+          "title": "Exact",
+          "type": "boolean"
+        },
+        "found": {
+          "title": "Found",
+          "type": "integer"
+        },
+        "kept": {
+          "title": "Kept",
+          "type": "integer"
+        },
+        "notes": {
+          "items": {
+            "$ref": "#/$defs/DeepenPairNote"
+          },
+          "title": "Notes",
+          "type": "array"
+        },
+        "below_cutoff": {
+          "items": {
+            "$ref": "#/$defs/DeepenPairNote"
+          },
+          "title": "Below Cutoff",
+          "type": "array"
+        }
+      },
+      "required": [
+        "cutoff",
+        "percentile",
+        "pairs_in_vault",
+        "exact",
+        "found",
+        "kept",
+        "notes",
+        "below_cutoff"
+      ],
+      "title": "DeepenPairs",
+      "type": "object"
+    },
+    "DirectEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "a_to_b": {
+          "description": "Lines of a with a link to b.",
+          "items": {
+            "type": "integer"
+          },
+          "title": "A To B",
+          "type": "array"
+        },
+        "b_to_a": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "B To A",
+          "type": "array"
+        },
+        "a_to_b_tag_lines": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "A To B Tag Lines",
+          "type": "array"
+        },
+        "b_to_a_tag_lines": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "B To A Tag Lines",
+          "type": "array"
+        }
+      },
+      "required": [
+        "a_to_b",
+        "b_to_a",
+        "a_to_b_tag_lines",
+        "b_to_a_tag_lines"
+      ],
+      "title": "DirectEvidence",
+      "type": "object"
+    },
+    "DiscoverLenses": {
+      "additionalProperties": false,
+      "properties": {
+        "hidden": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HiddenLens"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "role": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RoleLens"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "bridge": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BridgeLens"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "gap": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GapLens"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "surprise": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SurpriseLens"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "unwritten": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UnwrittenLens"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "wander": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WanderLens"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "DiscoverLenses",
+      "type": "object"
+    },
     "DuplicateCandidate": {
       "additionalProperties": false,
       "properties": {
@@ -865,6 +2026,183 @@
       "title": "DuplicateName",
       "type": "object"
     },
+    "EmbedStatusParams": {
+      "additionalProperties": false,
+      "properties": {},
+      "title": "EmbedStatusParams",
+      "type": "object"
+    },
+    "EmbedStatusRequest": {
+      "additionalProperties": false,
+      "description": "How many notes have a cached vector for the configured model. Omit \"id\" to send a notification (no response).",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "method": {
+          "const": "embed.status",
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/EmbedStatusParams"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "method"
+      ],
+      "title": "EmbedStatusRequest",
+      "type": "object"
+    },
+    "EmbedStatusResponse": {
+      "additionalProperties": false,
+      "description": "Successful response to embed.status.",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Id"
+        },
+        "result": {
+          "$ref": "#/$defs/EmbedStatusResult"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "result"
+      ],
+      "title": "EmbedStatusResponse",
+      "type": "object"
+    },
+    "EmbedStatusResult": {
+      "additionalProperties": false,
+      "properties": {
+        "model_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Model Id"
+        },
+        "notes": {
+          "title": "Notes",
+          "type": "integer"
+        },
+        "with_vector": {
+          "title": "With Vector",
+          "type": "integer"
+        },
+        "missing": {
+          "title": "Missing",
+          "type": "integer"
+        },
+        "missing_paths": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Missing Paths",
+          "type": "array"
+        },
+        "dim": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Dim"
+        },
+        "other_models": {
+          "items": {
+            "$ref": "#/$defs/OtherModel"
+          },
+          "title": "Other Models",
+          "type": "array"
+        },
+        "cache_vectors": {
+          "title": "Cache Vectors",
+          "type": "integer"
+        },
+        "cache_bytes": {
+          "title": "Cache Bytes",
+          "type": "integer"
+        },
+        "provider": {
+          "title": "Provider",
+          "type": "string"
+        },
+        "model_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Model Path"
+        },
+        "model_found": {
+          "title": "Model Found",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "model_id",
+        "notes",
+        "with_vector",
+        "missing",
+        "missing_paths",
+        "dim",
+        "other_models",
+        "cache_vectors",
+        "cache_bytes",
+        "provider",
+        "model_path",
+        "model_found"
+      ],
+      "title": "EmbedStatusResult",
+      "type": "object"
+    },
     "ErrorObject": {
       "additionalProperties": false,
       "properties": {
@@ -920,6 +2258,1449 @@
         "error"
       ],
       "title": "ErrorResponse",
+      "type": "object"
+    },
+    "EvidenceName": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "weight": {
+          "title": "Weight",
+          "type": "number"
+        }
+      },
+      "required": [
+        "name",
+        "weight"
+      ],
+      "title": "EvidenceName",
+      "type": "object"
+    },
+    "ExplainSignal": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "enum": [
+            "direct",
+            "cocitation",
+            "coupling",
+            "tags",
+            "text"
+          ],
+          "title": "Name",
+          "type": "string"
+        },
+        "value": {
+          "title": "Value",
+          "type": "number"
+        },
+        "weight": {
+          "title": "Weight",
+          "type": "number"
+        },
+        "contribution": {
+          "description": "weight x value; the score is their sum.",
+          "title": "Contribution",
+          "type": "number"
+        },
+        "available": {
+          "title": "Available",
+          "type": "boolean"
+        },
+        "unavailable": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Unavailable"
+        },
+        "evidence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DirectEvidence"
+            },
+            {
+              "$ref": "#/$defs/CocitationEvidence"
+            },
+            {
+              "$ref": "#/$defs/CouplingEvidence"
+            },
+            {
+              "$ref": "#/$defs/TagsEvidence"
+            },
+            {
+              "$ref": "#/$defs/TextEvidence"
+            },
+            {
+              "$ref": "#/$defs/NoEvidence"
+            }
+          ],
+          "title": "Evidence"
+        }
+      },
+      "required": [
+        "name",
+        "value",
+        "weight",
+        "contribution",
+        "available",
+        "unavailable",
+        "evidence"
+      ],
+      "title": "ExplainSignal",
+      "type": "object"
+    },
+    "ExplainWeights": {
+      "additionalProperties": false,
+      "properties": {
+        "direct": {
+          "title": "Direct",
+          "type": "number"
+        },
+        "cocitation": {
+          "title": "Cocitation",
+          "type": "number"
+        },
+        "coupling": {
+          "title": "Coupling",
+          "type": "number"
+        },
+        "tags": {
+          "title": "Tags",
+          "type": "number"
+        },
+        "text": {
+          "title": "Text",
+          "type": "number"
+        }
+      },
+      "required": [
+        "direct",
+        "cocitation",
+        "coupling",
+        "tags",
+        "text"
+      ],
+      "title": "ExplainWeights",
+      "type": "object"
+    },
+    "ExploreItem": {
+      "additionalProperties": false,
+      "properties": {
+        "ref": {
+          "description": "'2.3': section 2, result 3 of this run; what explore.mark and explore.link take.",
+          "title": "Ref",
+          "type": "string"
+        },
+        "lens": {
+          "enum": [
+            "neighbourhood",
+            "cited",
+            "foundations",
+            "backbone",
+            "cluster",
+            "hidden",
+            "role",
+            "bridge",
+            "gap",
+            "surprise",
+            "unwritten",
+            "wander",
+            "topicless"
+          ],
+          "title": "Lens",
+          "type": "string"
+        },
+        "kind": {
+          "description": "note: a note; pair: two notes not linked (a gap's joiners); link: a link that is there (surprise); missing: a missing note; community: a community or a pair of them.",
+          "enum": [
+            "note",
+            "pair",
+            "link",
+            "missing",
+            "community"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "target": {
+          "description": "What it is about, as remembered: a path, 'a ↔ b', '[[name]]', 'community: …'.",
+          "title": "Target",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "evidence": {
+          "description": "One line: why the lens found it, with the numbers it rests on.",
+          "title": "Evidence",
+          "type": "string"
+        },
+        "notes": {
+          "description": "The notes it is about (vault paths).",
+          "items": {
+            "type": "string"
+          },
+          "title": "Notes",
+          "type": "array"
+        },
+        "link": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The two notes explore.link would link; null when it is not two notes to link.",
+          "title": "Link"
+        },
+        "start_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Without a start: where explore would start for it (pass it as note).",
+          "title": "Start At"
+        },
+        "mark": {
+          "anyOf": [
+            {
+              "enum": [
+                "keep",
+                "dismiss"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Your earlier mark for this result from this start.",
+          "title": "Mark"
+        }
+      },
+      "required": [
+        "ref",
+        "lens",
+        "kind",
+        "target",
+        "title",
+        "evidence",
+        "notes",
+        "link",
+        "start_at",
+        "mark"
+      ],
+      "title": "ExploreItem",
+      "type": "object"
+    },
+    "ExploreKeptParams": {
+      "additionalProperties": false,
+      "properties": {
+        "lens": {
+          "anyOf": [
+            {
+              "enum": [
+                "neighbourhood",
+                "cited",
+                "foundations",
+                "backbone",
+                "cluster",
+                "hidden",
+                "role",
+                "bridge",
+                "gap",
+                "surprise",
+                "unwritten",
+                "wander",
+                "topicless"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lens"
+        }
+      },
+      "title": "ExploreKeptParams",
+      "type": "object"
+    },
+    "ExploreKeptRequest": {
+      "additionalProperties": false,
+      "description": "What was kept from explore, with its lens and evidence. Omit \"id\" to send a notification (no response).",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "method": {
+          "const": "explore.kept",
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/ExploreKeptParams"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "method"
+      ],
+      "title": "ExploreKeptRequest",
+      "type": "object"
+    },
+    "ExploreKeptResponse": {
+      "additionalProperties": false,
+      "description": "Successful response to explore.kept.",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Id"
+        },
+        "result": {
+          "$ref": "#/$defs/ExploreKeptResult"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "result"
+      ],
+      "title": "ExploreKeptResponse",
+      "type": "object"
+    },
+    "ExploreKeptResult": {
+      "additionalProperties": false,
+      "properties": {
+        "memory": {
+          "title": "Memory",
+          "type": "string"
+        },
+        "kept": {
+          "description": "Oldest first.",
+          "items": {
+            "$ref": "#/$defs/KeptItem"
+          },
+          "title": "Kept",
+          "type": "array"
+        }
+      },
+      "required": [
+        "memory",
+        "kept"
+      ],
+      "title": "ExploreKeptResult",
+      "type": "object"
+    },
+    "ExploreLinkParams": {
+      "additionalProperties": false,
+      "properties": {
+        "ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A result of the last explore.run; or give a and b.",
+          "title": "Ref"
+        },
+        "a": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "A"
+        },
+        "b": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "B"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The one-line reason; default: the result's lens and evidence.",
+          "title": "Reason"
+        },
+        "dry_run": {
+          "default": true,
+          "description": "True (the default): return the diff and write nothing.",
+          "title": "Dry Run",
+          "type": "boolean"
+        }
+      },
+      "title": "ExploreLinkParams",
+      "type": "object"
+    },
+    "ExploreLinkRequest": {
+      "additionalProperties": false,
+      "description": "A result (or two notes) made a link under See Also in both notes; dry run unless dry_run=false. Omit \"id\" to send a notification (no response).",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "method": {
+          "const": "explore.link",
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/ExploreLinkParams"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "method"
+      ],
+      "title": "ExploreLinkRequest",
+      "type": "object"
+    },
+    "ExploreLinkResponse": {
+      "additionalProperties": false,
+      "description": "Successful response to explore.link.",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Id"
+        },
+        "result": {
+          "$ref": "#/$defs/ExploreLinkResult"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "result"
+      ],
+      "title": "ExploreLinkResponse",
+      "type": "object"
+    },
+    "ExploreLinkResult": {
+      "additionalProperties": false,
+      "properties": {
+        "operation": {
+          "enum": [
+            "new",
+            "link",
+            "set",
+            "fix",
+            "ingest",
+            "link-it",
+            "unlink"
+          ],
+          "title": "Operation",
+          "type": "string"
+        },
+        "status": {
+          "description": "written; refused (would add violations, nothing written); dry-run; unchanged.",
+          "enum": [
+            "written",
+            "refused",
+            "dry-run",
+            "unchanged"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "dry_run": {
+          "title": "Dry Run",
+          "type": "boolean"
+        },
+        "written": {
+          "title": "Written",
+          "type": "boolean"
+        },
+        "files": {
+          "items": {
+            "$ref": "#/$defs/WrittenFile"
+          },
+          "title": "Files",
+          "type": "array"
+        },
+        "already": {
+          "description": "Parts of the request that were already so, e.g. an existing mirror.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Already",
+          "type": "array"
+        },
+        "new_violations": {
+          "description": "Why a write was refused: violations it would add.",
+          "items": {
+            "$ref": "#/$defs/Violation"
+          },
+          "title": "New Violations",
+          "type": "array"
+        },
+        "tolerated": {
+          "description": "Violations already in the notes written; they do not block a write.",
+          "items": {
+            "$ref": "#/$defs/Violation"
+          },
+          "title": "Tolerated",
+          "type": "array"
+        },
+        "index": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IndexSync"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Null unless written."
+        },
+        "recovered": {
+          "description": "Files restored from an interrupted earlier write.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Recovered",
+          "type": "array"
+        },
+        "ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Ref"
+        },
+        "lens": {
+          "anyOf": [
+            {
+              "enum": [
+                "neighbourhood",
+                "cited",
+                "foundations",
+                "backbone",
+                "cluster",
+                "hidden",
+                "role",
+                "bridge",
+                "gap",
+                "surprise",
+                "unwritten",
+                "wander",
+                "topicless"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Lens"
+        },
+        "notes": {
+          "description": "The two notes, as given or from the result.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Notes",
+          "type": "array"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        },
+        "kept": {
+          "description": "The result counted as a keep (a link made from a result).",
+          "title": "Kept",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "operation",
+        "status",
+        "dry_run",
+        "written",
+        "files",
+        "already",
+        "new_violations",
+        "tolerated",
+        "index",
+        "recovered",
+        "ref",
+        "lens",
+        "notes",
+        "reason",
+        "kept"
+      ],
+      "title": "ExploreLinkResult",
+      "type": "object"
+    },
+    "ExploreMarkParams": {
+      "additionalProperties": false,
+      "properties": {
+        "verdict": {
+          "enum": [
+            "keep",
+            "dismiss",
+            "clear"
+          ],
+          "title": "Verdict",
+          "type": "string"
+        },
+        "refs": {
+          "description": "Refs of the last explore.run ('2.3').",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Refs",
+          "type": "array"
+        }
+      },
+      "required": [
+        "verdict",
+        "refs"
+      ],
+      "title": "ExploreMarkParams",
+      "type": "object"
+    },
+    "ExploreMarkRequest": {
+      "additionalProperties": false,
+      "description": "Keep, dismiss or clear results of the last explore.run (the memory, never the notes). Omit \"id\" to send a notification (no response).",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "method": {
+          "const": "explore.mark",
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/ExploreMarkParams"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "method",
+        "params"
+      ],
+      "title": "ExploreMarkRequest",
+      "type": "object"
+    },
+    "ExploreMarkResponse": {
+      "additionalProperties": false,
+      "description": "Successful response to explore.mark.",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Id"
+        },
+        "result": {
+          "$ref": "#/$defs/ExploreMarkResult"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "result"
+      ],
+      "title": "ExploreMarkResponse",
+      "type": "object"
+    },
+    "ExploreMarkResult": {
+      "additionalProperties": false,
+      "properties": {
+        "marked": {
+          "items": {
+            "$ref": "#/$defs/MarkedItem"
+          },
+          "title": "Marked",
+          "type": "array"
+        },
+        "keep_rates": {
+          "description": "For the lenses marked here, over every start.",
+          "items": {
+            "$ref": "#/$defs/KeepRate"
+          },
+          "title": "Keep Rates",
+          "type": "array"
+        }
+      },
+      "required": [
+        "marked",
+        "keep_rates"
+      ],
+      "title": "ExploreMarkResult",
+      "type": "object"
+    },
+    "ExploreNumbers": {
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "description": "current: computed for the vault as it is; reused: the vault-wide distributions are from a few notes ago (see computed_at).",
+          "enum": [
+            "current",
+            "reused"
+          ],
+          "title": "Source",
+          "type": "string"
+        },
+        "computed_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Computed At"
+        },
+        "changed_since": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Changed Since"
+        },
+        "threshold": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Threshold"
+        }
+      },
+      "required": [
+        "source"
+      ],
+      "title": "ExploreNumbers",
+      "type": "object"
+    },
+    "ExploreRunParams": {
+      "additionalProperties": false,
+      "properties": {
+        "note": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A note (name, path or alias) or a missing note; null: where to start.",
+          "title": "Note"
+        },
+        "lenses": {
+          "anyOf": [
+            {
+              "items": {
+                "enum": [
+                  "neighbourhood",
+                  "cited",
+                  "foundations",
+                  "backbone",
+                  "cluster",
+                  "hidden",
+                  "role",
+                  "bridge",
+                  "gap",
+                  "surprise",
+                  "unwritten",
+                  "wander",
+                  "topicless"
+                ],
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Null: engine.explore.lenses (or start_lenses without a note).",
+          "title": "Lenses"
+        },
+        "per_lens": {
+          "anyOf": [
+            {
+              "maximum": 5,
+              "minimum": 3,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Results per section; null: engine.explore.per_lens.",
+          "title": "Per Lens"
+        },
+        "fresh": {
+          "default": false,
+          "description": "Leave out what was seen or dismissed before from this start.",
+          "title": "Fresh",
+          "type": "boolean"
+        },
+        "record": {
+          "default": true,
+          "description": "Remember the run: its results become refs for explore.mark/link, and count as seen.",
+          "title": "Record",
+          "type": "boolean"
+        },
+        "refresh": {
+          "default": false,
+          "description": "Recompute the stored vault-wide numbers now.",
+          "title": "Refresh",
+          "type": "boolean"
+        }
+      },
+      "title": "ExploreRunParams",
+      "type": "object"
+    },
+    "ExploreRunRequest": {
+      "additionalProperties": false,
+      "description": "Explore from a note (or where to start): a section per lens, each result with its lens and evidence; remembered for explore.mark and explore.link. Omit \"id\" to send a notification (no response).",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "method": {
+          "const": "explore.run",
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/ExploreRunParams"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "method"
+      ],
+      "title": "ExploreRunRequest",
+      "type": "object"
+    },
+    "ExploreRunResponse": {
+      "additionalProperties": false,
+      "description": "Successful response to explore.run.",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Id"
+        },
+        "result": {
+          "$ref": "#/$defs/ExploreRunResult"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "result"
+      ],
+      "title": "ExploreRunResponse",
+      "type": "object"
+    },
+    "ExploreRunResult": {
+      "additionalProperties": false,
+      "properties": {
+        "start": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The start's path, '[[missing note]]', or null (proposals).",
+          "title": "Start"
+        },
+        "start_kind": {
+          "anyOf": [
+            {
+              "enum": [
+                "note",
+                "missing"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Start Kind"
+        },
+        "fresh": {
+          "title": "Fresh",
+          "type": "boolean"
+        },
+        "duplicate_cutoff": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Similarity at or above which two notes are near-duplicates.",
+          "title": "Duplicate Cutoff"
+        },
+        "similarity": {
+          "enum": [
+            "embedding",
+            "key terms"
+          ],
+          "title": "Similarity",
+          "type": "string"
+        },
+        "memory": {
+          "description": "The memory file (marks, seen, links made, map snapshots).",
+          "title": "Memory",
+          "type": "string"
+        },
+        "numbers": {
+          "$ref": "#/$defs/ExploreNumbers"
+        },
+        "text_signal": {
+          "$ref": "#/$defs/TextSignal"
+        },
+        "sections": {
+          "description": "Ordered by keep_score, ties in the configured order.",
+          "items": {
+            "$ref": "#/$defs/ExploreSection"
+          },
+          "title": "Sections",
+          "type": "array"
+        }
+      },
+      "required": [
+        "start",
+        "start_kind",
+        "fresh",
+        "duplicate_cutoff",
+        "similarity",
+        "memory",
+        "numbers",
+        "text_signal",
+        "sections"
+      ],
+      "title": "ExploreRunResult",
+      "type": "object"
+    },
+    "ExploreSection": {
+      "additionalProperties": false,
+      "properties": {
+        "lens": {
+          "enum": [
+            "neighbourhood",
+            "cited",
+            "foundations",
+            "backbone",
+            "cluster",
+            "hidden",
+            "role",
+            "bridge",
+            "gap",
+            "surprise",
+            "unwritten",
+            "wander",
+            "topicless"
+          ],
+          "title": "Lens",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "deepen",
+            "discover",
+            "map"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "what": {
+          "title": "What",
+          "type": "string"
+        },
+        "budget": {
+          "description": "Results this section may show (3 to 5; deepen and discover get the same total).",
+          "title": "Budget",
+          "type": "integer"
+        },
+        "found": {
+          "description": "Candidates the lens found.",
+          "title": "Found",
+          "type": "integer"
+        },
+        "hidden": {
+          "description": "Left out: seen or dismissed before (fresh).",
+          "title": "Hidden",
+          "type": "integer"
+        },
+        "duplicates": {
+          "description": "Left out: near-duplicates of a result shown.",
+          "title": "Duplicates",
+          "type": "integer"
+        },
+        "kept": {
+          "description": "Your keeps of this lens's results, over every start.",
+          "title": "Kept",
+          "type": "integer"
+        },
+        "dismissed": {
+          "title": "Dismissed",
+          "type": "integer"
+        },
+        "keep_score": {
+          "description": "(kept + 1) / (kept + dismissed + 2): the sections are ordered by it.",
+          "title": "Keep Score",
+          "type": "number"
+        },
+        "applies": {
+          "description": "False: the lens does not apply to this start (e.g. a missing note) and takes no space.",
+          "title": "Applies",
+          "type": "boolean"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Why there are no results, when there are none.",
+          "title": "Note"
+        },
+        "results": {
+          "items": {
+            "$ref": "#/$defs/ExploreItem"
+          },
+          "title": "Results",
+          "type": "array"
+        }
+      },
+      "required": [
+        "lens",
+        "kind",
+        "title",
+        "what",
+        "budget",
+        "found",
+        "hidden",
+        "duplicates",
+        "kept",
+        "dismissed",
+        "keep_score",
+        "applies",
+        "note",
+        "results"
+      ],
+      "title": "ExploreSection",
+      "type": "object"
+    },
+    "ExploreUnlinkParams": {
+      "additionalProperties": false,
+      "properties": {
+        "a": {
+          "minLength": 1,
+          "title": "A",
+          "type": "string"
+        },
+        "b": {
+          "minLength": 1,
+          "title": "B",
+          "type": "string"
+        },
+        "dry_run": {
+          "default": true,
+          "description": "True (the default): return the diff and write nothing.",
+          "title": "Dry Run",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "a",
+        "b"
+      ],
+      "title": "ExploreUnlinkParams",
+      "type": "object"
+    },
+    "ExploreUnlinkRequest": {
+      "additionalProperties": false,
+      "description": "Undo explore.link: remove the See Also lines linking the two notes; dry run unless dry_run=false. Omit \"id\" to send a notification (no response).",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "method": {
+          "const": "explore.unlink",
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/ExploreUnlinkParams"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "method",
+        "params"
+      ],
+      "title": "ExploreUnlinkRequest",
+      "type": "object"
+    },
+    "ExploreUnlinkResponse": {
+      "additionalProperties": false,
+      "description": "Successful response to explore.unlink.",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Id"
+        },
+        "result": {
+          "$ref": "#/$defs/ExploreUnlinkResult"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "result"
+      ],
+      "title": "ExploreUnlinkResponse",
+      "type": "object"
+    },
+    "ExploreUnlinkResult": {
+      "additionalProperties": false,
+      "properties": {
+        "operation": {
+          "enum": [
+            "new",
+            "link",
+            "set",
+            "fix",
+            "ingest",
+            "link-it",
+            "unlink"
+          ],
+          "title": "Operation",
+          "type": "string"
+        },
+        "status": {
+          "description": "written; refused (would add violations, nothing written); dry-run; unchanged.",
+          "enum": [
+            "written",
+            "refused",
+            "dry-run",
+            "unchanged"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "dry_run": {
+          "title": "Dry Run",
+          "type": "boolean"
+        },
+        "written": {
+          "title": "Written",
+          "type": "boolean"
+        },
+        "files": {
+          "items": {
+            "$ref": "#/$defs/WrittenFile"
+          },
+          "title": "Files",
+          "type": "array"
+        },
+        "already": {
+          "description": "Parts of the request that were already so, e.g. an existing mirror.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Already",
+          "type": "array"
+        },
+        "new_violations": {
+          "description": "Why a write was refused: violations it would add.",
+          "items": {
+            "$ref": "#/$defs/Violation"
+          },
+          "title": "New Violations",
+          "type": "array"
+        },
+        "tolerated": {
+          "description": "Violations already in the notes written; they do not block a write.",
+          "items": {
+            "$ref": "#/$defs/Violation"
+          },
+          "title": "Tolerated",
+          "type": "array"
+        },
+        "index": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IndexSync"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Null unless written."
+        },
+        "recovered": {
+          "description": "Files restored from an interrupted earlier write.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Recovered",
+          "type": "array"
+        },
+        "recorded": {
+          "description": "link-it made this link: its section goes too when nothing else is left in it.",
+          "title": "Recorded",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "operation",
+        "status",
+        "dry_run",
+        "written",
+        "files",
+        "already",
+        "new_violations",
+        "tolerated",
+        "index",
+        "recovered",
+        "recorded"
+      ],
+      "title": "ExploreUnlinkResult",
       "type": "object"
     },
     "Facets": {
@@ -1012,6 +3793,166 @@
         "path"
       ],
       "title": "FormatRef",
+      "type": "object"
+    },
+    "GapFound": {
+      "additionalProperties": false,
+      "properties": {
+        "cutoff": {
+          "title": "Cutoff",
+          "type": "number"
+        },
+        "pairs": {
+          "title": "Pairs",
+          "type": "integer"
+        },
+        "found": {
+          "title": "Found",
+          "type": "integer"
+        },
+        "results": {
+          "items": {
+            "$ref": "#/$defs/GapResult"
+          },
+          "title": "Results",
+          "type": "array"
+        }
+      },
+      "required": [
+        "cutoff",
+        "pairs",
+        "found",
+        "results"
+      ],
+      "title": "GapFound",
+      "type": "object"
+    },
+    "GapJoin": {
+      "additionalProperties": false,
+      "properties": {
+        "a": {
+          "title": "A",
+          "type": "string"
+        },
+        "b": {
+          "title": "B",
+          "type": "string"
+        },
+        "score": {
+          "title": "Score",
+          "type": "number"
+        },
+        "middles": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Middles",
+          "type": "array"
+        }
+      },
+      "required": [
+        "a",
+        "b",
+        "score",
+        "middles"
+      ],
+      "title": "GapJoin",
+      "type": "object"
+    },
+    "GapLens": {
+      "additionalProperties": false,
+      "properties": {
+        "with_embeddings": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GapFound"
+            },
+            {
+              "$ref": "#/$defs/Unavailable"
+            }
+          ],
+          "title": "With Embeddings"
+        },
+        "without_embeddings": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GapFound"
+            },
+            {
+              "$ref": "#/$defs/Unavailable"
+            }
+          ],
+          "title": "Without Embeddings"
+        }
+      },
+      "required": [
+        "with_embeddings",
+        "without_embeddings"
+      ],
+      "title": "GapLens",
+      "type": "object"
+    },
+    "GapResult": {
+      "additionalProperties": false,
+      "properties": {
+        "communities": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Communities",
+          "type": "array"
+        },
+        "names": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Names",
+          "type": "array"
+        },
+        "closeness": {
+          "title": "Closeness",
+          "type": "number"
+        },
+        "closeness_percentile": {
+          "title": "Closeness Percentile",
+          "type": "number"
+        },
+        "links": {
+          "title": "Links",
+          "type": "integer"
+        },
+        "expected": {
+          "title": "Expected",
+          "type": "number"
+        },
+        "ratio": {
+          "title": "Ratio",
+          "type": "number"
+        },
+        "join": {
+          "items": {
+            "$ref": "#/$defs/GapJoin"
+          },
+          "title": "Join",
+          "type": "array"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "communities",
+        "names",
+        "closeness",
+        "closeness_percentile",
+        "links",
+        "expected",
+        "ratio",
+        "join",
+        "reason"
+      ],
+      "title": "GapResult",
       "type": "object"
     },
     "HeadingItem": {
@@ -1264,6 +4205,90 @@
         "empty_notes"
       ],
       "title": "HealthSummary",
+      "type": "object"
+    },
+    "HiddenLens": {
+      "additionalProperties": false,
+      "properties": {
+        "cutoff": {
+          "title": "Cutoff",
+          "type": "number"
+        },
+        "pairs_in_vault": {
+          "title": "Pairs In Vault",
+          "type": "integer"
+        },
+        "exact": {
+          "title": "Exact",
+          "type": "boolean"
+        },
+        "sources": {
+          "title": "Sources",
+          "type": "integer"
+        },
+        "found": {
+          "title": "Found",
+          "type": "integer"
+        },
+        "kept": {
+          "title": "Kept",
+          "type": "integer"
+        },
+        "results": {
+          "items": {
+            "$ref": "#/$defs/HiddenResult"
+          },
+          "title": "Results",
+          "type": "array"
+        }
+      },
+      "required": [
+        "cutoff",
+        "pairs_in_vault",
+        "exact",
+        "sources",
+        "found",
+        "kept",
+        "results"
+      ],
+      "title": "HiddenLens",
+      "type": "object"
+    },
+    "HiddenResult": {
+      "additionalProperties": false,
+      "properties": {
+        "note": {
+          "title": "Note",
+          "type": "string"
+        },
+        "score": {
+          "title": "Score",
+          "type": "number"
+        },
+        "percentile": {
+          "title": "Percentile",
+          "type": "number"
+        },
+        "middles": {
+          "items": {
+            "$ref": "#/$defs/Middle"
+          },
+          "title": "Middles",
+          "type": "array"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "note",
+        "score",
+        "percentile",
+        "middles",
+        "reason"
+      ],
+      "title": "HiddenResult",
       "type": "object"
     },
     "IncomingLink": {
@@ -1837,6 +4862,152 @@
       "title": "IngestDocument",
       "type": "object"
     },
+    "KeepRate": {
+      "additionalProperties": false,
+      "properties": {
+        "lens": {
+          "enum": [
+            "neighbourhood",
+            "cited",
+            "foundations",
+            "backbone",
+            "cluster",
+            "hidden",
+            "role",
+            "bridge",
+            "gap",
+            "surprise",
+            "unwritten",
+            "wander",
+            "topicless"
+          ],
+          "title": "Lens",
+          "type": "string"
+        },
+        "kept": {
+          "title": "Kept",
+          "type": "integer"
+        },
+        "dismissed": {
+          "title": "Dismissed",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "lens",
+        "kept",
+        "dismissed"
+      ],
+      "title": "KeepRate",
+      "type": "object"
+    },
+    "KeptItem": {
+      "additionalProperties": false,
+      "properties": {
+        "start": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Start"
+        },
+        "lens": {
+          "enum": [
+            "neighbourhood",
+            "cited",
+            "foundations",
+            "backbone",
+            "cluster",
+            "hidden",
+            "role",
+            "bridge",
+            "gap",
+            "surprise",
+            "unwritten",
+            "wander",
+            "topicless"
+          ],
+          "title": "Lens",
+          "type": "string"
+        },
+        "target": {
+          "title": "Target",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "note",
+            "pair",
+            "link",
+            "missing",
+            "community"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "evidence": {
+          "title": "Evidence",
+          "type": "string"
+        },
+        "link": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Link"
+        },
+        "at": {
+          "title": "At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "start",
+        "lens",
+        "target",
+        "kind",
+        "title",
+        "evidence",
+        "link",
+        "at"
+      ],
+      "title": "KeptItem",
+      "type": "object"
+    },
+    "LeftOutTag": {
+      "additionalProperties": false,
+      "properties": {
+        "tag": {
+          "title": "Tag",
+          "type": "string"
+        },
+        "notes": {
+          "title": "Notes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "tag",
+        "notes"
+      ],
+      "title": "LeftOutTag",
+      "type": "object"
+    },
     "LinkCounts": {
       "additionalProperties": false,
       "properties": {
@@ -1922,7 +5093,7 @@
           "type": "string"
         },
         "score": {
-          "description": "0.4 shared + 0.3 cited + 0.3 text.",
+          "description": "(0.4 shared + 0.3 cited + 0.2 tags + 0.3 text) / 1.2; without the text signal, the rescaled `weights`.",
           "title": "Score",
           "type": "number"
         },
@@ -1934,7 +5105,13 @@
           "title": "Cited",
           "type": "number"
         },
+        "tags": {
+          "description": "Weighted Jaccard of the two notes' #tags and tag links (Tags: [[topic]]), as in note.related.",
+          "title": "Tags",
+          "type": "number"
+        },
         "text": {
+          "description": "Centered cosine of the two notes' embeddings (0 if negative).",
           "title": "Text",
           "type": "number"
         },
@@ -1952,7 +5129,16 @@
           "title": "Cited By",
           "type": "array"
         },
+        "shared_tags": {
+          "description": "The #tags and [[tag links]] both notes have, rarest first.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Shared Tags",
+          "type": "array"
+        },
         "terms": {
+          "description": "Words in both notes that add most to their embedding cosine.",
           "items": {
             "type": "string"
           },
@@ -1970,9 +5156,11 @@
         "score",
         "shared",
         "cited",
+        "tags",
         "text",
         "shared_with",
         "cited_by",
+        "shared_tags",
         "terms",
         "reason"
       ],
@@ -2152,14 +5340,833 @@
           },
           "title": "Links",
           "type": "array"
+        },
+        "text_signal": {
+          "$ref": "#/$defs/TextSignal"
+        },
+        "weights": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "description": "The weights used: shared, cited, tags, text (rescaled to sum to 1 without the text signal).",
+          "title": "Weights",
+          "type": "object"
         }
       },
       "required": [
         "note",
         "path",
-        "links"
+        "links",
+        "text_signal",
+        "weights"
       ],
       "title": "LinksSuggestResult",
+      "type": "object"
+    },
+    "MapAuthority": {
+      "additionalProperties": false,
+      "properties": {
+        "target": {
+          "title": "Target",
+          "type": "string"
+        },
+        "missing": {
+          "title": "Missing",
+          "type": "boolean"
+        },
+        "score": {
+          "title": "Score",
+          "type": "number"
+        }
+      },
+      "required": [
+        "target",
+        "missing",
+        "score"
+      ],
+      "title": "MapAuthority",
+      "type": "object"
+    },
+    "MapBetweenness": {
+      "additionalProperties": false,
+      "properties": {
+        "exact": {
+          "title": "Exact",
+          "type": "boolean"
+        },
+        "sources": {
+          "title": "Sources",
+          "type": "integer"
+        },
+        "visits": {
+          "title": "Visits",
+          "type": "integer"
+        },
+        "budget": {
+          "title": "Budget",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "exact",
+        "sources",
+        "visits",
+        "budget"
+      ],
+      "title": "MapBetweenness",
+      "type": "object"
+    },
+    "MapBridge": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "betweenness": {
+          "title": "Betweenness",
+          "type": "number"
+        },
+        "betweenness_percentile": {
+          "title": "Betweenness Percentile",
+          "type": "number"
+        },
+        "constraint": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Constraint"
+        },
+        "constraint_percentile": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Constraint Percentile"
+        },
+        "community": {
+          "title": "Community",
+          "type": "integer"
+        },
+        "spans": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Spans",
+          "type": "array"
+        }
+      },
+      "required": [
+        "path",
+        "betweenness",
+        "betweenness_percentile",
+        "constraint",
+        "constraint_percentile",
+        "community",
+        "spans"
+      ],
+      "title": "MapBridge",
+      "type": "object"
+    },
+    "MapCommunity": {
+      "additionalProperties": false,
+      "properties": {
+        "number": {
+          "title": "Number",
+          "type": "integer"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "notes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Notes",
+          "type": "array"
+        },
+        "phrases": {
+          "items": {
+            "$ref": "#/$defs/MapPhrase"
+          },
+          "title": "Phrases",
+          "type": "array"
+        },
+        "hubs": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Hubs",
+          "type": "array"
+        },
+        "topic_pages": {
+          "items": {
+            "$ref": "#/$defs/MapTopicPage"
+          },
+          "title": "Topic Pages",
+          "type": "array"
+        }
+      },
+      "required": [
+        "number",
+        "name",
+        "notes",
+        "phrases",
+        "hubs",
+        "topic_pages"
+      ],
+      "title": "MapCommunity",
+      "type": "object"
+    },
+    "MapGetRequest": {
+      "additionalProperties": false,
+      "description": "The map: communities, topic pages, bridges, hubs and authorities; record=true saves a snapshot. Omit \"id\" to send a notification (no response).",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "method": {
+          "const": "map.get",
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/MapParams"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "method"
+      ],
+      "title": "MapGetRequest",
+      "type": "object"
+    },
+    "MapGetResponse": {
+      "additionalProperties": false,
+      "description": "Successful response to map.get.",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Id"
+        },
+        "result": {
+          "$ref": "#/$defs/MapResult"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "result"
+      ],
+      "title": "MapGetResponse",
+      "type": "object"
+    },
+    "MapHub": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "score": {
+          "title": "Score",
+          "type": "number"
+        }
+      },
+      "required": [
+        "path",
+        "score"
+      ],
+      "title": "MapHub",
+      "type": "object"
+    },
+    "MapMeaning": {
+      "additionalProperties": false,
+      "properties": {
+        "edges": {
+          "items": {
+            "$ref": "#/$defs/MeaningEdge"
+          },
+          "title": "Edges",
+          "type": "array"
+        },
+        "cutoff": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Cutoff"
+        },
+        "percentile": {
+          "title": "Percentile",
+          "type": "number"
+        },
+        "unavailable": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Unavailable"
+        },
+        "changes": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MeaningChanges"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "edges",
+        "cutoff",
+        "percentile",
+        "unavailable",
+        "changes"
+      ],
+      "title": "MapMeaning",
+      "type": "object"
+    },
+    "MapParams": {
+      "additionalProperties": false,
+      "properties": {
+        "limit": {
+          "default": 10,
+          "description": "Items per list (0 = all).",
+          "minimum": 0,
+          "title": "Limit",
+          "type": "integer"
+        },
+        "meaning": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Add meaning edges for the communities (null: engine.explore.meaning).",
+          "title": "Meaning"
+        },
+        "record": {
+          "default": false,
+          "description": "Also save a snapshot in the memory (for map.since).",
+          "title": "Record",
+          "type": "boolean"
+        }
+      },
+      "title": "MapParams",
+      "type": "object"
+    },
+    "MapPhrase": {
+      "additionalProperties": false,
+      "properties": {
+        "phrase": {
+          "title": "Phrase",
+          "type": "string"
+        },
+        "in_community": {
+          "title": "In Community",
+          "type": "integer"
+        },
+        "in_vault": {
+          "title": "In Vault",
+          "type": "integer"
+        },
+        "score": {
+          "title": "Score",
+          "type": "number"
+        }
+      },
+      "required": [
+        "phrase",
+        "in_community",
+        "in_vault",
+        "score"
+      ],
+      "title": "MapPhrase",
+      "type": "object"
+    },
+    "MapRecorded": {
+      "additionalProperties": false,
+      "properties": {
+        "at": {
+          "title": "At",
+          "type": "string"
+        },
+        "bytes": {
+          "title": "Bytes",
+          "type": "integer"
+        },
+        "memory": {
+          "title": "Memory",
+          "type": "string"
+        },
+        "communities": {
+          "title": "Communities",
+          "type": "integer"
+        },
+        "gaps": {
+          "title": "Gaps",
+          "type": "integer"
+        },
+        "basis": {
+          "title": "Basis",
+          "type": "string"
+        },
+        "missing": {
+          "title": "Missing",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "at",
+        "bytes",
+        "memory",
+        "communities",
+        "gaps",
+        "basis",
+        "missing"
+      ],
+      "title": "MapRecorded",
+      "type": "object"
+    },
+    "MapResult": {
+      "additionalProperties": false,
+      "properties": {
+        "percentile": {
+          "title": "Percentile",
+          "type": "number"
+        },
+        "topic_pages": {
+          "description": "How topic pages were decided (the format's types), or why there are none.",
+          "title": "Topic Pages",
+          "type": "string"
+        },
+        "notes": {
+          "title": "Notes",
+          "type": "integer"
+        },
+        "missing_notes": {
+          "title": "Missing Notes",
+          "type": "integer"
+        },
+        "tags": {
+          "title": "Tags",
+          "type": "integer"
+        },
+        "left_out_tags": {
+          "items": {
+            "$ref": "#/$defs/TagCountItem"
+          },
+          "title": "Left Out Tags",
+          "type": "array"
+        },
+        "nodes": {
+          "title": "Nodes",
+          "type": "integer"
+        },
+        "edges": {
+          "title": "Edges",
+          "type": "integer"
+        },
+        "communities": {
+          "items": {
+            "$ref": "#/$defs/MapCommunity"
+          },
+          "title": "Communities",
+          "type": "array"
+        },
+        "notes_in_communities": {
+          "title": "Notes In Communities",
+          "type": "integer"
+        },
+        "alone": {
+          "title": "Alone",
+          "type": "integer"
+        },
+        "modularity": {
+          "title": "Modularity",
+          "type": "number"
+        },
+        "seed": {
+          "title": "Seed",
+          "type": "integer"
+        },
+        "resolution": {
+          "title": "Resolution",
+          "type": "number"
+        },
+        "tag_rule": {
+          "title": "Tag Rule",
+          "type": "string"
+        },
+        "meaning_edges": {
+          "title": "Meaning Edges",
+          "type": "integer"
+        },
+        "meaning_cutoff": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Meaning Cutoff"
+        },
+        "meaning_unavailable": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Meaning Unavailable"
+        },
+        "betweenness": {
+          "$ref": "#/$defs/MapBetweenness"
+        },
+        "bridges": {
+          "items": {
+            "$ref": "#/$defs/MapBridge"
+          },
+          "title": "Bridges",
+          "type": "array"
+        },
+        "hubs": {
+          "items": {
+            "$ref": "#/$defs/MapHub"
+          },
+          "title": "Hubs",
+          "type": "array"
+        },
+        "authorities": {
+          "items": {
+            "$ref": "#/$defs/MapAuthority"
+          },
+          "title": "Authorities",
+          "type": "array"
+        },
+        "meaning": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MapMeaning"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "recorded": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MapRecorded"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "percentile",
+        "topic_pages",
+        "notes",
+        "missing_notes",
+        "tags",
+        "left_out_tags",
+        "nodes",
+        "edges",
+        "communities",
+        "notes_in_communities",
+        "alone",
+        "modularity",
+        "seed",
+        "resolution",
+        "tag_rule",
+        "meaning_edges",
+        "meaning_cutoff",
+        "meaning_unavailable",
+        "betweenness",
+        "bridges",
+        "hubs",
+        "authorities"
+      ],
+      "title": "MapResult",
+      "type": "object"
+    },
+    "MapSinceParams": {
+      "additionalProperties": false,
+      "properties": {
+        "since": {
+          "description": "A date (2026-11-10) or a time (2026-11-10T14:30).",
+          "minLength": 1,
+          "title": "Since",
+          "type": "string"
+        }
+      },
+      "required": [
+        "since"
+      ],
+      "title": "MapSinceParams",
+      "type": "object"
+    },
+    "MapSinceRequest": {
+      "additionalProperties": false,
+      "description": "What changed since a recorded map: gaps closed, communities formed or gone, missing notes written. Omit \"id\" to send a notification (no response).",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "method": {
+          "const": "map.since",
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/MapSinceParams"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "method",
+        "params"
+      ],
+      "title": "MapSinceRequest",
+      "type": "object"
+    },
+    "MapSinceResponse": {
+      "additionalProperties": false,
+      "description": "Successful response to map.since.",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Id"
+        },
+        "result": {
+          "$ref": "#/$defs/MapSinceResult"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "result"
+      ],
+      "title": "MapSinceResponse",
+      "type": "object"
+    },
+    "MapSinceResult": {
+      "additionalProperties": false,
+      "properties": {
+        "since": {
+          "title": "Since",
+          "type": "string"
+        },
+        "snapshot": {
+          "description": "When the snapshot compared with was recorded.",
+          "title": "Snapshot",
+          "type": "string"
+        },
+        "chosen": {
+          "description": "How it was chosen.",
+          "title": "Chosen",
+          "type": "string"
+        },
+        "notes": {
+          "description": "[then, now]",
+          "items": {
+            "type": "integer"
+          },
+          "title": "Notes",
+          "type": "array"
+        },
+        "links": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Links",
+          "type": "array"
+        },
+        "communities": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Communities",
+          "type": "array"
+        },
+        "formed": {
+          "items": {
+            "$ref": "#/$defs/SinceCommunity"
+          },
+          "title": "Formed",
+          "type": "array"
+        },
+        "gone": {
+          "items": {
+            "$ref": "#/$defs/SinceCommunity"
+          },
+          "title": "Gone",
+          "type": "array"
+        },
+        "gaps": {
+          "items": {
+            "$ref": "#/$defs/SinceGap"
+          },
+          "title": "Gaps",
+          "type": "array"
+        },
+        "gap_basis": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Gap Basis"
+        },
+        "written": {
+          "items": {
+            "$ref": "#/$defs/SinceWritten"
+          },
+          "title": "Written",
+          "type": "array"
+        },
+        "topic_pages": {
+          "items": {
+            "$ref": "#/$defs/SinceTopicPage"
+          },
+          "title": "Topic Pages",
+          "type": "array"
+        }
+      },
+      "required": [
+        "since",
+        "snapshot",
+        "chosen",
+        "notes",
+        "links",
+        "communities",
+        "formed",
+        "gone",
+        "gaps",
+        "gap_basis",
+        "written",
+        "topic_pages"
+      ],
+      "title": "MapSinceResult",
+      "type": "object"
+    },
+    "MapTopicPage": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "reaches": {
+          "title": "Reaches",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "path",
+        "reaches"
+      ],
+      "title": "MapTopicPage",
       "type": "object"
     },
     "Mark": {
@@ -2190,6 +6197,178 @@
         "kind"
       ],
       "title": "Mark",
+      "type": "object"
+    },
+    "MarkedItem": {
+      "additionalProperties": false,
+      "properties": {
+        "ref": {
+          "title": "Ref",
+          "type": "string"
+        },
+        "lens": {
+          "enum": [
+            "neighbourhood",
+            "cited",
+            "foundations",
+            "backbone",
+            "cluster",
+            "hidden",
+            "role",
+            "bridge",
+            "gap",
+            "surprise",
+            "unwritten",
+            "wander",
+            "topicless"
+          ],
+          "title": "Lens",
+          "type": "string"
+        },
+        "target": {
+          "title": "Target",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "verdict": {
+          "enum": [
+            "keep",
+            "dismiss",
+            "clear"
+          ],
+          "title": "Verdict",
+          "type": "string"
+        },
+        "changed": {
+          "description": "False for a clear of a result that was not marked.",
+          "title": "Changed",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "ref",
+        "lens",
+        "target",
+        "title",
+        "verdict",
+        "changed"
+      ],
+      "title": "MarkedItem",
+      "type": "object"
+    },
+    "MeaningChanges": {
+      "additionalProperties": false,
+      "properties": {
+        "stranded_before": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Stranded Before",
+          "type": "array"
+        },
+        "stranded_after": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Stranded After",
+          "type": "array"
+        },
+        "placed": {
+          "items": {
+            "$ref": "#/$defs/PlacedNote"
+          },
+          "title": "Placed",
+          "type": "array"
+        },
+        "moved": {
+          "items": {
+            "$ref": "#/$defs/MovedNote"
+          },
+          "title": "Moved",
+          "type": "array"
+        },
+        "match": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "title": "Match",
+          "type": "object"
+        },
+        "split": {
+          "additionalProperties": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "title": "Split",
+          "type": "object"
+        },
+        "joined": {
+          "additionalProperties": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "title": "Joined",
+          "type": "object"
+        },
+        "communities_before": {
+          "title": "Communities Before",
+          "type": "integer"
+        },
+        "communities_after": {
+          "title": "Communities After",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "stranded_before",
+        "stranded_after",
+        "placed",
+        "moved",
+        "match",
+        "split",
+        "joined",
+        "communities_before",
+        "communities_after"
+      ],
+      "title": "MeaningChanges",
+      "type": "object"
+    },
+    "MeaningEdge": {
+      "additionalProperties": false,
+      "properties": {
+        "a": {
+          "title": "A",
+          "type": "string"
+        },
+        "b": {
+          "title": "B",
+          "type": "string"
+        },
+        "cosine": {
+          "title": "Cosine",
+          "type": "number"
+        }
+      },
+      "required": [
+        "a",
+        "b",
+        "cosine"
+      ],
+      "title": "MeaningEdge",
       "type": "object"
     },
     "MentionedNote": {
@@ -2404,6 +6583,35 @@
       "title": "MentionsUnlinkedResult",
       "type": "object"
     },
+    "Middle": {
+      "additionalProperties": false,
+      "properties": {
+        "middle": {
+          "title": "Middle",
+          "type": "string"
+        },
+        "kind": {
+          "title": "Kind",
+          "type": "string"
+        },
+        "notes": {
+          "title": "Notes",
+          "type": "integer"
+        },
+        "weight": {
+          "title": "Weight",
+          "type": "number"
+        }
+      },
+      "required": [
+        "middle",
+        "kind",
+        "notes",
+        "weight"
+      ],
+      "title": "Middle",
+      "type": "object"
+    },
     "MissingNote": {
       "additionalProperties": false,
       "properties": {
@@ -2512,6 +6720,30 @@
       "title": "MostCited",
       "type": "object"
     },
+    "MovedNote": {
+      "additionalProperties": false,
+      "properties": {
+        "note": {
+          "title": "Note",
+          "type": "string"
+        },
+        "from": {
+          "title": "From",
+          "type": "integer"
+        },
+        "to": {
+          "title": "To",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "note",
+        "from",
+        "to"
+      ],
+      "title": "MovedNote",
+      "type": "object"
+    },
     "NameCount": {
       "additionalProperties": false,
       "properties": {
@@ -2529,6 +6761,156 @@
         "linking_notes"
       ],
       "title": "NameCount",
+      "type": "object"
+    },
+    "NoEvidence": {
+      "additionalProperties": false,
+      "properties": {},
+      "title": "NoEvidence",
+      "type": "object"
+    },
+    "NoteDeepenParams": {
+      "additionalProperties": false,
+      "properties": {
+        "note": {
+          "minLength": 1,
+          "title": "Note",
+          "type": "string"
+        },
+        "lenses": {
+          "anyOf": [
+            {
+              "items": {
+                "enum": [
+                  "neighbourhood",
+                  "cited",
+                  "foundations",
+                  "backbone",
+                  "cluster"
+                ],
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lenses"
+        },
+        "limit": {
+          "default": 8,
+          "description": "Notes per lens (0 = all that stand out).",
+          "minimum": 0,
+          "title": "Limit",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "note"
+      ],
+      "title": "NoteDeepenParams",
+      "type": "object"
+    },
+    "NoteDeepenRequest": {
+      "additionalProperties": false,
+      "description": "Five lenses on one note: neighbourhood, cited together, same foundations, backbone, cluster. Omit \"id\" to send a notification (no response).",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "method": {
+          "const": "note.deepen",
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/NoteDeepenParams"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "method",
+        "params"
+      ],
+      "title": "NoteDeepenRequest",
+      "type": "object"
+    },
+    "NoteDeepenResponse": {
+      "additionalProperties": false,
+      "description": "Successful response to note.deepen.",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Id"
+        },
+        "result": {
+          "$ref": "#/$defs/NoteDeepenResult"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "result"
+      ],
+      "title": "NoteDeepenResponse",
+      "type": "object"
+    },
+    "NoteDeepenResult": {
+      "additionalProperties": false,
+      "properties": {
+        "note": {
+          "title": "Note",
+          "type": "string"
+        },
+        "percentile": {
+          "title": "Percentile",
+          "type": "number"
+        },
+        "lenses": {
+          "$ref": "#/$defs/DeepenLenses"
+        }
+      },
+      "required": [
+        "note",
+        "percentile",
+        "lenses"
+      ],
+      "title": "NoteDeepenResult",
       "type": "object"
     },
     "NoteGetParams": {
@@ -2900,7 +7282,9 @@
             "link",
             "set",
             "fix",
-            "ingest"
+            "ingest",
+            "link-it",
+            "unlink"
           ],
           "title": "Operation",
           "type": "string"
@@ -3568,12 +7952,25 @@
           },
           "title": "Hits",
           "type": "array"
+        },
+        "text_signal": {
+          "$ref": "#/$defs/TextSignal"
+        },
+        "weights": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "description": "The weights used: graph, cocitation, coupling, tags, text (engine.related.weights, rescaled to sum to 1 without the text signal).",
+          "title": "Weights",
+          "type": "object"
         }
       },
       "required": [
         "seed",
         "compared",
-        "hits"
+        "hits",
+        "text_signal",
+        "weights"
       ],
       "title": "NoteRelatedResult",
       "type": "object"
@@ -3686,6 +8083,164 @@
         "result"
       ],
       "title": "NoteSetResponse",
+      "type": "object"
+    },
+    "NotesExplainParams": {
+      "additionalProperties": false,
+      "properties": {
+        "a": {
+          "minLength": 1,
+          "title": "A",
+          "type": "string"
+        },
+        "b": {
+          "minLength": 1,
+          "title": "B",
+          "type": "string"
+        },
+        "words": {
+          "default": 8,
+          "description": "Words listed behind the text score.",
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Words",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "a",
+        "b"
+      ],
+      "title": "NotesExplainParams",
+      "type": "object"
+    },
+    "NotesExplainRequest": {
+      "additionalProperties": false,
+      "description": "How two notes relate, signal by signal, with the evidence. Omit \"id\" to send a notification (no response).",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "method": {
+          "const": "notes.explain",
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/NotesExplainParams"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "method",
+        "params"
+      ],
+      "title": "NotesExplainRequest",
+      "type": "object"
+    },
+    "NotesExplainResponse": {
+      "additionalProperties": false,
+      "description": "Successful response to notes.explain.",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Id"
+        },
+        "result": {
+          "$ref": "#/$defs/NotesExplainResult"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "result"
+      ],
+      "title": "NotesExplainResponse",
+      "type": "object"
+    },
+    "NotesExplainResult": {
+      "additionalProperties": false,
+      "properties": {
+        "configured_weights": {
+          "$ref": "#/$defs/ExplainWeights"
+        },
+        "a": {
+          "title": "A",
+          "type": "string"
+        },
+        "b": {
+          "title": "B",
+          "type": "string"
+        },
+        "score": {
+          "title": "Score",
+          "type": "number"
+        },
+        "signals": {
+          "items": {
+            "$ref": "#/$defs/ExplainSignal"
+          },
+          "title": "Signals",
+          "type": "array"
+        },
+        "model_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Model Id"
+        },
+        "uncached": {
+          "title": "Uncached",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "configured_weights",
+        "a",
+        "b",
+        "score",
+        "signals",
+        "model_id",
+        "uncached"
+      ],
+      "title": "NotesExplainResult",
       "type": "object"
     },
     "NotesPickParams": {
@@ -3954,6 +8509,37 @@
       "title": "NotesSuggestResult",
       "type": "object"
     },
+    "OtherModel": {
+      "additionalProperties": false,
+      "properties": {
+        "model_id": {
+          "title": "Model Id",
+          "type": "string"
+        },
+        "vectors": {
+          "title": "Vectors",
+          "type": "integer"
+        },
+        "dim": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Dim"
+        }
+      },
+      "required": [
+        "model_id",
+        "vectors",
+        "dim"
+      ],
+      "title": "OtherModel",
+      "type": "object"
+    },
     "OutgoingLink": {
       "additionalProperties": false,
       "properties": {
@@ -4184,6 +8770,25 @@
       "title": "PickedNote",
       "type": "object"
     },
+    "PlacedNote": {
+      "additionalProperties": false,
+      "properties": {
+        "note": {
+          "title": "Note",
+          "type": "string"
+        },
+        "community": {
+          "title": "Community",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "note",
+        "community"
+      ],
+      "title": "PlacedNote",
+      "type": "object"
+    },
     "PreviewLine": {
       "additionalProperties": false,
       "properties": {
@@ -4289,7 +8894,7 @@
           "type": "string"
         },
         "score": {
-          "description": "0.5 graph + 0.3 text + 0.2 tags.",
+          "description": "The weighted sum of the scaled signals (engine.related.weights; default 0.7 text + 0.1 graph + 0.1 tags + 0.05 co-citation + 0.05 coupling); see `weights`.",
           "title": "Score",
           "type": "number"
         },
@@ -4298,11 +8903,22 @@
           "type": "number"
         },
         "text": {
+          "description": "Centered cosine of the two notes' embeddings, over the best one (0 to 1).",
           "title": "Text",
           "type": "number"
         },
         "tags": {
           "title": "Tags",
+          "type": "number"
+        },
+        "cocitation": {
+          "description": "Notes that link to both, scaled (0 unless engine.related.weights.cocitation > 0).",
+          "title": "Cocitation",
+          "type": "number"
+        },
+        "coupling": {
+          "description": "What both link to, scaled (0 unless engine.related.weights.coupling > 0).",
+          "title": "Coupling",
           "type": "number"
         },
         "linked": {
@@ -4321,7 +8937,7 @@
           "title": "Hops"
         },
         "reason": {
-          "description": "E.g. \"2 hops via kl-penalty-in-rlhf · shares #rl · similar text (kl, ppo)\".",
+          "description": "E.g. \"2 hops via kl-penalty-in-rlhf · shares #rl · similar text (kl, ppo)\"; the words are those in both notes that add most to their embedding cosine.",
           "title": "Reason",
           "type": "string"
         }
@@ -4333,6 +8949,8 @@
         "graph",
         "text",
         "tags",
+        "cocitation",
+        "coupling",
         "linked",
         "hops",
         "reason"
@@ -4458,6 +9076,42 @@
         },
         {
           "$ref": "#/$defs/MentionsUnlinkedRequest"
+        },
+        {
+          "$ref": "#/$defs/ExploreRunRequest"
+        },
+        {
+          "$ref": "#/$defs/ExploreMarkRequest"
+        },
+        {
+          "$ref": "#/$defs/ExploreKeptRequest"
+        },
+        {
+          "$ref": "#/$defs/ExploreLinkRequest"
+        },
+        {
+          "$ref": "#/$defs/ExploreUnlinkRequest"
+        },
+        {
+          "$ref": "#/$defs/MapGetRequest"
+        },
+        {
+          "$ref": "#/$defs/MapSinceRequest"
+        },
+        {
+          "$ref": "#/$defs/NoteDeepenRequest"
+        },
+        {
+          "$ref": "#/$defs/VaultDiscoverRequest"
+        },
+        {
+          "$ref": "#/$defs/NotesExplainRequest"
+        },
+        {
+          "$ref": "#/$defs/EmbedStatusRequest"
+        },
+        {
+          "$ref": "#/$defs/ConfigShowRequest"
         }
       ]
     },
@@ -4522,9 +9176,133 @@
           "$ref": "#/$defs/MentionsUnlinkedResponse"
         },
         {
+          "$ref": "#/$defs/ExploreRunResponse"
+        },
+        {
+          "$ref": "#/$defs/ExploreMarkResponse"
+        },
+        {
+          "$ref": "#/$defs/ExploreKeptResponse"
+        },
+        {
+          "$ref": "#/$defs/ExploreLinkResponse"
+        },
+        {
+          "$ref": "#/$defs/ExploreUnlinkResponse"
+        },
+        {
+          "$ref": "#/$defs/MapGetResponse"
+        },
+        {
+          "$ref": "#/$defs/MapSinceResponse"
+        },
+        {
+          "$ref": "#/$defs/NoteDeepenResponse"
+        },
+        {
+          "$ref": "#/$defs/VaultDiscoverResponse"
+        },
+        {
+          "$ref": "#/$defs/NotesExplainResponse"
+        },
+        {
+          "$ref": "#/$defs/EmbedStatusResponse"
+        },
+        {
+          "$ref": "#/$defs/ConfigShowResponse"
+        },
+        {
           "$ref": "#/$defs/ErrorResponse"
         }
       ]
+    },
+    "RoleLens": {
+      "additionalProperties": false,
+      "properties": {
+        "cutoff": {
+          "title": "Cutoff",
+          "type": "number"
+        },
+        "pairs_in_vault": {
+          "title": "Pairs In Vault",
+          "type": "integer"
+        },
+        "exact": {
+          "title": "Exact",
+          "type": "boolean"
+        },
+        "found": {
+          "title": "Found",
+          "type": "integer"
+        },
+        "kept": {
+          "title": "Kept",
+          "type": "integer"
+        },
+        "results": {
+          "items": {
+            "$ref": "#/$defs/RoleResult"
+          },
+          "title": "Results",
+          "type": "array"
+        }
+      },
+      "required": [
+        "cutoff",
+        "pairs_in_vault",
+        "exact",
+        "found",
+        "kept",
+        "results"
+      ],
+      "title": "RoleLens",
+      "type": "object"
+    },
+    "RoleResult": {
+      "additionalProperties": false,
+      "properties": {
+        "note": {
+          "title": "Note",
+          "type": "string"
+        },
+        "community": {
+          "title": "Community",
+          "type": "integer"
+        },
+        "distance": {
+          "title": "Distance",
+          "type": "number"
+        },
+        "percentile": {
+          "title": "Percentile",
+          "type": "number"
+        },
+        "features": {
+          "additionalProperties": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "description": "feature -> [this note's, that note's] raw value.",
+          "title": "Features",
+          "type": "object"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "note",
+        "community",
+        "distance",
+        "percentile",
+        "features",
+        "reason"
+      ],
+      "title": "RoleResult",
+      "type": "object"
     },
     "SearchClause": {
       "additionalProperties": false,
@@ -4822,6 +9600,261 @@
       "title": "SearchQueryResult",
       "type": "object"
     },
+    "SettingRow": {
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "title": "Key",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Value"
+        },
+        "source": {
+          "description": "default, file, env NAME or flag --x.",
+          "title": "Source",
+          "type": "string"
+        },
+        "env": {
+          "description": "The environment variable that sets it.",
+          "title": "Env",
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "value",
+        "source",
+        "env"
+      ],
+      "title": "SettingRow",
+      "type": "object"
+    },
+    "SharedReference": {
+      "additionalProperties": false,
+      "properties": {
+        "target": {
+          "title": "Target",
+          "type": "string"
+        },
+        "missing": {
+          "title": "Missing",
+          "type": "boolean"
+        },
+        "weight": {
+          "title": "Weight",
+          "type": "number"
+        },
+        "linked_from": {
+          "title": "Linked From",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "target",
+        "missing",
+        "weight",
+        "linked_from"
+      ],
+      "title": "SharedReference",
+      "type": "object"
+    },
+    "SharedWord": {
+      "additionalProperties": false,
+      "properties": {
+        "word": {
+          "title": "Word",
+          "type": "string"
+        },
+        "share": {
+          "title": "Share",
+          "type": "number"
+        }
+      },
+      "required": [
+        "word",
+        "share"
+      ],
+      "title": "SharedWord",
+      "type": "object"
+    },
+    "SinceCommunity": {
+      "additionalProperties": false,
+      "properties": {
+        "community": {
+          "title": "Community",
+          "type": "integer"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "notes": {
+          "title": "Notes",
+          "type": "integer"
+        },
+        "best_match": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Best Match"
+        },
+        "overlap": {
+          "title": "Overlap",
+          "type": "number"
+        }
+      },
+      "required": [
+        "community",
+        "name",
+        "notes",
+        "overlap"
+      ],
+      "title": "SinceCommunity",
+      "type": "object"
+    },
+    "SinceGap": {
+      "additionalProperties": false,
+      "properties": {
+        "communities": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Communities",
+          "type": "array"
+        },
+        "names": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Names",
+          "type": "array"
+        },
+        "links_then": {
+          "title": "Links Then",
+          "type": "number"
+        },
+        "expected_then": {
+          "title": "Expected Then",
+          "type": "number"
+        },
+        "links_now": {
+          "title": "Links Now",
+          "type": "number"
+        },
+        "expected_now": {
+          "title": "Expected Now",
+          "type": "number"
+        },
+        "added": {
+          "description": "Links between the two sides made since (pairs of paths).",
+          "items": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "title": "Added",
+          "type": "array"
+        },
+        "status": {
+          "enum": [
+            "open",
+            "closed",
+            "gone"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "why": {
+          "title": "Why",
+          "type": "string"
+        }
+      },
+      "required": [
+        "communities",
+        "names",
+        "links_then",
+        "expected_then",
+        "links_now",
+        "expected_now",
+        "added",
+        "status",
+        "why"
+      ],
+      "title": "SinceGap",
+      "type": "object"
+    },
+    "SinceTopicPage": {
+      "additionalProperties": false,
+      "properties": {
+        "community_then": {
+          "title": "Community Then",
+          "type": "integer"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "community": {
+          "title": "Community",
+          "type": "integer"
+        },
+        "topic_pages": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Topic Pages",
+          "type": "array"
+        }
+      },
+      "required": [
+        "community_then",
+        "name",
+        "community",
+        "topic_pages"
+      ],
+      "title": "SinceTopicPage",
+      "type": "object"
+    },
+    "SinceWritten": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "linked_from": {
+          "title": "Linked From",
+          "type": "integer"
+        },
+        "note": {
+          "title": "Note",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "linked_from",
+        "note"
+      ],
+      "title": "SinceWritten",
+      "type": "object"
+    },
     "SkippedFix": {
       "additionalProperties": false,
       "properties": {
@@ -4927,6 +9960,133 @@
       "title": "Snippet",
       "type": "object"
     },
+    "SurpriseFound": {
+      "additionalProperties": false,
+      "properties": {
+        "cutoff": {
+          "title": "Cutoff",
+          "type": "number"
+        },
+        "linked_pairs": {
+          "title": "Linked Pairs",
+          "type": "integer"
+        },
+        "found": {
+          "title": "Found",
+          "type": "integer"
+        },
+        "results": {
+          "items": {
+            "$ref": "#/$defs/SurpriseResult"
+          },
+          "title": "Results",
+          "type": "array"
+        }
+      },
+      "required": [
+        "cutoff",
+        "linked_pairs",
+        "found",
+        "results"
+      ],
+      "title": "SurpriseFound",
+      "type": "object"
+    },
+    "SurpriseLens": {
+      "additionalProperties": false,
+      "properties": {
+        "with_embeddings": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SurpriseFound"
+            },
+            {
+              "$ref": "#/$defs/Unavailable"
+            }
+          ],
+          "title": "With Embeddings"
+        },
+        "without_embeddings": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SurpriseFound"
+            },
+            {
+              "$ref": "#/$defs/Unavailable"
+            }
+          ],
+          "title": "Without Embeddings"
+        }
+      },
+      "required": [
+        "with_embeddings",
+        "without_embeddings"
+      ],
+      "title": "SurpriseLens",
+      "type": "object"
+    },
+    "SurpriseResult": {
+      "additionalProperties": false,
+      "properties": {
+        "a": {
+          "title": "A",
+          "type": "string"
+        },
+        "b": {
+          "title": "B",
+          "type": "string"
+        },
+        "lines": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Lines",
+          "type": "array"
+        },
+        "similarity": {
+          "title": "Similarity",
+          "type": "number"
+        },
+        "percentile": {
+          "title": "Percentile",
+          "type": "number"
+        },
+        "communities": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Communities",
+          "type": "array"
+        },
+        "ratio": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Ratio"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "a",
+        "b",
+        "lines",
+        "similarity",
+        "percentile",
+        "communities",
+        "ratio",
+        "reason"
+      ],
+      "title": "SurpriseResult",
+      "type": "object"
+    },
     "TagCount": {
       "additionalProperties": false,
       "properties": {
@@ -4944,6 +10104,25 @@
         "notes"
       ],
       "title": "TagCount",
+      "type": "object"
+    },
+    "TagCountItem": {
+      "additionalProperties": false,
+      "properties": {
+        "tag": {
+          "title": "Tag",
+          "type": "string"
+        },
+        "notes": {
+          "title": "Notes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "tag",
+        "notes"
+      ],
+      "title": "TagCountItem",
       "type": "object"
     },
     "TagItem": {
@@ -5006,6 +10185,230 @@
         "top"
       ],
       "title": "TagStats",
+      "type": "object"
+    },
+    "TagsEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "shared": {
+          "items": {
+            "$ref": "#/$defs/WeightedTag"
+          },
+          "title": "Shared",
+          "type": "array"
+        },
+        "only_a": {
+          "items": {
+            "$ref": "#/$defs/WeightedTag"
+          },
+          "title": "Only A",
+          "type": "array"
+        },
+        "only_b": {
+          "items": {
+            "$ref": "#/$defs/WeightedTag"
+          },
+          "title": "Only B",
+          "type": "array"
+        },
+        "shared_weight": {
+          "title": "Shared Weight",
+          "type": "number"
+        },
+        "union_weight": {
+          "title": "Union Weight",
+          "type": "number"
+        },
+        "left_out": {
+          "items": {
+            "$ref": "#/$defs/LeftOutTag"
+          },
+          "title": "Left Out",
+          "type": "array"
+        },
+        "notes": {
+          "title": "Notes",
+          "type": "integer"
+        },
+        "common_over": {
+          "title": "Common Over",
+          "type": "number"
+        }
+      },
+      "required": [
+        "shared",
+        "only_a",
+        "only_b",
+        "shared_weight",
+        "union_weight",
+        "left_out",
+        "notes",
+        "common_over"
+      ],
+      "title": "TagsEvidence",
+      "type": "object"
+    },
+    "TextEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "cosine": {
+          "title": "Cosine",
+          "type": "number"
+        },
+        "model_id": {
+          "title": "Model Id",
+          "type": "string"
+        },
+        "words": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/SharedWord"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Words"
+        },
+        "shared_words": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Shared Words"
+        },
+        "shared_total": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Shared Total"
+        },
+        "one_note_total": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "One Note Total"
+        },
+        "baseline": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Baseline"
+        },
+        "matches_vectors": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Matches Vectors"
+        }
+      },
+      "required": [
+        "cosine",
+        "model_id"
+      ],
+      "title": "TextEvidence",
+      "type": "object"
+    },
+    "TextSignal": {
+      "additionalProperties": false,
+      "description": "The state of the text (embedding) signal for this answer.",
+      "properties": {
+        "available": {
+          "description": "False when the embedding model cannot be loaded; the other signals still rank.",
+          "title": "Available",
+          "type": "boolean"
+        },
+        "model_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The embedding model behind the text signal.",
+          "title": "Model Id"
+        },
+        "unavailable": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Why the text signal is off (e.g. the model folder is missing).",
+          "title": "Unavailable"
+        },
+        "uncached": {
+          "description": "Notes without a cached vector, embedded in memory for this answer (`vault embed` caches them).",
+          "title": "Uncached",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "available",
+        "model_id",
+        "unavailable",
+        "uncached"
+      ],
+      "title": "TextSignal",
+      "type": "object"
+    },
+    "Unavailable": {
+      "additionalProperties": false,
+      "properties": {
+        "unavailable": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Unavailable"
+        }
+      },
+      "required": [
+        "unavailable"
+      ],
+      "title": "Unavailable",
       "type": "object"
     },
     "UncitedNote": {
@@ -5118,6 +10521,134 @@
         "links"
       ],
       "title": "UnresolvedTarget",
+      "type": "object"
+    },
+    "UnwrittenFound": {
+      "additionalProperties": false,
+      "properties": {
+        "cutoff": {
+          "title": "Cutoff",
+          "type": "number"
+        },
+        "groups": {
+          "title": "Groups",
+          "type": "integer"
+        },
+        "found": {
+          "title": "Found",
+          "type": "integer"
+        },
+        "by": {
+          "title": "By",
+          "type": "string"
+        },
+        "merge_cutoff": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Merge Cutoff"
+        },
+        "merged": {
+          "title": "Merged",
+          "type": "integer"
+        },
+        "results": {
+          "items": {
+            "$ref": "#/$defs/UnwrittenResult"
+          },
+          "title": "Results",
+          "type": "array"
+        }
+      },
+      "required": [
+        "cutoff",
+        "groups",
+        "found",
+        "by",
+        "merge_cutoff",
+        "merged",
+        "results"
+      ],
+      "title": "UnwrittenFound",
+      "type": "object"
+    },
+    "UnwrittenLens": {
+      "additionalProperties": false,
+      "properties": {
+        "with_embeddings": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UnwrittenFound"
+            },
+            {
+              "$ref": "#/$defs/Unavailable"
+            }
+          ],
+          "title": "With Embeddings"
+        },
+        "without_embeddings": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UnwrittenFound"
+            },
+            {
+              "$ref": "#/$defs/Unavailable"
+            }
+          ],
+          "title": "Without Embeddings"
+        }
+      },
+      "required": [
+        "with_embeddings",
+        "without_embeddings"
+      ],
+      "title": "UnwrittenLens",
+      "type": "object"
+    },
+    "UnwrittenResult": {
+      "additionalProperties": false,
+      "properties": {
+        "names": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Names",
+          "type": "array"
+        },
+        "linking_notes": {
+          "title": "Linking Notes",
+          "type": "integer"
+        },
+        "communities": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "description": "community -> notes in it that link the missing note.",
+          "title": "Communities",
+          "type": "object"
+        },
+        "spread": {
+          "title": "Spread",
+          "type": "integer"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "names",
+        "linking_notes",
+        "communities",
+        "spread",
+        "reason"
+      ],
+      "title": "UnwrittenResult",
       "type": "object"
     },
     "Variant": {
@@ -5454,6 +10985,194 @@
       "title": "VaultCoverageResult",
       "type": "object"
     },
+    "VaultDiscoverParams": {
+      "additionalProperties": false,
+      "properties": {
+        "note": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Null: the lenses over the whole vault (gap, surprise, unwritten).",
+          "title": "Note"
+        },
+        "lenses": {
+          "anyOf": [
+            {
+              "items": {
+                "enum": [
+                  "hidden",
+                  "role",
+                  "bridge",
+                  "gap",
+                  "surprise",
+                  "unwritten",
+                  "wander"
+                ],
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lenses"
+        },
+        "limit": {
+          "default": 3,
+          "description": "Results per lens (0 = all that stand out).",
+          "minimum": 0,
+          "title": "Limit",
+          "type": "integer"
+        },
+        "steps": {
+          "default": 8,
+          "description": "wander: steps to take.",
+          "maximum": 200,
+          "minimum": 1,
+          "title": "Steps",
+          "type": "integer"
+        },
+        "seed": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "wander and sampling; null: engine.explore.seed.",
+          "title": "Seed"
+        }
+      },
+      "title": "VaultDiscoverParams",
+      "type": "object"
+    },
+    "VaultDiscoverRequest": {
+      "additionalProperties": false,
+      "description": "Discover lenses: hidden links, same roles, bridges, gaps, surprises, unwritten notes, a wander. Omit \"id\" to send a notification (no response).",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "method": {
+          "const": "vault.discover",
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/$defs/VaultDiscoverParams"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "method"
+      ],
+      "title": "VaultDiscoverRequest",
+      "type": "object"
+    },
+    "VaultDiscoverResponse": {
+      "additionalProperties": false,
+      "description": "Successful response to vault.discover.",
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Id"
+        },
+        "result": {
+          "$ref": "#/$defs/VaultDiscoverResult"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "result"
+      ],
+      "title": "VaultDiscoverResponse",
+      "type": "object"
+    },
+    "VaultDiscoverResult": {
+      "additionalProperties": false,
+      "properties": {
+        "note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Note"
+        },
+        "percentile": {
+          "title": "Percentile",
+          "type": "number"
+        },
+        "seed": {
+          "title": "Seed",
+          "type": "integer"
+        },
+        "text_signal": {
+          "$ref": "#/$defs/TextSignal"
+        },
+        "lenses": {
+          "$ref": "#/$defs/DiscoverLenses"
+        }
+      },
+      "required": [
+        "note",
+        "percentile",
+        "seed",
+        "text_signal",
+        "lenses"
+      ],
+      "title": "VaultDiscoverResult",
+      "type": "object"
+    },
     "VaultFixParams": {
       "additionalProperties": false,
       "properties": {
@@ -5572,7 +11291,9 @@
             "link",
             "set",
             "fix",
-            "ingest"
+            "ingest",
+            "link-it",
+            "unlink"
           ],
           "title": "Operation",
           "type": "string"
@@ -5914,6 +11635,101 @@
       "title": "Violation",
       "type": "object"
     },
+    "WanderHop": {
+      "additionalProperties": false,
+      "properties": {
+        "from": {
+          "title": "From",
+          "type": "string"
+        },
+        "to": {
+          "title": "To",
+          "type": "string"
+        },
+        "lines_out": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Lines Out",
+          "type": "array"
+        },
+        "lines_back": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Lines Back",
+          "type": "array"
+        },
+        "community": {
+          "title": "Community",
+          "type": "integer"
+        },
+        "new_community": {
+          "title": "New Community",
+          "type": "boolean"
+        },
+        "revisit": {
+          "title": "Revisit",
+          "type": "boolean"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "from",
+        "to",
+        "lines_out",
+        "lines_back",
+        "community",
+        "new_community",
+        "revisit",
+        "reason"
+      ],
+      "title": "WanderHop",
+      "type": "object"
+    },
+    "WanderLens": {
+      "additionalProperties": false,
+      "properties": {
+        "seed": {
+          "title": "Seed",
+          "type": "integer"
+        },
+        "steps": {
+          "title": "Steps",
+          "type": "integer"
+        },
+        "walk": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Walk",
+          "type": "array"
+        },
+        "hops": {
+          "items": {
+            "$ref": "#/$defs/WanderHop"
+          },
+          "title": "Hops",
+          "type": "array"
+        },
+        "communities": {
+          "title": "Communities",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "seed",
+        "steps",
+        "walk",
+        "hops",
+        "communities"
+      ],
+      "title": "WanderLens",
+      "type": "object"
+    },
     "WantedNote": {
       "additionalProperties": false,
       "properties": {
@@ -5938,6 +11754,25 @@
       "title": "WantedNote",
       "type": "object"
     },
+    "WeightedTag": {
+      "additionalProperties": false,
+      "properties": {
+        "tag": {
+          "title": "Tag",
+          "type": "string"
+        },
+        "weight": {
+          "title": "Weight",
+          "type": "number"
+        }
+      },
+      "required": [
+        "tag",
+        "weight"
+      ],
+      "title": "WeightedTag",
+      "type": "object"
+    },
     "WriteResult": {
       "additionalProperties": false,
       "properties": {
@@ -5947,7 +11782,9 @@
             "link",
             "set",
             "fix",
-            "ingest"
+            "ingest",
+            "link-it",
+            "unlink"
           ],
           "title": "Operation",
           "type": "string"

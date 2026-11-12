@@ -21,7 +21,11 @@ _SPLIT = re.compile(r"(\r\n|\r|\n)")
 
 
 class Lines:
-    def __init__(self, raw: str) -> None:
+    def __init__(self, raw: str, keep_ending: bool = False) -> None:
+        """``keep_ending``: a file without a final line break keeps none after the edit (link-it, unlink), so lines
+        added at its end and removed again give back the same bytes. Otherwise the last line gains one when
+        something is added after it."""
+        self.keep_ending = keep_ending
         self.bom = "\ufeff" if raw.startswith("\ufeff") else ""
         parts = _SPLIT.split(raw[len(self.bom):])
         self.content = parts[0::2]
@@ -36,6 +40,7 @@ class Lines:
         self.before: dict[int, list[str]] = defaultdict(list)
         self.after: dict[int, list[str]] = defaultdict(list)
         self.at_end: list[str] = []
+        self.delete: set[int] = set()  # lines removed, terminator and all
 
     def text(self, line: int) -> str:
         return self.content[line - 1]
@@ -47,6 +52,9 @@ class Lines:
             content, end = self.content[index - 1], self.ends[index - 1]
             nl = end or self.newline
             out.extend(line + nl for line in self.before.get(index, []))
+            if index in self.delete:
+                out.extend(line + nl for line in self.after.get(index, []))
+                continue
             if index in self.replace:
                 content = self.replace[index]
             if index in self.append:
@@ -61,7 +69,12 @@ class Lines:
             out.extend(line + self.newline for line in trailing)
         if last == 0:
             out.extend(line + self.newline for line in self.at_end)
-        return "".join(out)
+        text = "".join(out)
+        if self.keep_ending and last and not self.ends[last - 1]:  # the file had no final line break: keep it so
+            for terminator in ("\r\n", "\n", "\r"):
+                if text.endswith(terminator):
+                    return text[: -len(terminator)]
+        return text
 
 
 def add_relation(typed: TypedVault, lines: Lines, path: str, relation: str, links: list[str]) -> str:

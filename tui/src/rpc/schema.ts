@@ -6,39 +6,96 @@
 /**
  * Any request this server accepts.
  */
-export type Request = (IndexBuildRequest | IndexStatusRequest | VaultStatsRequest | HealthReportRequest | NotesPickRequest | NoteGetRequest | VaultCheckRequest | VaultFixRequest | VaultCoverageRequest | NoteNewRequest | NoteLinkRequest | NoteSetRequest | NoteIngestRequest | SearchQueryRequest | NotePreviewRequest | NoteRelatedRequest | LinksSuggestRequest | NotesSuggestRequest | MentionsUnlinkedRequest)
+export type Request = (IndexBuildRequest | IndexStatusRequest | VaultStatsRequest | HealthReportRequest | NotesPickRequest | NoteGetRequest | VaultCheckRequest | VaultFixRequest | VaultCoverageRequest | NoteNewRequest | NoteLinkRequest | NoteSetRequest | NoteIngestRequest | SearchQueryRequest | NotePreviewRequest | NoteRelatedRequest | LinksSuggestRequest | NotesSuggestRequest | MentionsUnlinkedRequest | ExploreRunRequest | ExploreMarkRequest | ExploreKeptRequest | ExploreLinkRequest | ExploreUnlinkRequest | MapGetRequest | MapSinceRequest | NoteDeepenRequest | VaultDiscoverRequest | NotesExplainRequest | EmbedStatusRequest | ConfigShowRequest)
 /**
  * Any response this server sends: a method result or an error.
  */
-export type Response = (IndexBuildResponse | IndexStatusResponse | VaultStatsResponse | HealthReportResponse | NotesPickResponse | NoteGetResponse | VaultCheckResponse | VaultFixResponse | VaultCoverageResponse | NoteNewResponse | NoteLinkResponse | NoteSetResponse | NoteIngestResponse | SearchQueryResponse | NotePreviewResponse | NoteRelatedResponse | LinksSuggestResponse | NotesSuggestResponse | MentionsUnlinkedResponse | ErrorResponse)
+export type Response = (IndexBuildResponse | IndexStatusResponse | VaultStatsResponse | HealthReportResponse | NotesPickResponse | NoteGetResponse | VaultCheckResponse | VaultFixResponse | VaultCoverageResponse | NoteNewResponse | NoteLinkResponse | NoteSetResponse | NoteIngestResponse | SearchQueryResponse | NotePreviewResponse | NoteRelatedResponse | LinksSuggestResponse | NotesSuggestResponse | MentionsUnlinkedResponse | ExploreRunResponse | ExploreMarkResponse | ExploreKeptResponse | ExploreLinkResponse | ExploreUnlinkResponse | MapGetResponse | MapSinceResponse | NoteDeepenResponse | VaultDiscoverResponse | NotesExplainResponse | EmbedStatusResponse | ConfigShowResponse | ErrorResponse)
 
 export interface VaultRpcSchema {
 AmbiguousLink?: AmbiguousLink
 BlockItem?: BlockItem
+BridgeLens?: BridgeLens
+Broker?: Broker
 CheckScope?: CheckScope
 CheckSummary?: CheckSummary
 CheckedNote?: CheckedNote
+CitingNote?: CitingNote
 ClauseMatch?: ClauseMatch
+ClusterNeighbour?: ClusterNeighbour
+ClusterPhrase?: ClusterPhrase
+CocitationEvidence?: CocitationEvidence
 CodeCount?: CodeCount
+CommunityWeight?: CommunityWeight
+ConfigShowParams?: ConfigShowParams
+ConfigShowRequest?: ConfigShowRequest
+ConfigShowResponse?: ConfigShowResponse
+ConfigShowResult?: ConfigShowResult
 Count?: Count
+CouplingEvidence?: CouplingEvidence
 CoverageCitation?: CoverageCitation
 CoverageCiting?: CoverageCiting
 CoverageReasons?: CoverageReasons
 CoverageSources?: CoverageSources
+DeepenBackbone?: DeepenBackbone
+DeepenCluster?: DeepenCluster
+DeepenHit?: DeepenHit
+DeepenLenses?: DeepenLenses
+DeepenNeighbourhood?: DeepenNeighbourhood
+DeepenPairNote?: DeepenPairNote
+DeepenPairs?: DeepenPairs
+DirectEvidence?: DirectEvidence
+DiscoverLenses?: DiscoverLenses
 DuplicateCandidate?: DuplicateCandidate
 DuplicateName?: DuplicateName
+EmbedStatusParams?: EmbedStatusParams
+EmbedStatusRequest?: EmbedStatusRequest
+EmbedStatusResponse?: EmbedStatusResponse
+EmbedStatusResult?: EmbedStatusResult
 ErrorObject?: ErrorObject
 ErrorResponse?: ErrorResponse
+EvidenceName?: EvidenceName
+ExplainSignal?: ExplainSignal
+ExplainWeights?: ExplainWeights
+ExploreItem?: ExploreItem
+ExploreKeptParams?: ExploreKeptParams
+ExploreKeptRequest?: ExploreKeptRequest
+ExploreKeptResponse?: ExploreKeptResponse
+ExploreKeptResult?: ExploreKeptResult
+ExploreLinkParams?: ExploreLinkParams
+ExploreLinkRequest?: ExploreLinkRequest
+ExploreLinkResponse?: ExploreLinkResponse
+ExploreLinkResult?: ExploreLinkResult
+ExploreMarkParams?: ExploreMarkParams
+ExploreMarkRequest?: ExploreMarkRequest
+ExploreMarkResponse?: ExploreMarkResponse
+ExploreMarkResult?: ExploreMarkResult
+ExploreNumbers?: ExploreNumbers
+ExploreRunParams?: ExploreRunParams
+ExploreRunRequest?: ExploreRunRequest
+ExploreRunResponse?: ExploreRunResponse
+ExploreRunResult?: ExploreRunResult
+ExploreSection?: ExploreSection
+ExploreUnlinkParams?: ExploreUnlinkParams
+ExploreUnlinkRequest?: ExploreUnlinkRequest
+ExploreUnlinkResponse?: ExploreUnlinkResponse
+ExploreUnlinkResult?: ExploreUnlinkResult
 Facets?: Facets
 FieldCount?: FieldCount
 FolderCount?: FolderCount
 FormatRef?: FormatRef
+GapFound?: GapFound
+GapJoin?: GapJoin
+GapLens?: GapLens
+GapResult?: GapResult
 HeadingItem?: HeadingItem
 HealthReportParams?: HealthReportParams
 HealthReportRequest?: HealthReportRequest
 HealthReportResponse?: HealthReportResponse
 HealthReportResult?: HealthReportResult
 HealthSummary?: HealthSummary
+HiddenLens?: HiddenLens
+HiddenResult?: HiddenResult
 IncomingLink?: IncomingLink
 IndexBuildParams?: IndexBuildParams
 IndexBuildRequest?: IndexBuildRequest
@@ -50,6 +107,9 @@ IndexStatusResponse?: IndexStatusResponse
 IndexStatusResult?: IndexStatusResult
 IndexSync?: IndexSync
 IngestDocument?: IngestDocument
+KeepRate?: KeepRate
+KeptItem?: KeptItem
+LeftOutTag?: LeftOutTag
 LinkCounts?: LinkCounts
 LinkRef?: LinkRef
 LinkSuggestion?: LinkSuggestion
@@ -58,16 +118,43 @@ LinksSuggestParams?: LinksSuggestParams
 LinksSuggestRequest?: LinksSuggestRequest
 LinksSuggestResponse?: LinksSuggestResponse
 LinksSuggestResult?: LinksSuggestResult
+MapAuthority?: MapAuthority
+MapBetweenness?: MapBetweenness
+MapBridge?: MapBridge
+MapCommunity?: MapCommunity
+MapGetRequest?: MapGetRequest
+MapGetResponse?: MapGetResponse
+MapHub?: MapHub
+MapMeaning?: MapMeaning
+MapParams?: MapParams
+MapPhrase?: MapPhrase
+MapRecorded?: MapRecorded
+MapResult?: MapResult
+MapSinceParams?: MapSinceParams
+MapSinceRequest?: MapSinceRequest
+MapSinceResponse?: MapSinceResponse
+MapSinceResult?: MapSinceResult
+MapTopicPage?: MapTopicPage
 Mark?: Mark
+MarkedItem?: MarkedItem
+MeaningChanges?: MeaningChanges
+MeaningEdge?: MeaningEdge
 MentionedNote?: MentionedNote
 MentionsUnlinkedParams?: MentionsUnlinkedParams
 MentionsUnlinkedRequest?: MentionsUnlinkedRequest
 MentionsUnlinkedResponse?: MentionsUnlinkedResponse
 MentionsUnlinkedResult?: MentionsUnlinkedResult
+Middle?: Middle
 MissingNote?: MissingNote
 MissingSubpath?: MissingSubpath
 MostCited?: MostCited
+MovedNote?: MovedNote
 NameCount?: NameCount
+NoEvidence?: NoEvidence
+NoteDeepenParams?: NoteDeepenParams
+NoteDeepenRequest?: NoteDeepenRequest
+NoteDeepenResponse?: NoteDeepenResponse
+NoteDeepenResult?: NoteDeepenResult
 NoteGetParams?: NoteGetParams
 NoteGetRequest?: NoteGetRequest
 NoteGetResponse?: NoteGetResponse
@@ -93,6 +180,10 @@ NoteRelatedResult?: NoteRelatedResult
 NoteSetParams?: NoteSetParams
 NoteSetRequest?: NoteSetRequest
 NoteSetResponse?: NoteSetResponse
+NotesExplainParams?: NotesExplainParams
+NotesExplainRequest?: NotesExplainRequest
+NotesExplainResponse?: NotesExplainResponse
+NotesExplainResult?: NotesExplainResult
 NotesPickParams?: NotesPickParams
 NotesPickRequest?: NotesPickRequest
 NotesPickResponse?: NotesPickResponse
@@ -101,9 +192,11 @@ NotesSuggestParams?: NotesSuggestParams
 NotesSuggestRequest?: NotesSuggestRequest
 NotesSuggestResponse?: NotesSuggestResponse
 NotesSuggestResult?: NotesSuggestResult
+OtherModel?: OtherModel
 OutgoingLink?: OutgoingLink
 PendingChanges?: PendingChanges
 PickedNote?: PickedNote
+PlacedNote?: PlacedNote
 PreviewLine?: PreviewLine
 ProbablyExisting?: ProbablyExisting
 PropertyCount?: PropertyCount
@@ -113,20 +206,40 @@ RelatedSeed?: RelatedSeed
 RelationRef?: RelationRef
 Request?: Request
 Response?: Response
+RoleLens?: RoleLens
+RoleResult?: RoleResult
 SearchClause?: SearchClause
 SearchHit?: SearchHit
 SearchQueryParams?: SearchQueryParams
 SearchQueryRequest?: SearchQueryRequest
 SearchQueryResponse?: SearchQueryResponse
 SearchQueryResult?: SearchQueryResult
+SettingRow?: SettingRow
+SharedReference?: SharedReference
+SharedWord?: SharedWord
+SinceCommunity?: SinceCommunity
+SinceGap?: SinceGap
+SinceTopicPage?: SinceTopicPage
+SinceWritten?: SinceWritten
 SkippedFix?: SkippedFix
 Snippet?: Snippet
+SurpriseFound?: SurpriseFound
+SurpriseLens?: SurpriseLens
+SurpriseResult?: SurpriseResult
 TagCount?: TagCount
+TagCountItem?: TagCountItem
 TagItem?: TagItem
 TagStats?: TagStats
+TagsEvidence?: TagsEvidence
+TextEvidence?: TextEvidence
+TextSignal?: TextSignal
+Unavailable?: Unavailable
 UncitedNote?: UncitedNote
 UnlinkedMention?: UnlinkedMention
 UnresolvedTarget?: UnresolvedTarget
+UnwrittenFound?: UnwrittenFound
+UnwrittenLens?: UnwrittenLens
+UnwrittenResult?: UnwrittenResult
 Variant?: Variant
 VaultCheckParams?: VaultCheckParams
 VaultCheckRequest?: VaultCheckRequest
@@ -136,6 +249,10 @@ VaultCoverageParams?: VaultCoverageParams
 VaultCoverageRequest?: VaultCoverageRequest
 VaultCoverageResponse?: VaultCoverageResponse
 VaultCoverageResult?: VaultCoverageResult
+VaultDiscoverParams?: VaultDiscoverParams
+VaultDiscoverRequest?: VaultDiscoverRequest
+VaultDiscoverResponse?: VaultDiscoverResponse
+VaultDiscoverResult?: VaultDiscoverResult
 VaultFixParams?: VaultFixParams
 VaultFixRequest?: VaultFixRequest
 VaultFixResponse?: VaultFixResponse
@@ -145,7 +262,10 @@ VaultStatsRequest?: VaultStatsRequest
 VaultStatsResponse?: VaultStatsResponse
 VaultStatsResult?: VaultStatsResult
 Violation?: Violation
+WanderHop?: WanderHop
+WanderLens?: WanderLens
 WantedNote?: WantedNote
+WeightedTag?: WeightedTag
 WriteResult?: WriteResult
 WrittenFile?: WrittenFile
 }
@@ -158,6 +278,27 @@ candidates: string[]
 export interface BlockItem {
 id: string
 line: number
+}
+export interface BridgeLens {
+betweenness: number
+betweenness_percentile: number
+constraint: (number | null)
+constraint_percentile: (number | null)
+community: number
+reaches: CommunityWeight[]
+exact: boolean
+sources: number
+brokers: Broker[]
+}
+export interface CommunityWeight {
+community: number
+weight: number
+}
+export interface Broker {
+communities: number[]
+share: number
+pairs: number
+reason: string
 }
 export interface CheckScope {
 mode: ("all" | "changed")
@@ -209,6 +350,11 @@ message: string
  */
 related: (string | null)
 }
+export interface CitingNote {
+note: string
+weight: number
+links_to: number
+}
 export interface ClauseMatch {
 /**
  * The clause as written in the query, e.g. reward, "reward hacking", a NEAR/3 b.
@@ -229,9 +375,78 @@ field: ("title" | "aliases" | "headings" | "tags" | "body")
  */
 count: number
 }
+export interface ClusterNeighbour {
+community: number
+name: string
+weight: number
+through: string[]
+}
+export interface ClusterPhrase {
+phrase: string
+in_community: number
+in_vault: number
+}
+export interface CocitationEvidence {
+both: CitingNote[]
+citing_a: number
+citing_b: number
+total_a: number
+total_b: number
+}
+export interface ConfigShowParams {
+
+}
+/**
+ * Every engine setting, its value and where it came from. Omit "id" to send a notification (no response).
+ */
+export interface ConfigShowRequest {
+jsonrpc: "2.0"
+method: "config.show"
+params?: ConfigShowParams
+id?: (number | string | null)
+}
+/**
+ * Successful response to config.show.
+ */
+export interface ConfigShowResponse {
+jsonrpc: "2.0"
+id: (number | string | null)
+result: ConfigShowResult
+}
+export interface ConfigShowResult {
+config_file: (string | null)
+config_found_by: string
+precedence: string[]
+settings: SettingRow[]
+}
+export interface SettingRow {
+key: string
+value: (string | null)
+/**
+ * default, file, env NAME or flag --x.
+ */
+source: string
+/**
+ * The environment variable that sets it.
+ */
+env: string
+}
 export interface Count {
 name: string
 notes: number
+}
+export interface CouplingEvidence {
+both: SharedReference[]
+references_a: number
+references_b: number
+total_a: number
+total_b: number
+}
+export interface SharedReference {
+target: string
+missing: boolean
+weight: number
+linked_from: number
 }
 export interface CoverageCitation {
 line: number
@@ -267,6 +482,229 @@ linked: number
  */
 unlinked: string[]
 }
+export interface DeepenBackbone {
+community: (number | null)
+chain: string[]
+steps?: string[]
+note_on_chain: (number | null)
+steps_off: (number | null)
+joins_at: (string | null)
+length?: (number | null)
+community_notes?: (number | null)
+}
+export interface DeepenCluster {
+community: (number | null)
+name?: (string | null)
+notes?: (number | null)
+phrases?: ClusterPhrase[]
+hubs?: string[]
+topic_pages?: MapTopicPage[]
+weight_inside?: (number | null)
+inside_percentile?: (number | null)
+weight: number
+outside_share?: (number | null)
+participation: number
+neighbours?: ClusterNeighbour[]
+}
+export interface MapTopicPage {
+path: string
+reaches: number
+}
+export interface DeepenHit {
+path: string
+score: number
+linked: boolean
+reason: string
+}
+export interface DeepenLenses {
+neighbourhood?: (DeepenNeighbourhood | null)
+cited?: (DeepenPairs | null)
+foundations?: (DeepenPairs | null)
+backbone?: (DeepenBackbone | null)
+cluster?: (DeepenCluster | null)
+}
+export interface DeepenNeighbourhood {
+cutoff: number
+percentile: number
+compared: number
+kept: number
+text_unavailable: (string | null)
+uncached: number
+hits: DeepenHit[]
+}
+export interface DeepenPairs {
+cutoff: number
+percentile: number
+pairs_in_vault: number
+exact: boolean
+found: number
+kept: number
+notes: DeepenPairNote[]
+below_cutoff: DeepenPairNote[]
+}
+export interface DeepenPairNote {
+path: string
+value: number
+percentile: number
+evidence: EvidenceName[]
+}
+export interface EvidenceName {
+name: string
+weight: number
+}
+export interface DirectEvidence {
+/**
+ * Lines of a with a link to b.
+ */
+a_to_b: number[]
+b_to_a: number[]
+a_to_b_tag_lines: number[]
+b_to_a_tag_lines: number[]
+}
+export interface DiscoverLenses {
+hidden?: (HiddenLens | null)
+role?: (RoleLens | null)
+bridge?: (BridgeLens | null)
+gap?: (GapLens | null)
+surprise?: (SurpriseLens | null)
+unwritten?: (UnwrittenLens | null)
+wander?: (WanderLens | null)
+}
+export interface HiddenLens {
+cutoff: number
+pairs_in_vault: number
+exact: boolean
+sources: number
+found: number
+kept: number
+results: HiddenResult[]
+}
+export interface HiddenResult {
+note: string
+score: number
+percentile: number
+middles: Middle[]
+reason: string
+}
+export interface Middle {
+middle: string
+kind: string
+notes: number
+weight: number
+}
+export interface RoleLens {
+cutoff: number
+pairs_in_vault: number
+exact: boolean
+found: number
+kept: number
+results: RoleResult[]
+}
+export interface RoleResult {
+note: string
+community: number
+distance: number
+percentile: number
+/**
+ * feature -> [this note's, that note's] raw value.
+ */
+features: {
+[k: string]: number[]
+}
+reason: string
+}
+export interface GapLens {
+with_embeddings: (GapFound | Unavailable)
+without_embeddings: (GapFound | Unavailable)
+}
+export interface GapFound {
+cutoff: number
+pairs: number
+found: number
+results: GapResult[]
+}
+export interface GapResult {
+communities: number[]
+names: string[]
+closeness: number
+closeness_percentile: number
+links: number
+expected: number
+ratio: number
+join: GapJoin[]
+reason: string
+}
+export interface GapJoin {
+a: string
+b: string
+score: number
+middles: string[]
+}
+export interface Unavailable {
+unavailable: (string | null)
+}
+export interface SurpriseLens {
+with_embeddings: (SurpriseFound | Unavailable)
+without_embeddings: (SurpriseFound | Unavailable)
+}
+export interface SurpriseFound {
+cutoff: number
+linked_pairs: number
+found: number
+results: SurpriseResult[]
+}
+export interface SurpriseResult {
+a: string
+b: string
+lines: number[]
+similarity: number
+percentile: number
+communities: number[]
+ratio: (number | null)
+reason: string
+}
+export interface UnwrittenLens {
+with_embeddings: (UnwrittenFound | Unavailable)
+without_embeddings: (UnwrittenFound | Unavailable)
+}
+export interface UnwrittenFound {
+cutoff: number
+groups: number
+found: number
+by: string
+merge_cutoff: (number | null)
+merged: number
+results: UnwrittenResult[]
+}
+export interface UnwrittenResult {
+names: string[]
+linking_notes: number
+/**
+ * community -> notes in it that link the missing note.
+ */
+communities: {
+[k: string]: number
+}
+spread: number
+reason: string
+}
+export interface WanderLens {
+seed: number
+steps: number
+walk: string[]
+hops: WanderHop[]
+communities: number
+}
+export interface WanderHop {
+from: string
+to: string
+lines_out: number[]
+lines_back: number[]
+community: number
+new_community: boolean
+revisit: boolean
+reason: string
+}
 export interface DuplicateCandidate {
 path: string
 duplicate: boolean
@@ -288,6 +726,45 @@ export interface DuplicateName {
 name: string
 paths: string[]
 }
+export interface EmbedStatusParams {
+
+}
+/**
+ * How many notes have a cached vector for the configured model. Omit "id" to send a notification (no response).
+ */
+export interface EmbedStatusRequest {
+jsonrpc: "2.0"
+method: "embed.status"
+params?: EmbedStatusParams
+id?: (number | string | null)
+}
+/**
+ * Successful response to embed.status.
+ */
+export interface EmbedStatusResponse {
+jsonrpc: "2.0"
+id: (number | string | null)
+result: EmbedStatusResult
+}
+export interface EmbedStatusResult {
+model_id: (string | null)
+notes: number
+with_vector: number
+missing: number
+missing_paths: string[]
+dim: (number | null)
+other_models: OtherModel[]
+cache_vectors: number
+cache_bytes: number
+provider: string
+model_path: (string | null)
+model_found: boolean
+}
+export interface OtherModel {
+model_id: string
+vectors: number
+dim: (number | null)
+}
 export interface ErrorObject {
 code: number
 message: string
@@ -299,6 +776,479 @@ export interface ErrorResponse {
 jsonrpc: "2.0"
 id: (number | string | null)
 error: ErrorObject
+}
+export interface ExplainSignal {
+name: ("direct" | "cocitation" | "coupling" | "tags" | "text")
+value: number
+weight: number
+/**
+ * weight x value; the score is their sum.
+ */
+contribution: number
+available: boolean
+unavailable: (string | null)
+evidence: (DirectEvidence | CocitationEvidence | CouplingEvidence | TagsEvidence | TextEvidence | NoEvidence)
+}
+export interface TagsEvidence {
+shared: WeightedTag[]
+only_a: WeightedTag[]
+only_b: WeightedTag[]
+shared_weight: number
+union_weight: number
+left_out: LeftOutTag[]
+notes: number
+common_over: number
+}
+export interface WeightedTag {
+tag: string
+weight: number
+}
+export interface LeftOutTag {
+tag: string
+notes: number
+}
+export interface TextEvidence {
+cosine: number
+model_id: string
+words?: (SharedWord[] | null)
+shared_words?: (number | null)
+shared_total?: (number | null)
+one_note_total?: (number | null)
+baseline?: (number | null)
+matches_vectors?: (boolean | null)
+}
+export interface SharedWord {
+word: string
+share: number
+}
+export interface NoEvidence {
+
+}
+export interface ExplainWeights {
+direct: number
+cocitation: number
+coupling: number
+tags: number
+text: number
+}
+export interface ExploreItem {
+/**
+ * '2.3': section 2, result 3 of this run; what explore.mark and explore.link take.
+ */
+ref: string
+lens: ("neighbourhood" | "cited" | "foundations" | "backbone" | "cluster" | "hidden" | "role" | "bridge" | "gap" | "surprise" | "unwritten" | "wander" | "topicless")
+/**
+ * note: a note; pair: two notes not linked (a gap's joiners); link: a link that is there (surprise); missing: a missing note; community: a community or a pair of them.
+ */
+kind: ("note" | "pair" | "link" | "missing" | "community")
+/**
+ * What it is about, as remembered: a path, 'a ↔ b', '[[name]]', 'community: …'.
+ */
+target: string
+title: string
+/**
+ * One line: why the lens found it, with the numbers it rests on.
+ */
+evidence: string
+/**
+ * The notes it is about (vault paths).
+ */
+notes: string[]
+/**
+ * The two notes explore.link would link; null when it is not two notes to link.
+ */
+link: (string[] | null)
+/**
+ * Without a start: where explore would start for it (pass it as note).
+ */
+start_at: (string | null)
+/**
+ * Your earlier mark for this result from this start.
+ */
+mark: (("keep" | "dismiss") | null)
+}
+export interface ExploreKeptParams {
+lens?: (("neighbourhood" | "cited" | "foundations" | "backbone" | "cluster" | "hidden" | "role" | "bridge" | "gap" | "surprise" | "unwritten" | "wander" | "topicless") | null)
+}
+/**
+ * What was kept from explore, with its lens and evidence. Omit "id" to send a notification (no response).
+ */
+export interface ExploreKeptRequest {
+jsonrpc: "2.0"
+method: "explore.kept"
+params?: ExploreKeptParams
+id?: (number | string | null)
+}
+/**
+ * Successful response to explore.kept.
+ */
+export interface ExploreKeptResponse {
+jsonrpc: "2.0"
+id: (number | string | null)
+result: ExploreKeptResult
+}
+export interface ExploreKeptResult {
+memory: string
+/**
+ * Oldest first.
+ */
+kept: KeptItem[]
+}
+export interface KeptItem {
+start: (string | null)
+lens: ("neighbourhood" | "cited" | "foundations" | "backbone" | "cluster" | "hidden" | "role" | "bridge" | "gap" | "surprise" | "unwritten" | "wander" | "topicless")
+target: string
+kind: ("note" | "pair" | "link" | "missing" | "community")
+title: string
+evidence: string
+link: (string[] | null)
+at: string
+}
+export interface ExploreLinkParams {
+/**
+ * A result of the last explore.run; or give a and b.
+ */
+ref?: (string | null)
+a?: (string | null)
+b?: (string | null)
+/**
+ * The one-line reason; default: the result's lens and evidence.
+ */
+reason?: (string | null)
+/**
+ * True (the default): return the diff and write nothing.
+ */
+dry_run?: boolean
+}
+/**
+ * A result (or two notes) made a link under See Also in both notes; dry run unless dry_run=false. Omit "id" to send a notification (no response).
+ */
+export interface ExploreLinkRequest {
+jsonrpc: "2.0"
+method: "explore.link"
+params?: ExploreLinkParams
+id?: (number | string | null)
+}
+/**
+ * Successful response to explore.link.
+ */
+export interface ExploreLinkResponse {
+jsonrpc: "2.0"
+id: (number | string | null)
+result: ExploreLinkResult
+}
+export interface ExploreLinkResult {
+operation: ("new" | "link" | "set" | "fix" | "ingest" | "link-it" | "unlink")
+/**
+ * written; refused (would add violations, nothing written); dry-run; unchanged.
+ */
+status: ("written" | "refused" | "dry-run" | "unchanged")
+dry_run: boolean
+written: boolean
+files: WrittenFile[]
+/**
+ * Parts of the request that were already so, e.g. an existing mirror.
+ */
+already: string[]
+/**
+ * Why a write was refused: violations it would add.
+ */
+new_violations: Violation[]
+/**
+ * Violations already in the notes written; they do not block a write.
+ */
+tolerated: Violation[]
+/**
+ * Null unless written.
+ */
+index: (IndexSync | null)
+/**
+ * Files restored from an interrupted earlier write.
+ */
+recovered: string[]
+ref: (string | null)
+lens: (("neighbourhood" | "cited" | "foundations" | "backbone" | "cluster" | "hidden" | "role" | "bridge" | "gap" | "surprise" | "unwritten" | "wander" | "topicless") | null)
+/**
+ * The two notes, as given or from the result.
+ */
+notes: string[]
+reason: string
+/**
+ * The result counted as a keep (a link made from a result).
+ */
+kept: boolean
+}
+export interface WrittenFile {
+path: string
+action: ("create" | "modify")
+/**
+ * What was done, for people: 'line 11: added [[X]] to `supported-by::`'.
+ */
+changes: string[]
+/**
+ * Unified diff of the file (against /dev/null for a new file).
+ */
+diff: string
+/**
+ * The whole new file, for action 'create'; null otherwise.
+ */
+content: (string | null)
+}
+export interface IndexSync {
+status: ("updated" | "no-index" | "needs-rebuild")
+/**
+ * Written notes now up to date in the index.
+ */
+synced: string[]
+/**
+ * Written notes left 'changed' for vault.check changed=true.
+ */
+pending: string[]
+reason?: (string | null)
+}
+export interface ExploreMarkParams {
+verdict: ("keep" | "dismiss" | "clear")
+/**
+ * Refs of the last explore.run ('2.3').
+ * 
+ * @minItems 1
+ */
+refs: [string, ...(string)[]]
+}
+/**
+ * Keep, dismiss or clear results of the last explore.run (the memory, never the notes). Omit "id" to send a notification (no response).
+ */
+export interface ExploreMarkRequest {
+jsonrpc: "2.0"
+method: "explore.mark"
+params: ExploreMarkParams
+id?: (number | string | null)
+}
+/**
+ * Successful response to explore.mark.
+ */
+export interface ExploreMarkResponse {
+jsonrpc: "2.0"
+id: (number | string | null)
+result: ExploreMarkResult
+}
+export interface ExploreMarkResult {
+marked: MarkedItem[]
+/**
+ * For the lenses marked here, over every start.
+ */
+keep_rates: KeepRate[]
+}
+export interface MarkedItem {
+ref: string
+lens: ("neighbourhood" | "cited" | "foundations" | "backbone" | "cluster" | "hidden" | "role" | "bridge" | "gap" | "surprise" | "unwritten" | "wander" | "topicless")
+target: string
+title: string
+verdict: ("keep" | "dismiss" | "clear")
+/**
+ * False for a clear of a result that was not marked.
+ */
+changed: boolean
+}
+export interface KeepRate {
+lens: ("neighbourhood" | "cited" | "foundations" | "backbone" | "cluster" | "hidden" | "role" | "bridge" | "gap" | "surprise" | "unwritten" | "wander" | "topicless")
+kept: number
+dismissed: number
+}
+export interface ExploreNumbers {
+/**
+ * current: computed for the vault as it is; reused: the vault-wide distributions are from a few notes ago (see computed_at).
+ */
+source: ("current" | "reused")
+computed_at?: (string | null)
+changed_since?: (number | null)
+threshold?: (number | null)
+}
+export interface ExploreRunParams {
+/**
+ * A note (name, path or alias) or a missing note; null: where to start.
+ */
+note?: (string | null)
+/**
+ * Null: engine.explore.lenses (or start_lenses without a note).
+ */
+lenses?: ([("neighbourhood" | "cited" | "foundations" | "backbone" | "cluster" | "hidden" | "role" | "bridge" | "gap" | "surprise" | "unwritten" | "wander" | "topicless"), ...(("neighbourhood" | "cited" | "foundations" | "backbone" | "cluster" | "hidden" | "role" | "bridge" | "gap" | "surprise" | "unwritten" | "wander" | "topicless"))[]] | null)
+/**
+ * Results per section; null: engine.explore.per_lens.
+ */
+per_lens?: (number | null)
+/**
+ * Leave out what was seen or dismissed before from this start.
+ */
+fresh?: boolean
+/**
+ * Remember the run: its results become refs for explore.mark/link, and count as seen.
+ */
+record?: boolean
+/**
+ * Recompute the stored vault-wide numbers now.
+ */
+refresh?: boolean
+}
+/**
+ * Explore from a note (or where to start): a section per lens, each result with its lens and evidence; remembered for explore.mark and explore.link. Omit "id" to send a notification (no response).
+ */
+export interface ExploreRunRequest {
+jsonrpc: "2.0"
+method: "explore.run"
+params?: ExploreRunParams
+id?: (number | string | null)
+}
+/**
+ * Successful response to explore.run.
+ */
+export interface ExploreRunResponse {
+jsonrpc: "2.0"
+id: (number | string | null)
+result: ExploreRunResult
+}
+export interface ExploreRunResult {
+/**
+ * The start's path, '[[missing note]]', or null (proposals).
+ */
+start: (string | null)
+start_kind: (("note" | "missing") | null)
+fresh: boolean
+/**
+ * Similarity at or above which two notes are near-duplicates.
+ */
+duplicate_cutoff: (number | null)
+similarity: ("embedding" | "key terms")
+/**
+ * The memory file (marks, seen, links made, map snapshots).
+ */
+memory: string
+numbers: ExploreNumbers
+text_signal: TextSignal
+/**
+ * Ordered by keep_score, ties in the configured order.
+ */
+sections: ExploreSection[]
+}
+/**
+ * The state of the text (embedding) signal for this answer.
+ */
+export interface TextSignal {
+/**
+ * False when the embedding model cannot be loaded; the other signals still rank.
+ */
+available: boolean
+/**
+ * The embedding model behind the text signal.
+ */
+model_id: (string | null)
+/**
+ * Why the text signal is off (e.g. the model folder is missing).
+ */
+unavailable: (string | null)
+/**
+ * Notes without a cached vector, embedded in memory for this answer (`vault embed` caches them).
+ */
+uncached: number
+}
+export interface ExploreSection {
+lens: ("neighbourhood" | "cited" | "foundations" | "backbone" | "cluster" | "hidden" | "role" | "bridge" | "gap" | "surprise" | "unwritten" | "wander" | "topicless")
+kind: ("deepen" | "discover" | "map")
+title: string
+what: string
+/**
+ * Results this section may show (3 to 5; deepen and discover get the same total).
+ */
+budget: number
+/**
+ * Candidates the lens found.
+ */
+found: number
+/**
+ * Left out: seen or dismissed before (fresh).
+ */
+hidden: number
+/**
+ * Left out: near-duplicates of a result shown.
+ */
+duplicates: number
+/**
+ * Your keeps of this lens's results, over every start.
+ */
+kept: number
+dismissed: number
+/**
+ * (kept + 1) / (kept + dismissed + 2): the sections are ordered by it.
+ */
+keep_score: number
+/**
+ * False: the lens does not apply to this start (e.g. a missing note) and takes no space.
+ */
+applies: boolean
+/**
+ * Why there are no results, when there are none.
+ */
+note: (string | null)
+results: ExploreItem[]
+}
+export interface ExploreUnlinkParams {
+a: string
+b: string
+/**
+ * True (the default): return the diff and write nothing.
+ */
+dry_run?: boolean
+}
+/**
+ * Undo explore.link: remove the See Also lines linking the two notes; dry run unless dry_run=false. Omit "id" to send a notification (no response).
+ */
+export interface ExploreUnlinkRequest {
+jsonrpc: "2.0"
+method: "explore.unlink"
+params: ExploreUnlinkParams
+id?: (number | string | null)
+}
+/**
+ * Successful response to explore.unlink.
+ */
+export interface ExploreUnlinkResponse {
+jsonrpc: "2.0"
+id: (number | string | null)
+result: ExploreUnlinkResult
+}
+export interface ExploreUnlinkResult {
+operation: ("new" | "link" | "set" | "fix" | "ingest" | "link-it" | "unlink")
+/**
+ * written; refused (would add violations, nothing written); dry-run; unchanged.
+ */
+status: ("written" | "refused" | "dry-run" | "unchanged")
+dry_run: boolean
+written: boolean
+files: WrittenFile[]
+/**
+ * Parts of the request that were already so, e.g. an existing mirror.
+ */
+already: string[]
+/**
+ * Why a write was refused: violations it would add.
+ */
+new_violations: Violation[]
+/**
+ * Violations already in the notes written; they do not block a write.
+ */
+tolerated: Violation[]
+/**
+ * Null unless written.
+ */
+index: (IndexSync | null)
+/**
+ * Files restored from an interrupted earlier write.
+ */
+recovered: string[]
+/**
+ * link-it made this link: its section goes too when nothing else is left in it.
+ */
+recorded: boolean
 }
 export interface Facets {
 /**
@@ -501,18 +1451,6 @@ deleted: string[]
  */
 reason: (string | null)
 }
-export interface IndexSync {
-status: ("updated" | "no-index" | "needs-rebuild")
-/**
- * Written notes now up to date in the index.
- */
-synced: string[]
-/**
- * Written notes left 'changed' for vault.check changed=true.
- */
-pending: string[]
-reason?: (string | null)
-}
 export interface IngestDocument {
 file: string
 kind: ("markdown" | "text" | "html")
@@ -535,14 +1473,28 @@ export interface LinkSuggestion {
 a: string
 b: string
 /**
- * 0.4 shared + 0.3 cited + 0.3 text.
+ * (0.4 shared + 0.3 cited + 0.2 tags + 0.3 text) / 1.2; without the text signal, the rescaled `weights`.
  */
 score: number
 shared: number
 cited: number
+/**
+ * Weighted Jaccard of the two notes' #tags and tag links (Tags: [[topic]]), as in note.related.
+ */
+tags: number
+/**
+ * Centered cosine of the two notes' embeddings (0 if negative).
+ */
 text: number
 shared_with: string[]
 cited_by: string[]
+/**
+ * The #tags and [[tag links]] both notes have, rarest first.
+ */
+shared_tags: string[]
+/**
+ * Words in both notes that add most to their embedding cosine.
+ */
 terms: string[]
 reason: string
 }
@@ -586,6 +1538,240 @@ path: (string | null)
  * Never a pair that is already linked, or a note with itself.
  */
 links: LinkSuggestion[]
+text_signal: TextSignal
+/**
+ * The weights used: shared, cited, tags, text (rescaled to sum to 1 without the text signal).
+ */
+weights: {
+[k: string]: number
+}
+}
+export interface MapAuthority {
+target: string
+missing: boolean
+score: number
+}
+export interface MapBetweenness {
+exact: boolean
+sources: number
+visits: number
+budget: number
+}
+export interface MapBridge {
+path: string
+betweenness: number
+betweenness_percentile: number
+constraint: (number | null)
+constraint_percentile: (number | null)
+community: number
+spans: number[]
+}
+export interface MapCommunity {
+number: number
+name: string
+notes: string[]
+phrases: MapPhrase[]
+hubs: string[]
+topic_pages: MapTopicPage[]
+}
+export interface MapPhrase {
+phrase: string
+in_community: number
+in_vault: number
+score: number
+}
+/**
+ * The map: communities, topic pages, bridges, hubs and authorities; record=true saves a snapshot. Omit "id" to send a notification (no response).
+ */
+export interface MapGetRequest {
+jsonrpc: "2.0"
+method: "map.get"
+params?: MapParams
+id?: (number | string | null)
+}
+export interface MapParams {
+/**
+ * Items per list (0 = all).
+ */
+limit?: number
+/**
+ * Add meaning edges for the communities (null: engine.explore.meaning).
+ */
+meaning?: (boolean | null)
+/**
+ * Also save a snapshot in the memory (for map.since).
+ */
+record?: boolean
+}
+/**
+ * Successful response to map.get.
+ */
+export interface MapGetResponse {
+jsonrpc: "2.0"
+id: (number | string | null)
+result: MapResult
+}
+export interface MapResult {
+percentile: number
+/**
+ * How topic pages were decided (the format's types), or why there are none.
+ */
+topic_pages: string
+notes: number
+missing_notes: number
+tags: number
+left_out_tags: TagCountItem[]
+nodes: number
+edges: number
+communities: MapCommunity[]
+notes_in_communities: number
+alone: number
+modularity: number
+seed: number
+resolution: number
+tag_rule: string
+meaning_edges: number
+meaning_cutoff: (number | null)
+meaning_unavailable: (string | null)
+betweenness: MapBetweenness
+bridges: MapBridge[]
+hubs: MapHub[]
+authorities: MapAuthority[]
+meaning?: (MapMeaning | null)
+recorded?: (MapRecorded | null)
+}
+export interface TagCountItem {
+tag: string
+notes: number
+}
+export interface MapHub {
+path: string
+score: number
+}
+export interface MapMeaning {
+edges: MeaningEdge[]
+cutoff: (number | null)
+percentile: number
+unavailable: (string | null)
+changes: (MeaningChanges | null)
+}
+export interface MeaningEdge {
+a: string
+b: string
+cosine: number
+}
+export interface MeaningChanges {
+stranded_before: string[]
+stranded_after: string[]
+placed: PlacedNote[]
+moved: MovedNote[]
+match: {
+[k: string]: number | null
+}
+split: {
+[k: string]: number[]
+}
+joined: {
+[k: string]: number[]
+}
+communities_before: number
+communities_after: number
+}
+export interface PlacedNote {
+note: string
+community: number
+}
+export interface MovedNote {
+note: string
+from: number
+to: number
+}
+export interface MapRecorded {
+at: string
+bytes: number
+memory: string
+communities: number
+gaps: number
+basis: string
+missing: number
+}
+export interface MapSinceParams {
+/**
+ * A date (2026-11-10) or a time (2026-11-10T14:30).
+ */
+since: string
+}
+/**
+ * What changed since a recorded map: gaps closed, communities formed or gone, missing notes written. Omit "id" to send a notification (no response).
+ */
+export interface MapSinceRequest {
+jsonrpc: "2.0"
+method: "map.since"
+params: MapSinceParams
+id?: (number | string | null)
+}
+/**
+ * Successful response to map.since.
+ */
+export interface MapSinceResponse {
+jsonrpc: "2.0"
+id: (number | string | null)
+result: MapSinceResult
+}
+export interface MapSinceResult {
+since: string
+/**
+ * When the snapshot compared with was recorded.
+ */
+snapshot: string
+/**
+ * How it was chosen.
+ */
+chosen: string
+/**
+ * [then, now]
+ */
+notes: number[]
+links: number[]
+communities: number[]
+formed: SinceCommunity[]
+gone: SinceCommunity[]
+gaps: SinceGap[]
+gap_basis: (string | null)
+written: SinceWritten[]
+topic_pages: SinceTopicPage[]
+}
+export interface SinceCommunity {
+community: number
+name: string
+notes: number
+best_match?: (number | null)
+overlap: number
+}
+export interface SinceGap {
+communities: number[]
+names: string[]
+links_then: number
+expected_then: number
+links_now: number
+expected_now: number
+/**
+ * Links between the two sides made since (pairs of paths).
+ */
+added: string[][]
+status: ("open" | "closed" | "gone")
+why: string
+}
+export interface SinceWritten {
+name: string
+linked_from: number
+note: string
+}
+export interface SinceTopicPage {
+community_then: number
+name: string
+community: number
+topic_pages: string[]
 }
 export interface Mark {
 /**
@@ -689,6 +1875,36 @@ citing_notes: number
 export interface NameCount {
 name: string
 linking_notes: number
+}
+export interface NoteDeepenParams {
+note: string
+lenses?: ([("neighbourhood" | "cited" | "foundations" | "backbone" | "cluster"), ...(("neighbourhood" | "cited" | "foundations" | "backbone" | "cluster"))[]] | null)
+/**
+ * Notes per lens (0 = all that stand out).
+ */
+limit?: number
+}
+/**
+ * Five lenses on one note: neighbourhood, cited together, same foundations, backbone, cluster. Omit "id" to send a notification (no response).
+ */
+export interface NoteDeepenRequest {
+jsonrpc: "2.0"
+method: "note.deepen"
+params: NoteDeepenParams
+id?: (number | string | null)
+}
+/**
+ * Successful response to note.deepen.
+ */
+export interface NoteDeepenResponse {
+jsonrpc: "2.0"
+id: (number | string | null)
+result: NoteDeepenResult
+}
+export interface NoteDeepenResult {
+note: string
+percentile: number
+lenses: DeepenLenses
 }
 export interface NoteGetParams {
 /**
@@ -804,7 +2020,7 @@ id: (number | string | null)
 result: NoteIngestResult
 }
 export interface NoteIngestResult {
-operation: ("new" | "link" | "set" | "fix" | "ingest")
+operation: ("new" | "link" | "set" | "fix" | "ingest" | "link-it" | "unlink")
 /**
  * duplicate: an existing note matches; nothing written (see duplicates).
  */
@@ -839,22 +2055,6 @@ duplicates: DuplicateCandidate[]
  */
 candidates: DuplicateCandidate[]
 }
-export interface WrittenFile {
-path: string
-action: ("create" | "modify")
-/**
- * What was done, for people: 'line 11: added [[X]] to `supported-by::`'.
- */
-changes: string[]
-/**
- * Unified diff of the file (against /dev/null for a new file).
- */
-diff: string
-/**
- * The whole new file, for action 'create'; null otherwise.
- */
-content: (string | null)
-}
 export interface NoteLinkParams {
 /**
  * Check and return the diff; write nothing.
@@ -888,7 +2088,7 @@ id: (number | string | null)
 result: WriteResult
 }
 export interface WriteResult {
-operation: ("new" | "link" | "set" | "fix" | "ingest")
+operation: ("new" | "link" | "set" | "fix" | "ingest" | "link-it" | "unlink")
 /**
  * written; refused (would add violations, nothing written); dry-run; unchanged.
  */
@@ -1064,6 +2264,13 @@ export interface NoteRelatedResult {
 seed: RelatedSeed
 compared: number
 hits: RelatedHit[]
+text_signal: TextSignal
+/**
+ * The weights used: graph, cocitation, coupling, tags, text (engine.related.weights, rescaled to sum to 1 without the text signal).
+ */
+weights: {
+[k: string]: number
+}
 }
 export interface RelatedSeed {
 label: string
@@ -1080,16 +2287,27 @@ export interface RelatedHit {
 path: string
 title: string
 /**
- * 0.5 graph + 0.3 text + 0.2 tags.
+ * The weighted sum of the scaled signals (engine.related.weights; default 0.7 text + 0.1 graph + 0.1 tags + 0.05 co-citation + 0.05 coupling); see `weights`.
  */
 score: number
 graph: number
+/**
+ * Centered cosine of the two notes' embeddings, over the best one (0 to 1).
+ */
 text: number
 tags: number
+/**
+ * Notes that link to both, scaled (0 unless engine.related.weights.cocitation > 0).
+ */
+cocitation: number
+/**
+ * What both link to, scaled (0 unless engine.related.weights.coupling > 0).
+ */
+coupling: number
 linked: boolean
 hops: (number | null)
 /**
- * E.g. "2 hops via kl-penalty-in-rlhf · shares #rl · similar text (kl, ppo)".
+ * E.g. "2 hops via kl-penalty-in-rlhf · shares #rl · similar text (kl, ppo)"; the words are those in both notes that add most to their embedding cosine.
  */
 reason: string
 }
@@ -1124,6 +2342,40 @@ export interface NoteSetResponse {
 jsonrpc: "2.0"
 id: (number | string | null)
 result: WriteResult
+}
+export interface NotesExplainParams {
+a: string
+b: string
+/**
+ * Words listed behind the text score.
+ */
+words?: number
+}
+/**
+ * How two notes relate, signal by signal, with the evidence. Omit "id" to send a notification (no response).
+ */
+export interface NotesExplainRequest {
+jsonrpc: "2.0"
+method: "notes.explain"
+params: NotesExplainParams
+id?: (number | string | null)
+}
+/**
+ * Successful response to notes.explain.
+ */
+export interface NotesExplainResponse {
+jsonrpc: "2.0"
+id: (number | string | null)
+result: NotesExplainResult
+}
+export interface NotesExplainResult {
+configured_weights: ExplainWeights
+a: string
+b: string
+score: number
+signals: ExplainSignal[]
+model_id: (string | null)
+uncached: number
 }
 export interface NotesPickParams {
 /**
@@ -1314,6 +2566,34 @@ facets?: number
 snippet_width?: number
 }
 /**
+ * Discover lenses: hidden links, same roles, bridges, gaps, surprises, unwritten notes, a wander. Omit "id" to send a notification (no response).
+ */
+export interface VaultDiscoverRequest {
+jsonrpc: "2.0"
+method: "vault.discover"
+params?: VaultDiscoverParams
+id?: (number | string | null)
+}
+export interface VaultDiscoverParams {
+/**
+ * Null: the lenses over the whole vault (gap, surprise, unwritten).
+ */
+note?: (string | null)
+lenses?: ([("hidden" | "role" | "bridge" | "gap" | "surprise" | "unwritten" | "wander"), ...(("hidden" | "role" | "bridge" | "gap" | "surprise" | "unwritten" | "wander"))[]] | null)
+/**
+ * Results per lens (0 = all that stand out).
+ */
+limit?: number
+/**
+ * wander: steps to take.
+ */
+steps?: number
+/**
+ * wander and sampling; null: engine.explore.seed.
+ */
+seed?: (number | null)
+}
+/**
  * Successful response to vault.stats.
  */
 export interface VaultStatsResponse {
@@ -1385,7 +2665,7 @@ id: (number | string | null)
 result: VaultFixResult
 }
 export interface VaultFixResult {
-operation: ("new" | "link" | "set" | "fix" | "ingest")
+operation: ("new" | "link" | "set" | "fix" | "ingest" | "link-it" | "unlink")
 /**
  * written; refused (would add violations, nothing written); dry-run; unchanged.
  */
@@ -1519,5 +2799,20 @@ marks: Mark[]
 truncated_start: boolean
 truncated_end: boolean
 }
+/**
+ * Successful response to vault.discover.
+ */
+export interface VaultDiscoverResponse {
+jsonrpc: "2.0"
+id: (number | string | null)
+result: VaultDiscoverResult
+}
+export interface VaultDiscoverResult {
+note: (string | null)
+percentile: number
+seed: number
+text_signal: TextSignal
+lenses: DiscoverLenses
+}
 
-export type VaultMethod = 'index.build' | 'index.status' | 'vault.stats' | 'health.report' | 'notes.pick' | 'note.get' | 'vault.check' | 'vault.fix' | 'vault.coverage' | 'note.new' | 'note.link' | 'note.set' | 'note.ingest' | 'search.query' | 'note.preview' | 'note.related' | 'links.suggest' | 'notes.suggest' | 'mentions.unlinked';
+export type VaultMethod = 'index.build' | 'index.status' | 'vault.stats' | 'health.report' | 'notes.pick' | 'note.get' | 'vault.check' | 'vault.fix' | 'vault.coverage' | 'note.new' | 'note.link' | 'note.set' | 'note.ingest' | 'search.query' | 'note.preview' | 'note.related' | 'links.suggest' | 'notes.suggest' | 'mentions.unlinked' | 'explore.run' | 'explore.mark' | 'explore.kept' | 'explore.link' | 'explore.unlink' | 'map.get' | 'map.since' | 'note.deepen' | 'vault.discover' | 'notes.explain' | 'embed.status' | 'config.show';

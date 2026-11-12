@@ -2,7 +2,7 @@
 
 [← Documentation index](../README.md#documentation)
 
-Ranked, typo-tolerant search with a query language that mixes text with tags, folders, properties and links; related notes; links to add and notes to write; unlinked mentions. All classical, offline, with a reason for every result. Examples use a copy of the sample vault: `cp -Rp tests/fixtures/vault /tmp/sample-vault && vault index /tmp/sample-vault`.
+Ranked, typo-tolerant search with a query language that mixes text with tags, folders, properties and links; related notes; links to add and notes to write; unlinked mentions. All offline (text similarity uses a small local embedding model), with a reason for every result. Examples use a copy of the sample vault: `cp -Rp tests/fixtures/vault /tmp/sample-vault && vault index /tmp/sample-vault`.
 
 ## Search and queries
 
@@ -119,53 +119,109 @@ vault related /tmp/sample-vault kl-penalty-in-rlhf --limit 5
 ```
 ```
 Related to kl-penalty-in-rlhf
-  20_ZETTLEKASTEN/kl-penalty-in-rlhf.md · index 2026-11-07T06:01:37+00:00
+  20_ZETTLEKASTEN/kl-penalty-in-rlhf.md · index 2026-11-10T15:01:32+00:00
 
-  score = 0.5 × graph + 0.3 × text + 0.2 × tags · 179 notes compared
+  score = 0.5 × graph + 0.3 × text + 0.2 × tags · 179 notes compared · text: potion-base-8M embeddings
 
-   1. direct-preference-optimization-dpo                                            0.59      linked
-      linked from it · similar text (dpo, rlhf, ppo)
+   1. direct-preference-optimization-dpo                                            0.87      linked
+      linked from it · shares [[reinforcement-learning-from-human-feedback-rlhf]], [[policy-gradient-methods]] · similar text (dpo, policy, reward)
 
-   2. RLHF                                                                          0.50  not linked
-      2 hops via direct-preference-optimization-dpo +1 · similar text (kl, dpo, rlhf)
+   2. trust-region-policy-optimization-monotonic-improvement-guarantee              0.53      linked
+      linked from it · shares [[policy-gradient-methods]] · similar text (policy, kl, divergence)
 
-   3. trust-region-policy-optimization-monotonic-improvement-guarantee              0.42      linked
-      linked from it · similar text (kl, divergence, penalty)
+   3. RLHF                                                                          0.50  not linked
+      2 hops via direct-preference-optimization-dpo +1 · similar text (rlhf, reward, policy)
 
-   4. covariance-targeted-entropy-intervention                                      0.33  not linked
-      2 hops via trust-region-policy-optimization-monoto… +3 · similar text (kl, penalize, penalty)
+   4. covariance-targeted-entropy-intervention                                      0.48  not linked
+      2 hops via trust-region-policy-optimization-monoto… +3 · shares [[policy-gradient-methods]] · similar text (kl, token, grpo)
 
-   5. Cameron R. Wolfe - GRPO Tricks (Making RL Actually Work)                      0.31  not linked
-      2 hops via trust-region-policy-optimization-monoto… +2 · similar text (kl, token, penalty)
+   5. decoupling-clipping-unit-from-credit-assignment-unit                          0.45  not linked
+      2 hops via policy-gradient-methods (no note yet) · shares [[policy-gradient-methods]] · similar text (token, reward, gradient)
 ```
 
-Three signals, each scaled to 0–1 by its best value, blended 0.5 / 0.3 / 0.2:
+Five signals, each scaled to 0–1 by its best value and weighted by `engine.related.weights` in
+`config/config.yaml`: graph 0.5, text 0.3, tags 0.2 (co-citation and coupling 0), so the notes it already links
+come first. `--unlinked` (only the notes it has no link with, either way) uses `engine.related.unlinked_weights`
+instead: text 0.7, graph 0.1, tags 0.1, co-citation 0.05, coupling 0.05, the mix [`vault experiment`](experiment.md)
+found best at finding hidden links among unlinked notes (`vault discover` and `vault explore` use it too):
+
+```bash
+vault related /tmp/sample-vault kl-penalty-in-rlhf --limit 3 --unlinked
+```
+```
+Related to kl-penalty-in-rlhf
+  20_ZETTLEKASTEN/kl-penalty-in-rlhf.md · index 2026-11-10T15:01:32+00:00
+
+  score = 0.1 × graph + 0.05 × cocitation + 0.05 × coupling + 0.7 × text + 0.1 × tags · 179 notes compared · text: potion-base-8M embeddings
+
+   1. RLHF                                                                          0.74  not linked
+      2 hops via direct-preference-optimization-dpo +1 · similar text (rlhf, reward, policy)
+
+   2. covariance-targeted-entropy-intervention                                      0.71  not linked
+      2 hops via trust-region-policy-optimization-monoto… +3 · shares [[policy-gradient-methods]] · both link trust-region-policy-optimization-monoto…, reward-model-overoptimization-hump (no note yet) · similar text (kl, token, grpo)
+
+   3. decoupling-clipping-unit-from-credit-assignment-unit                          0.70  not linked
+      2 hops via policy-gradient-methods (no note yet) · shares [[policy-gradient-methods]] · similar text (token, reward, gradient)
+```
+
+The signals:
 
 - **graph**: personalized PageRank (a random walk that follows links in either direction and jumps back to the
   note with probability 0.15) over the link graph, divided by each note's number of links so hubs do not come
   first for everything. Links to notes that do not exist yet are part of the graph: two notes that both link
   `[[rl-environment-design]]` are two hops apart through it (shown as "(no note yet)");
-- **text**: the note's 30 most distinctive terms run as a search, scored with the same BM25F as `vault search`.
-  Property keys (`Status:`), tags and the words of template headings ("Related zettels", in 3+ notes) do not count;
-- **tags**: shared tags weighted by rarity; tags on more than a third of the notes (`#baby`) are ignored.
+- **text**: the cosine of the two notes' embeddings, from the model configured in `engine.embedding`
+  (`config/config.yaml`; the bundled `models/potion-base-8M`), with the vault's mean vector subtracted from both
+  first. Without that, a static model puts every pair of notes in one vault between 0.5 and 0.9 (sample vault:
+  median 0.65) and everything looks somewhat alike; centered, the median pair is about 0 and only notes closer
+  than average count (negative = 0). What a note is embedded as: its title, aliases, headings and body, without
+  frontmatter, code, comments, tags, property keys, URLs and TeX math. Vectors are cached in the index (see
+  [`vault embed`](commands.md#vault-embed-vault---status---full---prune)); a note without a cached vector is
+  embedded in memory for that run only, never written (the output says how many, and that `vault embed` caches
+  them);
+- **tags**: shared tags weighted by rarity; tags on more than a third of the notes (`#baby`) are ignored. A note's
+  tags are its `#tags` and its tag links (`Tags: [[policy-gradient-methods]]`;
+  [which links are tags](explore.md#the-graph-and-which-links-are-tags));
+- **co-citation** and **coupling**: notes that link to both, and what both link to (missing notes too), each
+  weighted so a note that links to everything counts little (as in [`vault explain`](#how-two-notes-relate-vault-explain)).
 
 Reasons are facts you can check: "linked from it" (this note links to the result), "links to it", "linked both
-ways", "2 hops via X +2 more", "shares #tag", "similar text (terms)". Results without any link between the two
-notes are marked `not linked`. `--unlinked` shows only those (link candidates), `--explain` the three signals,
-`--json` everything. The note can be a name, path or alias, or the name of a missing note (then: what the notes
-that link to it are related to).
+ways", "2 hops via X +2 more", "shares #tag", "cited together by X", "both link X", "similar text (words)". The words are words in both notes that add
+the most to their cosine, read off the embedding itself: a static model's vector is the mean of its token
+vectors, so the cosine splits exactly into a share per word (`vaultengine/embedding/explain.py`). "similar text"
+is given when the text signal is at least a quarter of the best one and there is such a word. Results without any
+link between the two notes are marked `not linked`. `--unlinked` shows only those (link candidates), `--explain`
+the signals (and the cosine behind the text signal), `--json` everything. The note can be a name, path or
+alias, or the name of a missing note (then its vector is the mean of the vectors of the notes that link to it).
+
+**Without the embedding model** (its folder missing, or files that do not load), only the text signal is off: the
+others still rank, with their weights rescaled to sum to 1, and the output says why:
+
+```
+  score = 0.71 × graph + 0.29 × tags · 179 notes compared
+  text signal unavailable: embedding model folder not found: /no/such/model
+    (the other signals still rank; their weights are rescaled to sum to 1)
+```
+
+The same holds for the links of `vault suggest`, its drafts, `vault explain` and the JSON-RPC methods (their
+`text_signal` says whether the text signal was available, and why not). Only `vault embed` stops with an error.
 
 Where it is convincing and where it is not (checked on the sample vault):
 
 - concept notes with a few specific links (`kl-penalty-in-rlhf`): the unlinked suggestions are real
-  (`RLHF`, `ppo-as-trpo-simplification`, `GRPO Tricks` all discuss the KL penalty). Dividing by degree costs
-  something here: the broad parent concept, `reinforcement-learning-from-human-feedback-rlhf`, is linked but
-  only eighth, because it is a hub and its text is general;
+  (`RLHF` and `GRPO Tricks` discuss the KL penalty; `decoupling-clipping-unit-from-credit-assignment-unit` and
+  `tool-output-masking-in-agentic-rl` are about per-token policy-gradient credit, which the note's "per-token vs
+  per-sequence KL" is about too). Dividing by degree costs something here: the broad parent concept,
+  `reinforcement-learning-from-human-feedback-rlhf`, is linked but only tenth, because it is a hub and its text is
+  general;
 - dense, well-linked clusters (`obfuscated-reward-hacking`): the top results are right but already linked; the
-  unlinked ones are generic neighbours ("2 hops via … · shares #ai-safety"), not new insight;
-- notes made from a shared template (the `50_MOC/discourse` claims): structure dominates. Sibling claims come up
-  through a shared missing question note, the status tag `#supported` and naming-convention words (`que`, `evd`),
-  not because their content is related. Treat those results as "same part of the map", not "same idea".
+  unlinked ones are thematic neighbours (AI control, scheming, monitoring: "2 hops via … · shares #ai-safety ·
+  similar text (monitor, agent, detector)"), plausible but not new insight;
+- notes made from a shared template (the `50_MOC/discourse` claims): structure still shows. Sibling claims come up
+  through a shared missing question note and the status tag `#supported`, and the template's words (`evd`,
+  `zettels`) can be among the words named. Treat those results as "same part of the map", not "same idea";
+- the words named are the biggest contributors, and common words can be among them ("similar text (judge,
+  verdict, rather)").
 
 **Connecting notes.** `vault suggest <vault>` starts with links to add: pairs of notes with no link between them
 that probably belong linked, with every kind of evidence in the reason:
@@ -174,16 +230,16 @@ that probably belong linked, with every kind of evidence in the reason:
 vault suggest /tmp/sample-vault --links --path 20_ZETTLEKASTEN --limit 3
 ```
 ```
-  Links to add  (notes with no link between them; score = 0.4 × shared neighbours + 0.3 × cited together + 0.3 × similar text)
+  Links to add  (notes with no link between them; score = 0.33 × shared neighbours + 0.25 × cited together + 0.17 × shared tags + 0.25 × similar text)
 
-    1. in-context-scheming-capability  ↔  sandbagging-strategic-underperformance                          0.24
-       shared neighbours: 2412.04984 - Frontier Models Capable of In-c…, ai-control-vs-alignment +1 · cited together by scheming-as-threat-model · similar text (scheming, goal, sonnet)
+    1. in-context-scheming-capability  ↔  scheming-inability-safety-case-closed                 0.38
+       shared neighbours: 2412.04984 - Frontier Models Capable of In-c…, ai-control-vs-alignment +1 · shares #frontier-models-in-ai, #ai-safety · cited together by scheming-as-threat-model · similar text (scheming, context, reasoning)
 
-    2. in-context-scheming-capability  ↔  scheming-inability-safety-case-closed                           0.24
-       shared neighbours: 2412.04984 - Frontier Models Capable of In-c…, ai-control-vs-alignment +1 · cited together by scheming-as-threat-model · similar text (scheming, empirical)
+    2. binary-judge-scoring-over-likert  ↔  llm-judge-position-bias                             0.35
+       shared neighbours: judge-agreement-against-human-ceiling · shares [[llm-as-judge]], [[evaluation-methodology]] · cited together by llm-judge-score-bias-and-contrastive-decoding, 2511.19399 - DR Tulu (RLER, Evolving Rubrics… +1 · similar text (judge, verdict, rather)
 
-    3. cot-monitor-beats-action-monitor  ↔  cot-monitorability-vs-faithfulness                            0.23
-       shared neighbours: 2503.11926 - Monitoring Reasoning Models (Co… · cited together by monitorability-tax, obfuscated-reward-hacking · similar text (cot, intent)
+    3. eval-precision-vs-eval-validity  ↔  label-noise-dominates-saturated-benchmarks           0.35
+       shared neighbours: rephrasing-defeats-ngram-decontamination (no…, construct-and-operationalization-gap (no not… · shares [[benchmark-design]], [[experimental-design]], [[evaluation-methodology]] · similar text (benchmark, failure, errors)
 ```
 
 - **shared neighbours**: notes (or missing notes) both are linked with, weighted by rarity (a note linked from 2
@@ -191,15 +247,23 @@ vault suggest /tmp/sample-vault --links --path 20_ZETTLEKASTEN --limit 3
   notes that each link 60 things are not matched just for being big;
 - **cited together**: notes that link to both, weighted and normalised the same way (a note that links to both
   counts here, not also as a shared neighbour);
-- **similar text**: the cosine of the two notes' distinctive-term profiles.
+- **shared tags**: the weighted Jaccard of the two notes' `#tags` and tag links, exactly as `related` and `explain`
+  score it. Tag links (`Tags: [[llm-as-judge]]`; [which links are tags](explore.md#the-graph-and-which-links-are-tags))
+  are tags here too, never neighbours or citations, so the three commands read a note's links the same way;
+- **similar text**: the centered cosine of the two notes' embeddings, as in `related` (0 if negative). Each note's
+  5 closest notes by embedding are candidates too, with no link evidence needed. The reason names the words in
+  both notes that add the most to it; two notes with no such word (near-empty notes) get no "similar text".
 
-Each is a similarity from 0 to 1 (`--explain` shows them); score = 0.4 × shared + 0.3 × cited + 0.3 × text.
+Each is a similarity from 0 to 1 (`--explain` shows them); score = (0.4 × shared + 0.3 × cited + 0.2 × tags +
+0.3 × text) / 1.2, the weights printed in the header.
 `--for <note>` lists pairs with one note, `--path <text>` pairs whose paths both contain the text, `--links` /
-`--notes` one section only. On the sample the zettel pairs are convincing (the three scheming notes, the two CoT
-monitor notes, the rubric notes); across the whole vault the top is dominated by evidence notes (`EVD - …`) of
-the discourse graph: small notes under the same claim or source, which score high on thin but consistent
-evidence. Some belong linked (the two AppWorld notes share a source, a claim and their vocabulary), many are just
-siblings, and in a discourse graph evidence links to claims rather than to other evidence.
+`--notes` one section only. On the sample the zettel pairs are convincing (the scheming notes, the judge notes,
+the evaluation-precision notes). Across the whole vault the top 5 are all evidence notes (`EVD - …`) of the discourse
+graph: every one carries the same template tags (`#evidence`, `[[discourse-graph]]`, `[[rl-environment-design]]`),
+none on more than a third of the notes, so sibling evidence notes share three tags. The two AppWorld notes, first,
+belong linked; most others are siblings under the same claim.
+"Notes to write" needs no embeddings: its "about" words are each linking note's most distinctive terms (tf × idf),
+shown as keywords; nothing is ranked by them.
 
 `vault unlinked <vault> [note]` finds every plain-text mention of a note's title or alias that is not a link yet
 (all notes, or one):
@@ -267,9 +331,11 @@ after which `vault index` resolves every link to it:
 vault suggest /tmp/sample-vault --draft reward-model-overoptimization-hump
 ```
 ```
-Created: 07-11-2026 06:04
+# would be written to 20_ZETTLEKASTEN/reward-model-overoptimization-hump.md (add --write to create it)
 
-Tags: [[reward]] [[reinforcement-learning-in-language-models]] [[reward-hacking-as-specification-gaming]] [[evaluation-methodology]]
+Created: 09-11-2026 20:26
+
+Tags: [[reward]] [[reward-hacking-as-specification-gaming]] [[reinforcement-learning-in-language-models]] [[evaluation-methodology]]
 
 # reward-model-overoptimization-hump
 
@@ -277,15 +343,110 @@ Tags: [[reward]] [[reinforcement-learning-in-language-models]] [[reward-hacking-
 
 ## What the linking notes say
 
-- [[2507.17746 - Rubrics as Rewards (RaR)]]: … "latches onto surface artifacts — response length, formatting quirks, annotator idiosyncrasies. That is the [[reward-model-overoptimization-hump]] and the length-bias literature; it is also the mechanism behind [[rlhf-amplifies-sycophancy]]. You optimize" …
+- [[reward-model-accuracy-is-not-reward-model-utility]]: … "— a metric that ranks graders well but predicts training utility poorly. It reframes [[reward-model-overoptimization-hump]]: if accuracy does not predict utility, the hump's location is not predictable from leaderboard rank either." …
 - [[filtering-to-the-competence-frontier-as-free-curriculum]]: … "[[rlvr-reinforcement-learning-with-verifiable-rewards]] and would be fragile under a learned reward model ([[reward-model-overoptimization-hump]]). Compare [[consensus-filtering-for-process-supervision-data]], which filters *labels* by agreement rather" …
 …
 ```
 
 The "about" terms are weakest for broad topic hubs, whose linking notes share little vocabulary
 (`experimental-design` gets "prime, composition, hub…"), and drafts lean toward what the linking notes are
-mostly about (the overoptimization draft's "See Also" is rubric-heavy because several linking notes are about
-rubrics). The draft is a starting point to rewrite, not a note.
+mostly about (the overoptimization draft's "See Also" is about reward and verifier design, like most of its
+linking notes). The draft is a starting point to rewrite, not a note.
+
+## How two notes relate: `vault explain`
+
+`vault explain <vault> <a> <b>` takes two notes apart signal by signal: each signal's value from 0 to 1, its weight,
+its contribution to the score, and the evidence it rests on.
+
+```bash
+vault explain /tmp/sample-vault "2312.06942 - AI Control - Improving Safety Despite Intentional Subversion" \
+  "Shlegeris Greenblatt - The Case for Ensuring Powerful AIs are Controlled" --limit 3
+```
+```
+How 2312.06942 - AI Control - Improving Safety Despite Intentional Subversion and Shlegeris Greenblatt - The Case for Ensuring Powerful AIs are Controlled relate
+  10_SOURCES/2312.06942 - AI Control - Improving Safety Despite Intentional Subversion.md ↔ 10_SOURCES/Shlegeris Greenblatt - The Case for Ensuring Powerful AIs are Controlled.md
+  index 2026-11-10T10:15:55+00:00 (up to date)
+
+  score 0.66 = the sum of weight × value  (weights: engine.explore.weights, rescaled to sum to 1)
+
+  signal         value   weight   contribution
+  direct links    1.00 ×   0.30 =        0.300
+  co-citation     0.48 ×   0.15 =        0.071
+  coupling        0.56 ×   0.15 =        0.085
+  shared tags     0.00 ×   0.10 =        0.000
+  text            0.67 ×   0.30 =        0.202
+
+  direct links  1.00  (1 if either links to the other)
+    2312.06942 - AI Control - Improving Safety Despite Intentional Subversion → Shlegeris Greenblatt - The Case for Ensuring Powerful AIs are Controlled: 1 link (line 139)
+    Shlegeris Greenblatt - The Case for Ensuring Powerful AIs are Controlled → 2312.06942 - AI Control - Improving Safety Despite Intentional Subversion: 1 link (line 186)
+
+  co-citation  0.48  (notes that link to both; each weighs 1 / ln(1 + the notes it links to))
+    2412.14093 - Alignment Faking in Large Language Models       0.72  (links to 3)
+    2504.10374 - Ctrl-Z - Controlling AI Agents via Resampling   0.72  (links to 3)
+    2412.04984 - Frontier Models Capable of In-context Scheming  0.62  (links to 4)
+      … 2 more (--limit 0 shows all)
+    = 3.14 / √((5.23 + 1) × (5.99 + 1)) = 0.48   [8 and 10 notes link to each in all, weighing 5.23 and 5.99]
+
+  coupling  0.56  (what both link to; each weighs 1 / ln(1 + the notes linking to it))
+    Shlegeris Greenblatt - Catching AIs Red-Handed (no note yet)  0.72  (linked from 3)
+    2504.10374 - Ctrl-Z - Controlling AI Agents via Resampling    0.62  (linked from 4)
+    2412.14093 - Alignment Faking in Large Language Models        0.51  (linked from 6)
+    = 1.86 / √((2.27 + 1) × (2.31 + 1)) = 0.56   [4 and 4 references in all, weighing 2.27 and 2.31]
+
+  shared tags  0.00  (each tag weighs ln(180 / notes with it); weighted Jaccard; tag links: fields named 'tags' (no format configured))
+    shared: none
+    only in 2312.06942 - AI Control - Improving Safety Despite Intentional Subversion: none
+    only in Shlegeris Greenblatt - The Case for Ensuring Powerful AIs are Controlled: none
+    left out (on more than a third of the notes): #baby (133 notes)
+
+  text  0.67  (centered cosine 0.673 of the two embeddings, potion-base-8M; the vault's mean vector subtracted; 0 if negative)
+    words in both notes, by their share of the cosine: trusted +0.025 · safety +0.024 · control +0.023 · untrusted +0.020 · scheming +0.020 · enough +0.010 · attack +0.008 · even +0.007
+    = all 395 words in both +0.576, words in one note only +0.174, the vault's average note -0.077  (sum 0.673)
+```
+
+| Signal | Value | Evidence shown |
+|---|---|---|
+| direct links | 1 if either note links to the other, else 0 | the links each way, with their lines |
+| co-citation | the notes that link to both; each weighs 1 / ln(1 + the nodes it links to), so a list that links 80 things counts less than a note that links three; weighted cosine: sum over the notes citing both / √((W_a + 1)(W_b + 1)), W = the weight of all notes citing each | the citing notes and their weights, and the sum |
+| coupling | what both link to, missing notes included; each reference weighs 1 / ln(1 + the notes linking to it); the same weighted cosine over references | the shared references and their weights, and the sum |
+| shared tags | weighted Jaccard of the tags, each weighing ln(N / notes with it); nested tags count their parents; tags on more than a third of the notes are left out | shared tags, tags of one note only, tags left out |
+| text | the centered cosine of the two embeddings (as in `related`), 0 if negative | the words in both notes by their share of the cosine; the shares of all words add up exactly to the cosine, together with the part from subtracting the vault's average note |
+
+score = the sum of weight × value. The weights are `engine.explore.weights` in `config/config.yaml` (direct 0.3,
+co-citation 0.15, coupling 0.15, tags 0.1, text 0.3; any of them with `--setting explore.weights.text=0.5` or
+`VAULTENGINE_EXPLORE__WEIGHTS__TEXT`), rescaled to sum to 1 over the signals that are available. Co-citation and
+coupling run on the same graph `related` walks (`vaultengine/graphrank.py`, which keeps the link directions); a link
+between the two notes counts as a direct link only, never as its own co-citation or coupling. `--words N` words are
+listed behind the text score, `--limit N` notes per signal, `--json` everything.
+
+Without the embedding model the text row is `unavailable` and the other four share its weight. A pair related only
+by meaning then has nothing left:
+
+```
+$ vault explain /tmp/sample-vault RLHF kl-penalty-in-rlhf --setting embedding.model_path=/no/such/model
+  score 0.00 = the sum of weight × value  (weights: engine.explore.weights, rescaled to sum to 1)
+  text signal unavailable: embedding model folder not found: /no/such/model
+    (the other signals still rank; their weights are rescaled to sum to 1)
+
+  signal         value   weight   contribution
+  direct links    0.00 ×   0.43 =        0.000
+  co-citation     0.00 ×   0.21 =        0.000
+  coupling        0.00 ×   0.21 =        0.000
+  shared tags     0.00 ×   0.14 =        0.000
+  text               —        —    unavailable
+```
+
+What to keep in mind when reading the numbers (checked on the sample vault):
+
+- in this vault the topics are `[[links]]` on a `Tags:` line; those are tag links (see
+  [The shape of the vault](explore.md#the-graph-and-which-links-are-tags)) and count as shared tags, not as coupling,
+  so two notes both tagged `[[policy-gradient-methods]]` share that tag. `#baby` (on 133 notes) is left out;
+- a note that links to both notes and is linked from both counts in co-citation and in coupling (in the example,
+  `Ctrl-Z` and `Alignment Faking`): the two signals are separate views of the same links, not independent evidence;
+- direct links are all or nothing: one link and ten links are both 1;
+- with the weights above, a pair related only by meaning scores at most 0.3;
+- TeX math (`$…$`, `$$…$$`) is left out of what is embedded: before it was, two math-heavy notes looked alike for their
+  `\frac` and `\mathbb` ("Adding Error Bars to Evals" and "GiGPO": 0.71 on text, 0.33 now).
 
 ## Over JSON-RPC
 
@@ -304,8 +465,10 @@ rubrics). The draft is a starting point to rewrite, not a note.
 
 Params, results and errors are defined once as Pydantic models (`vaultengine/rpc/models.py`); `vault rpc-schema`
 prints the JSON Schema they produce (`vaultengine/rpc/schema.json`, from which the app's TypeScript types are
-generated). Errors: the JSON-RPC codes, plus -32001 index not built, -32002 note not found, -32003/-32004/-32005 format and write errors (see [api.md](api.md)), and -32006 invalid
+generated). Errors: the JSON-RPC codes, plus -32001 index not built, -32002 note not found, -32003/-32004/-32005 format and write errors (see [api.md](api.md)), -32006 invalid
 query, whose `data` says where the problem is (`start`/`end` offsets in the query) and how to fix it (`hint`).
+`note.related` and `links.suggest` answer without the embedding model too: their `text_signal` (`available`,
+`model_id`, `unavailable`, `uncached`) and `weights` say what the score was made of.
 
 ```bash
 printf '%s\n' \
@@ -342,7 +505,7 @@ On stderr it also prints `vaultengine: serving /tmp/sample-vault (index …) on 
 | then `o` | opens the note in Obsidian (`obsidian://open?vault=sample-vault&file=20_ZETTLEKASTEN%2F…md`) and says `↗ Opened … in Obsidian`; works in the list too |
 | then Esc, Esc | back to the list (same note selected), then closed: the top results stay in the transcript, the prompt is back |
 | `/search reward (tag:ai-safety` Enter | `⏺ Invalid query: this ( is never closed`, the query, a `^` under the `(`, and `add ) after the group` |
-| `/related @klpen` (pick, Enter) Enter | `⏺ Related to kl-penalty-in-rlhf`, each note with its score, `linked` / `not linked` and the reason (`2 hops via direct-preference-optimization-dpo +1 · similar text (kl, dpo, rlhf)`) |
+| `/related @klpen` (pick, Enter) Enter | `⏺ Related to kl-penalty-in-rlhf`, each note with its score, `linked` / `not linked` and the reason (`2 hops via direct-preference-optimization-dpo +1 · similar text (rlhf, reward, policy)`) |
 | `/suggest` Enter | `⏺ Links to add` (pairs with their evidence) and `⏺ Notes to write`; `/suggest links`, `/suggest notes`, `/suggest @note` for one part |
 | `/unlinked @monitorability` (pick, Enter) Enter | `⏺ Unlinked mentions of monitorability-tax  4 mentions in 1 note…`, each with the mention highlighted; `/unlinked` alone lists the most mentioned notes |
 

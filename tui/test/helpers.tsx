@@ -21,7 +21,7 @@ type Exchange = {
 	response: {result?: unknown; error?: ErrorObject} | unknown[] | null;
 };
 
-export type Session = 'resolver_vault' | 'sample_vault' | 'sample_vault_format';
+export type Session = 'resolver_vault' | 'sample_vault' | 'sample_vault_format' | 'sample_vault_explore';
 
 export function recorded(session: Session): Map<string, unknown> {
 	const results = new Map<string, unknown>();
@@ -65,7 +65,7 @@ export function formatResult<T>(id: number): T {
 }
 
 /** Every recorded single request of a session: its result or its error, by "method params". */
-export function recordedReplies(session: 'resolver_vault' | 'sample_vault'): Map<string, {result?: unknown; error?: ErrorObject}> {
+export function recordedReplies(session: 'resolver_vault' | 'sample_vault' | 'sample_vault_explore'): Map<string, {result?: unknown; error?: ErrorObject}> {
 	const replies = new Map<string, {result?: unknown; error?: ErrorObject}>();
 	const text = readFileSync(`${REPO_ROOT}/tests/fixtures/rpc/${session}.jsonl`, 'utf8');
 	for (const line of text.split('\n').filter(Boolean)) {
@@ -97,6 +97,26 @@ export function sampleReply<T>(method: string, params: object = {}): T {
 }
 
 const sampleReplies = recordedReplies('sample_vault');
+const exploreReplies = recordedReplies('sample_vault_explore');
+
+/**
+ * Replays a recorded sample_vault_explore reply (explore.*, map.*, config.show, …) for (method, params). The last
+ * recording of the same call wins. A call that was never recorded fails loudly, naming it.
+ */
+export function exploreReply<T>(method: string, params: object = {}): T {
+	const clean = Object.fromEntries(Object.entries(params).filter(([, value]) => value !== undefined));
+	const key = `${method} ${JSON.stringify(clean)}`;
+	const reply = exploreReplies.get(key);
+	if (!reply) {
+		throw new Error(`no recorded sample_vault_explore reply for ${key} (add it to tests/fixtures/rpc/sample_vault_explore.jsonl and re-record)`);
+	}
+
+	if (reply.error) {
+		throw new RpcError(reply.error.code, reply.error.message, reply.error.data);
+	}
+
+	return reply.result as T;
+}
 
 export const freshStatus: IndexStatusResult = {
 	vault: '/vaults/resolver_vault',
@@ -198,8 +218,32 @@ export function fakeApi(overrides: Partial<VaultApi> = {}): FakeApi {
 			calls.push(`mentions.unlinked ${JSON.stringify(params)}`);
 			return sampleReply('mentions.unlinked', params);
 		},
+		...exploreMethods(calls),
 	};
 	return Object.assign(api, overrides, {calls});
+}
+
+/** The explore methods of the fake API: replays of the recorded sample_vault_explore session. */
+function exploreMethods(calls: string[]): Pick<VaultApi, 'explore' | 'mark' | 'kept' | 'linkIt' | 'unlink' | 'map' | 'mapSince' | 'deepen' | 'discover' | 'explain' | 'embedStatus' | 'config'> {
+	const replay = async <T,>(method: string, params: object = {}): Promise<T> => {
+		calls.push(`${method} ${JSON.stringify(params)}`);
+		return exploreReply<T>(method, params);
+	};
+
+	return {
+		explore: async (params = {}) => replay('explore.run', params),
+		mark: async (params) => replay('explore.mark', params),
+		kept: async (params = {}) => replay('explore.kept', params),
+		linkIt: async (params) => replay('explore.link', params),
+		unlink: async (params) => replay('explore.unlink', params),
+		map: async (params = {}) => replay('map.get', params),
+		mapSince: async (params) => replay('map.since', params),
+		deepen: async (params) => replay('note.deepen', params),
+		discover: async (params = {}) => replay('vault.discover', params),
+		explain: async (params) => replay('notes.explain', params),
+		embedStatus: async () => replay('embed.status'),
+		config: async () => replay('config.show'),
+	};
 }
 
 export const keys = {

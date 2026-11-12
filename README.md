@@ -5,7 +5,7 @@ Convert substantive source notes into atomic Zettels, keep the knowledge graph l
 This repository has two parts:
 
 - **Vault engine, `vault` CLI and `vault-tui`** (no LLM): read an Obsidian vault the way Obsidian does (frontmatter, tags,
-  wikilinks, embeds, headings, blocks), resolve links, keep an incremental SQLite index, search it with a query language, find related notes and missing links, and work with it from the command
+  wikilinks, embeds, headings, blocks), resolve links, keep an incremental SQLite index, search it with a query language, find related notes (links, tags and a local embedding model) and missing links, and work with it from the command
   line, over JSON-RPC, or in a Claude Code–style terminal app. On top of that, a **formats layer** checks notes against your
   own conventions, written in a YAML file under `formats/`, and gives scripts a safe way to write notes.
 - **`zettel`**: the original LLM tool that turns source notes into Zettels. See [docs/zettel.md](docs/zettel.md).
@@ -18,7 +18,12 @@ cp -Rp tests/fixtures/vault /tmp/sample-vault                # work on a copy of
 vault index /tmp/sample-vault                                # 180 notes, 1787 links
 vault check /tmp/sample-vault --format brain                 # ✗ 102 violations in 77 notes, each with file and line
 vault search /tmp/sample-vault '"reward hacking" -path:10_SOURCES'   # ranked hits with snippets
+vault embed /tmp/sample-vault                                # 180 embedded (models/potion-base-8M), cached in the index
+vault related /tmp/sample-vault kl-penalty-in-rlhf           # related notes, each with a reason
+vault config show                                            # every engine setting and where it comes from
 ```
+
+In the sandbox, `source scripts/setup.sh` runs `uv sync` and `npm ci` with absolute paths and activates the environment.
 
 Details: [Install](docs/install.md) and [Getting started](docs/getting-started.md).
 
@@ -33,7 +38,16 @@ Details: [Install](docs/install.md) and [Getting started](docs/getting-started.m
 | `vault new` / `link` / `set` | the safe write path for scripts: create a note of a type, relate two notes (mirror included), set a metadata value; atomic, index kept in sync, refused if it would add a violation | `vault link <vault> -f brain A B --as supports` | [Commands](docs/commands.md#the-safe-write-path-vault-new-vault-link-vault-set) |
 | `vault ingest` / `coverage` | bring a markdown, text or HTML file in as a source (with provenance, refused if it duplicates one), and see which sources nothing links to and which notes cite none | `vault ingest <vault> paper.html --as source -f brain` | [Commands](docs/commands.md#vault-ingest-vault-file---as-type--f-f---title-t---folder-f---set-kv---dry-run) |
 | `vault search` | ranked, typo-tolerant search with a query language: text, `"phrases"`, `tag:`, `path:`, properties, `links-to:`, `within:N of:`, `has:`/`missing:`, dates, `-`, `OR` | `vault search <vault> 'tag:ai-safety links-to:[[x]] -path:10_SOURCES'` | [Search and connections](docs/search.md) |
-| `vault related` / `suggest` / `unlinked` | related notes with a reason each; links to add and notes to write (with drafts); plain-text mentions that aren't links yet | `vault related <vault> kl-penalty-in-rlhf` | [Search and connections](docs/search.md#related-notes-links-to-add-notes-to-write) |
+| `vault related` / `suggest` / `unlinked` | related notes with a reason each (links, tags, and text by embeddings); links to add and notes to write (with drafts); plain-text mentions that aren't links yet | `vault related <vault> kl-penalty-in-rlhf` | [Search and connections](docs/search.md#related-notes-links-to-add-notes-to-write) |
+| `vault map` / `vault deepen` | the shape of the vault from links and tags: communities (seeded Louvain) named by key phrases and hubs, the ones with no topic page, bridge notes (betweenness, Burt's constraint), hubs vs authorities; five lenses on one note (neighbourhood, cited together, same foundations, backbone, cluster), every cutoff a percentile of the vault | `vault map <vault>` | [The shape of the vault](docs/explore.md) |
+| `vault discover` | what the vault does not say yet: hidden links (Swanson's A–B–C), the same role in another community, a note as a bridge, gaps between communities close in meaning, surprising links, unwritten notes linked from many communities, a seeded wander; each result with its reason and evidence | `vault discover <vault> reward-hacking-as-specification-gaming` | [The shape of the vault](docs/explore.md#vault-discover-vault-note---lens-l---limit-n---steps-n---seed-n---json--f-format) |
+| `vault explain` | how two notes relate, signal by signal: direct links, co-citation, coupling, shared tags and embedding similarity, each with its weight, contribution and evidence (the notes citing both, what both link to, the shared tags, the words behind the text score) | `vault explain <vault> RLHF kl-penalty-in-rlhf` | [Search and connections](docs/search.md#how-two-notes-relate-vault-explain) |
+| `vault explore` + `mark` / `kept` / `link-it` / `unlink` | the deepen and discover lenses through one registry, a section each (3–5 results, each with its lens and evidence, near-duplicates left out, equal space for deepen and discover); without a note, where to start; a memory in the engine's store (keep / dismiss, `--fresh`, keep rates that order the sections); a result made a real link in both notes through the safe write path, and undone; `vault map --record` / `--since` for what changed | `vault explore <vault> kl-penalty-in-rlhf -f brain` | [For assistants](docs/agents.md) | the `--json` contract of every explore command (and the JSON-RPC method behind each), field by field with an example each; how an assistant should use them: start, keep, link with a dry run first, never edit files |
+| [Exploring](docs/exploring.md) |
+| `vault experiment` | tests the engine's options on your own notes, seeded: which signals and weights recover hidden links (MRR, recall@k; the hidden links and everything derived from them provably gone), which embedded text, which community settings match the `Tags:` topics (ARI, NMI); a table per question with the winner and whether it beats the seed noise, and the defaults it would change | `vault experiment <vault> -f brain --without 50_MOC/discourse` | [Exploring](docs/exploring.md) | `vault explore` (the lens registry, equal space, diversity, where to start), its memory (`vault mark`, `vault kept`, `--fresh`, keep rates), `vault link-it` / `vault unlink`, `vault map --record` / `--since`; a real session on the sample vault; the cost at 5,000 and 50,000 notes |
+| [Experiments](docs/experiment.md) |
+| `vaultengine/embedding/` + `vault embed` | an embedding provider interface and a static Model2Vec implementation (numpy + tokenizers, `models/potion-base-8M`); note vectors cached in the index by text hash and model id | `vault embed <vault> --status` | [Commands](docs/commands.md#vault-embed-vault---status---full---prune) |
+| `config/config.yaml` `engine:` + `vault config show` | every engine setting in one place (vault, index, format, embedding model, explore weights), flag > env > file > default, validated | `vault config show` | [Commands](docs/commands.md#settings-vault-config-show-vault---db-f---format-f---setting-kv---config-file---json) |
 | `vault serve` | the engine as a JSON-RPC 2.0 server on stdio (schema: `vaultengine/rpc/schema.json`); with `--format`, also the format methods | `vault serve <vault> --format brain` | [The JSON-RPC API](docs/api.md) |
 | `tui/` → `vault-tui` | terminal app (TypeScript + Ink) that starts `vault serve` and talks to it | `vault-tui --vault <vault> --format brain` | [The terminal app](docs/tui.md) |
 
@@ -45,6 +59,8 @@ Details: [Install](docs/install.md) and [Getting started](docs/getting-started.m
 | [Getting started](docs/getting-started.md) | the sample vault step by step: building the index, stats and health, the engine as a Python library |
 | [The format file](docs/formats.md) | every key of a format file (note types, headings, metadata, relations and mirrors, link roles, `new`, `ingest`, `coverage`), the violation codes, the Python API |
 | [Search and connections](docs/search.md) | `vault search` and the query language, `related`, `suggest`, `unlinked`: options, real output, the JSON-RPC methods and `/search` in the app |
+| [The shape of the vault](docs/explore.md) | `vault map` (communities, topic pages, bridges, hubs and authorities, meaning edges), `vault deepen` (five lenses on one note) and `vault discover` (seven discover lenses): definitions, real output, what it costs at 5,000 and 50,000 notes |
+| [Experiments](docs/experiment.md) | `vault experiment`: the three questions, how hidden links are kept from leaking, when a difference counts, the sample run that set `related.weights`, where 180 notes are too few, the cost at 5,000 notes |
 | [Commands](docs/commands.md) | `vault formats`, `check`, `fix`, `new`, `link`, `set`, `ingest`, `coverage`: options, exit codes and real output; the safe write path and the duplicate gate |
 | [The JSON-RPC API](docs/api.md) | the protocol, the error codes, and the format methods (`vault.check`, `note.link`, `note.ingest`, …) |
 | [The terminal app](docs/tui.md) | `vault-tui`: `/search`, `/related`, `/suggest`, `/unlinked`, `/check`, `/fix`, `/new`, `/link`, `/ingest`, `/coverage` and the other commands, with a captured screen |
@@ -56,7 +72,7 @@ Details: [Install](docs/install.md) and [Getting started](docs/getting-started.m
 ## Verify
 
 ```bash
-bash scripts/verify.sh    # about 8 minutes; the last line is ALL CHECKS PASSED
+bash scripts/verify.sh    # 15–25 minutes; the last line is ALL CHECKS PASSED
 ```
 
 It runs both test suites, then every command, the JSON-RPC API and the terminal app end to end on scratch copies of the

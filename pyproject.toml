@@ -15,6 +15,9 @@ dependencies = [
     "pydantic>=2.12.5",
     "markdownify>=1.2",
     "regex>=2024.11.6",
+    # vaultengine.embedding (static Model2Vec embeddings); both were already installed for the zettel tool
+    "numpy>=2.0",
+    "tokenizers>=0.20",
 ]
 
 [project.scripts]

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Run every check of vaultengine + the vault CLI + vault-tui, and stop at the first failure.
 #
-#   scripts/verify.sh            everything (about 8 minutes)
+#   scripts/verify.sh            everything (15–25 minutes)
 #   scripts/verify.sh --quick    skip the two long test suites (pytest, npm test): CLI, API and app end to end only
 #
 # Needs the installs from docs/install.md: `uv sync` and `cd tui && npm ci`. What each step proves: docs/verify.md.
@@ -71,6 +71,8 @@ $PY -c "import markdownify" 2>/dev/null || fail "markdownify missing: run \`uv s
 [[ -f tui/node_modules/node-pty/build/Release/pty.node || -d tui/node_modules/node-pty/prebuilds ]] ||
 	fail "node-pty is not built: \`cd tui && npm ci\` (offline: \`npm_config_nodedir=/usr npm ci\`, see docs/install.md)"
 node -e 'process.exit(+process.versions.node.split(".")[0] >= 22 ? 0 : 1)' || fail "Node.js 22 or newer is needed"
+[[ -f models/potion-base-8M/model.safetensors && -f models/potion-base-8M/tokenizer.json ]] ||
+	fail "no embedding model in models/potion-base-8M (shipped next to the repository; see docs/install.md)"
 ok "python $($PY -c 'import sys; print(sys.version.split()[0])'), node $(node --version), node-pty built"
 
 step "Documentation: every link in README.md and docs/ resolves"
@@ -103,15 +105,131 @@ expect "$(COLUMNS=100 $VAULT search "$sample" '"reward hacking" links-to:[[grpo-
 expect "$(COLUMNS=100 $VAULT search "$sample" 'within:2 of:[[obfuscated-reward-hacking]] tag:ai-safety')" "  12 of 180 notes match" "     12  #ai-safety"
 expect "$(COLUMNS=100 $VAULT search "$sample" 'missing:status')" "  3 of 180 notes match" "      2  50_MOC/topics/"
 expect "$($VAULT search "$sample" 'reward (tag:x OR b' 2>&1 || true)" "error: this ( is never closed" "         ^"
-expect "$(COLUMNS=100 $VAULT related "$sample" kl-penalty-in-rlhf --limit 3 --color never)" "   2. RLHF" \
-	"      2 hops via direct-preference-optimization-dpo +1 · similar text (kl, dpo, rlhf)"
+expect "$(COLUMNS=100 $VAULT explain "$sample" RLHF kl-penalty-in-rlhf --color never)" "  text            0.58 ×   0.30 =        0.173" \
+	"180 notes had no cached vector: embedded in memory for this run only"
+expect "$(COLUMNS=100 $VAULT related "$sample" kl-penalty-in-rlhf --limit 3 --color never)" "   3. RLHF" \
+	"linked from it · shares [[policy-gradient-methods]] · similar text (policy, kl, divergence)" \
+	"      2 hops via direct-preference-optimization-dpo +1 · similar text (rlhf, reward, policy)" \
+	"· 179 notes compared · text: potion-base-8M embeddings"
+expect "$(COLUMNS=100 $VAULT related "$sample" kl-penalty-in-rlhf --limit 3 --unlinked --color never)" "   1. RLHF" \
+	"score = 0.1 × graph + 0.05 × cocitation + 0.05 × coupling + 0.7 × text + 0.1 × tags"
 expect "$(COLUMNS=100 $VAULT suggest "$sample" --limit 3 --color never)" "    1. rl-environment-design" \
 	"    [[on-policy-vs-off-policy-learning]] (5 notes) → 20_ZETTLEKASTEN/on-policy-versus-off-policy-learning.md"
 expect "$($VAULT suggest "$sample" --draft reward-model-overoptimization-hump)" "# reward-model-overoptimization-hump" "## What the linking notes say"
 expect "$(COLUMNS=120 $VAULT suggest "$sample" --links --path 20_ZETTLEKASTEN --limit 3 --color never)" \
-	"in-context-scheming-capability  ↔  sandbagging-strategic-underperformance" "cited together by scheming-as-threat-model"
+	"in-context-scheming-capability  ↔  scheming-inability-safety-case-closed" "cited together by scheming-as-threat-model" \
+	"similar text (scheming, context, reasoning)"
 expect "$(COLUMNS=100 $VAULT unlinked "$sample" monitorability-tax --color never)" \
 	"  4 plain-text mentions of monitorability-tax in 1 note that does not link to it yet"
+
+step "Settings and embeddings (vault config show, vault embed)"
+expect "$(VAULTENGINE_FORMAT=brain $VAULT config show "$sample" --setting embedding.model_id=other-id)" \
+	"precedence: flag > env > file > default" "env VAULTENGINE_FORMAT" "flag --setting embedding.model_id" \
+	"$(pwd)/models/potion-base-8M"
+run_status 2 env VAULTENGINE_EMBEDDING__PROVIDER=nope $VAULT config show
+expect "$out" "engine.embedding.provider: unknown provider 'nope'; known: model2vec  [from env VAULTENGINE_EMBEDDING__PROVIDER]"
+# related, suggest and explain ran above without cached vectors: they computed them in memory and wrote nothing.
+expect "$($VAULT embed "$sample" --status)" "vectors    0 of 180 indexed notes · 180 missing"
+expect "$($VAULT embed "$sample")" "potion-base-8M (model2vec, 256 dims)" "vectors    180 embedded, 0 cached (180 notes)"
+echo "Edited again." >>"$sample/20_ZETTLEKASTEN/kl-penalty-in-rlhf.md"
+expect "$($VAULT embed "$sample")" "index      1 parsed (0 added, 1 changed, 0 deleted)" "vectors    1 embedded, 179 cached (180 notes)" \
+	"    + 20_ZETTLEKASTEN/kl-penalty-in-rlhf.md"
+expect "$($VAULT embed "$sample" --setting embedding.model_id=other-id)" "vectors    180 embedded, 0 cached (180 notes)"
+expect "$($VAULT embed "$sample" --status)" "vectors    180 of 180 indexed notes (256 dims) · all up to date" \
+	"other ids  other-id: 180 vectors (256 dims)"
+# Without the model only the text signal is off: related and explain still answer, from links and tags.
+run_status 0 $VAULT related "$sample" kl-penalty-in-rlhf --color never --setting embedding.model_path=/no/such/model
+expect "$out" "score = 0.71 × graph + 0.29 × tags" "text signal unavailable: embedding model folder not found: /no/such/model"
+run_status 0 $VAULT explain "$sample" kl-penalty-in-rlhf direct-preference-optimization-dpo --color never --setting embedding.model_path=/no/such/model
+expect "$out" "  direct links    1.00 ×   0.43 =        0.429" "  text  unavailable  (embedding model folder not found: /no/such/model)"
+A="2312.06942 - AI Control - Improving Safety Despite Intentional Subversion"
+B="Shlegeris Greenblatt - The Case for Ensuring Powerful AIs are Controlled"
+expect "$($VAULT explain "$sample" "$A" "$B" --color never)" "  score 0.66 = the sum of weight × value" \
+	"    2412.14093 - Alignment Faking in Large Language Models       0.72  (links to 3)" \
+	"    Shlegeris Greenblatt - Catching AIs Red-Handed (no note yet)  0.72  (linked from 3)" \
+	"(sum 0.673)"
+
+step "Map and lenses (vault map, vault deepen)"
+out=$(COLUMNS=120 $VAULT map "$sample" -f brain --color never --limit 0)
+expect "$out" "tag links: format brain (Tags)" "modularity 0.67 · 12 communities hold 179 notes; 1 note in none" \
+	"  topic pages  notes the format brain types as topic" "  No topic page  (10 of 12 communities" \
+	"      1. 0.106 (p100)  0.048 (p4)    reward-hacking-as-specification-gaming  → 4, 2, 5, 6, 3"
+[[ $($VAULT map "$sample" -f brain --json | sha256sum) == $($VAULT map "$sample" -f brain --json | sha256sum) ]] ||
+	fail "vault map gave two different answers"
+ok "vault map: the same answer twice (seeded)"
+out=$(COLUMNS=120 $VAULT deepen "$sample" reward-hacking-as-specification-gaming -f brain --color never)
+expect "$out" "  Neighbourhood  (vault related: 18 of 179 notes at or above the 90th percentile" "  Cited together" \
+	"  Same foundations" "      1. cot-monitor-beats-action-monitor  0.34 (p98)" \
+	"this note is 1 step off it, joining at model-awareness-of-intent-violation-while-cheating" \
+	"  Cluster  (community 2: #ai-safety · control-evaluations-red-team-blue-team, 32 notes)"
+
+step "Discover lenses and meaning edges (vault discover, vault map --meaning)"
+out=$(COLUMNS=140 $VAULT map "$sample" -f brain --color never --meaning)
+expect "$out" "  meaning      29 edges added for the communities: mutual nearest neighbours by embedding" \
+	"  What the meaning edges change  (communities 12 → 11; notes in none 1 → 2)"
+out=$(COLUMNS=140 $VAULT discover "$sample" reward-hacking-as-specification-gaming -f brain --color never)
+expect "$out" "  Hidden link" "      1. reinforcement-learning-in-language-models" "  Same role elsewhere" \
+	"  Bridge  (betweenness 0.106, p100; constraint 0.048, p4" "  Wander  (a random walk on links, seed 42" \
+	"    with embeddings (merged by embedding of the names"
+[[ $($VAULT discover "$sample" kl-penalty-in-rlhf --json | sha256sum) == $($VAULT discover "$sample" kl-penalty-in-rlhf --json | sha256sum) ]] ||
+	fail "vault discover gave two different answers"
+ok "vault discover: the same answer twice (seed 42)"
+out=$(COLUMNS=140 $VAULT discover "$sample" -f brain --color never --lens gap)
+expect "$out" "    without them (closeness of key-term profiles" \
+	"         join EVD - Verifiers makes an environment a … ↔ environment-as-installable-package-not-… (3.81, via 'package', 'installable', 'intellect')"
+
+step "Experiments: hidden links, seeded (vault experiment)"
+out=$($VAULT experiment "$sample" -f brain --seeds 2 --question relatedness --quiet)
+expect "$out" "| relatedness | whole vault | MRR |" "| links only |" "Hidden per seed: 55 of 367 linked pairs; 55 scored per seed." \
+	"- \`related.unlinked_weights\`: "
+[[ $(echo "$out" | sed -E 's/[0-9]+\.[0-9]{2} \|/t |/g; s/Whole run: [0-9]+ s//; /^Time: /d') == \
+	$($VAULT experiment "$sample" -f brain --seeds 2 --question relatedness --quiet | sed -E 's/[0-9]+\.[0-9]{2} \|/t |/g; s/Whole run: [0-9]+ s//; /^Time: /d') ]] ||
+	fail "vault experiment gave two different reports"
+ok "vault experiment: the same numbers twice (seeds 42, 43; timings aside)"
+run_status 2 $VAULT experiment "$sample" --seeds 1
+expect "$out" "error: --seeds must be 2 or more"
+
+step "Explore, its memory, link it and map history (vault explore, mark, kept, link-it, unlink, map --record/--since)"
+notes_only() { (cd "$1" && find . -type f ! -path './.vaultengine/*' -print0 | sort -z | xargs -0 sha256sum | sha256sum); }
+before=$(notes_only "$sample")
+out=$(COLUMNS=120 $VAULT map "$sample" -f brain --record --color never)
+expect "$out" "  recorded     snapshot " "4 gaps (meaning), 612 missing notes"
+out=$(COLUMNS=120 $VAULT explore "$sample" -f brain --color never)
+expect "$out" "where to start" "  1. Gap  (discover · " "  4. No topic page  (map · " "→ explore [[llm-as-a-judge-framework]]"
+out=$(COLUMNS=120 $VAULT explore "$sample" kl-penalty-in-rlhf -f brain --color never)
+expect "$out" "equal space: deepen" "  1. Neighbourhood  (deepen · " "      1.1  RLHF" "           neighbourhood · 2 hops via" \
+	"  6. Hidden link  (discover · " "      6.1  covariance-targeted-entropy-intervention" "  8. Gap  (discover · "
+[[ $(COLUMNS=120 $VAULT explore "$sample" kl-penalty-in-rlhf -f brain --color never | sha256sum) == $(echo "$out" | sha256sum) ]] ||
+	fail "vault explore gave two different answers"
+ok "vault explore: the same output twice"
+[[ -f "$sample/.vaultengine/stats.sqlite" ]] || fail "vault explore kept no vault-wide numbers (.vaultengine/stats.sqlite)"
+ok "vault explore kept the vault-wide numbers for the next run (.vaultengine/stats.sqlite)"
+expect "$($VAULT mark "$sample" keep 1.1 6.1)" "  1.1  kept  neighbourhood · RLHF"
+expect "$($VAULT mark "$sample" dismiss 7.1)" "  7.1  dismissed  role · rubric-agreement-does-not-establish-rubric-validity"
+expect "$($VAULT kept "$sample")" "  covariance-targeted-entropy-intervention" "    hidden · no link either way"
+out=$($VAULT link-it "$sample" 8.1 -f brain)
+expect "$out" "Would write 2 notes (link-it):" "Dry run: nothing was written."
+[[ $(notes_only "$sample") == "$before" ]] || fail "explore, mark, kept, map --record or a dry run changed a note"
+ok "explore, mark, kept, map --record and the dry run changed no note"
+expect "$($VAULT link-it "$sample" 8.1 -f brain --write)" "Wrote 2 notes (link-it):" "  check    no new violations"
+expect "$(grep -h -- '— gap: ' "$sample/20_ZETTLEKASTEN/persona-driven-synthetic-data-generation.md")" \
+	"- [[reward-computation-as-a-heavyweight-pipeline-stage]] — gap: "
+out=$(COLUMNS=120 $VAULT explore "$sample" kl-penalty-in-rlhf -f brain --color never --fresh)
+reject "$out" "rubric-agreement-does-not-establish-rubric-validity" "      1.1  RLHF"
+ok "--fresh: the dismissed note and what was seen are gone"
+out=$(COLUMNS=120 $VAULT map "$sample" -f brain --since "$(date +%F)" --color never)
+expect "$out" "(1 of 4 recorded gaps closed" "    closed  communities 6 and 12" \
+	"new link persona-driven-synthetic-data-generation ↔ reward-computation-as-a-heavyweight-pipeline…"
+expect "$($VAULT unlink "$sample" reward-computation-as-a-heavyweight-pipeline-stage persona-driven-synthetic-data-generation -f brain --write)" \
+	"Wrote 2 notes (unlink):"
+[[ $(notes_only "$sample") == "$before" ]] || fail "unlink did not restore both notes"
+ok "unlink: both notes byte for byte as before"
+[[ -n $(tail -c1 "$sample/10_SOURCES/RLHF.md") ]] || fail "10_SOURCES/RLHF.md was expected to have no final newline"
+$VAULT link-it "$sample" kl-penalty-in-rlhf RLHF -f brain --write >/dev/null
+[[ -n $(tail -c1 "$sample/10_SOURCES/RLHF.md") ]] || fail "link-it added a final newline to 10_SOURCES/RLHF.md"
+$VAULT unlink "$sample" kl-penalty-in-rlhf RLHF -f brain --write >/dev/null
+[[ $(notes_only "$sample") == "$before" ]] || fail "link-it then unlink on RLHF.md (no final newline) did not restore both notes"
+ok "link-it then unlink on a note without a final newline (10_SOURCES/RLHF.md): byte for byte as before"
 
 step "JSON-RPC 2.0 over stdio (vault serve)"
 rpc=$(printf '%s\n' \
@@ -124,7 +242,7 @@ rpc=$(printf '%s\n' \
 	'{"jsonrpc":"2.0","id":10,"method":"search.query","params":{"query":"reward hacking tag:ai-safety","limit":1}}' \
 	'{"jsonrpc":"2.0","id":11,"method":"search.query","params":{"query":"reward (tag:ai-safety OR path:50_MOC"}}' \
 	'{"jsonrpc":"2.0","id":12,"method":"note.preview","params":{"path":"20_ZETTLEKASTEN/monitorability-tax.md","query":"monitorability"}}' \
-	'{"jsonrpc":"2.0","id":13,"method":"note.related","params":{"note":"kl-penalty-in-rlhf","limit":2}}' \
+	'{"jsonrpc":"2.0","id":13,"method":"note.related","params":{"note":"kl-penalty-in-rlhf","limit":3}}' \
 	'{"jsonrpc":"2.0","id":14,"method":"links.suggest","params":{"limit":1,"path":"20_ZETTLEKASTEN"}}' \
 	'{"jsonrpc":"2.0","id":15,"method":"notes.suggest","params":{"limit":1}}' \
 	'{"jsonrpc":"2.0","id":16,"method":"mentions.unlinked","params":{"note":"monitorability-tax"}}' \
@@ -134,10 +252,21 @@ expect "$rpc" '"id":10,"result":{"query":"reward hacking tag:ai-safety","tree":"
 	'"id":11,"error":{"code":-32006,"message":"this ( is never closed","data":{"query":"reward (tag:ai-safety OR path:50_MOC","start":7,"end":8,"hint":"add ) after the group"}}' \
 	'"id":12,"result":{"path":"20_ZETTLEKASTEN/monitorability-tax.md","title":"monitorability-tax","query":"monitorability","matched":true' \
 	'"title":"RLHF","score":' \
-	'"id":14,"result":{"note":null,"path":"20_ZETTLEKASTEN","links":[{"a":"20_ZETTLEKASTEN/in-context-scheming-capability.md","b":"20_ZETTLEKASTEN/sandbagging-strategic-underperformance.md"' \
+	'"id":14,"result":{"note":null,"path":"20_ZETTLEKASTEN","links":[{"a":"20_ZETTLEKASTEN/in-context-scheming-capability.md","b":"20_ZETTLEKASTEN/scheming-inability-safety-case-closed.md"' \
 	'"id":15,"result":{"total_missing":612,"notes":[{"name":"rl-environment-design","linking_notes":52' \
 	'"id":16,"result":{"note":"20_ZETTLEKASTEN/monitorability-tax.md","total":4,"notes":1' \
 	'"id":17,"error":{"code":-32002,"message":"no note or link target called \"no-such-note\""'
+rpc=$(printf '%s\n' \
+	'{"jsonrpc":"2.0","id":20,"method":"explore.run","params":{"note":"kl-penalty-in-rlhf"}}' \
+	'{"jsonrpc":"2.0","id":21,"method":"explore.mark","params":{"verdict":"keep","refs":["1.1"]}}' \
+	'{"jsonrpc":"2.0","id":22,"method":"explore.link","params":{"ref":"1.1"}}' \
+	'{"jsonrpc":"2.0","id":23,"method":"config.show"}' \
+	'{"jsonrpc":"2.0","id":24,"method":"explore.run","params":{"lenses":["hidden"]}}' |
+	$VAULT serve "$sample" --format brain 2>/dev/null)
+expect "$rpc" '"id":20,"result":{"start":"20_ZETTLEKASTEN/kl-penalty-in-rlhf.md","start_kind":"note"' \
+	'"id":21,"result":{"marked":[{"ref":"1.1","lens":"neighbourhood","target":"10_SOURCES/RLHF.md"' \
+	'"id":22,"result":{"operation":"link-it","status":"dry-run","dry_run":true,"written":false' \
+	'"id":23,"result":{"config_file":' '"id":24,"error":{"code":-32007,"message":"hidden only run from a note"'
 
 step "The format file (vault formats)"
 expect "$($VAULT formats "$sample" --format brain)" "180 typed, 0 untyped" "issues     102   in 77 notes" \
@@ -280,7 +409,7 @@ fi
 step "App: type check"
 (cd tui && npm run typecheck)
 
-step "App: end to end in a real pseudo-terminal (/health; /check, /coverage, /link, /check changed)"
+step "App: end to end in a real pseudo-terminal (/health; /check, /coverage, /link, /check changed; /explore, keep, link it, /kept, /map since)"
 (cd tui && npm run test:e2e)
 
 printf '\n\033[32mALL CHECKS PASSED\033[0m\n'

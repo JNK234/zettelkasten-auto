@@ -5,6 +5,28 @@
  * testable with an in-memory fake.
  */
 import type {
+	ConfigShowResult,
+	EmbedStatusResult,
+	ExploreKeptParams,
+	ExploreKeptResult,
+	ExploreLinkParams,
+	ExploreLinkResult,
+	ExploreMarkParams,
+	ExploreMarkResult,
+	ExploreRunParams,
+	ExploreRunResult,
+	ExploreUnlinkParams,
+	ExploreUnlinkResult,
+	MapParams,
+	MapResult,
+	MapSinceParams,
+	MapSinceResult,
+	NoteDeepenParams,
+	NoteDeepenResult,
+	NotesExplainParams,
+	NotesExplainResult,
+	VaultDiscoverParams,
+	VaultDiscoverResult,
 	HealthReportParams,
 	HealthReportResult,
 	IndexBuildParams,
@@ -64,6 +86,21 @@ export type VaultApi = {
 	suggestLinks(params?: LinksSuggestParams): Promise<LinksSuggestResult>;
 	suggestNotes(params?: NotesSuggestParams): Promise<NotesSuggestResult>;
 	unlinked(params?: MentionsUnlinkedParams): Promise<MentionsUnlinkedResult>;
+	/** explore.run: a section per lens from a note (or where to start); remembered for mark and linkIt. */
+	explore(params?: ExploreRunParams): Promise<ExploreRunResult>;
+	/** explore.mark: keep, dismiss or clear results of the last explore run, by ref ("2.3"). */
+	mark(params: ExploreMarkParams): Promise<ExploreMarkResult>;
+	kept(params?: ExploreKeptParams): Promise<ExploreKeptResult>;
+	/** explore.link: a result made a See Also link in both notes; a dry run unless dry_run is false. */
+	linkIt(params: ExploreLinkParams): Promise<ExploreLinkResult>;
+	unlink(params: ExploreUnlinkParams): Promise<ExploreUnlinkResult>;
+	map(params?: MapParams): Promise<MapResult>;
+	mapSince(params: MapSinceParams): Promise<MapSinceResult>;
+	deepen(params: NoteDeepenParams): Promise<NoteDeepenResult>;
+	discover(params?: VaultDiscoverParams): Promise<VaultDiscoverResult>;
+	explain(params: NotesExplainParams): Promise<NotesExplainResult>;
+	embedStatus(): Promise<EmbedStatusResult>;
+	config(): Promise<ConfigShowResult>;
 };
 
 export type RpcRequester = {
@@ -91,5 +128,17 @@ export function createVaultApi(client: RpcRequester): VaultApi {
 		suggestLinks: async (params) => client.request('links.suggest', params),
 		suggestNotes: async (params) => client.request('notes.suggest', params),
 		unlinked: async (params) => client.request('mentions.unlinked', params),
+		explore: async (params) => client.request('explore.run', params),
+		mark: async (params) => client.request('explore.mark', params),
+		kept: async (params) => client.request('explore.kept', params),
+		linkIt: async (params) => client.request('explore.link', params),
+		unlink: async (params) => client.request('explore.unlink', params),
+		map: async (params) => client.request('map.get', params),
+		mapSince: async (params) => client.request('map.since', params),
+		deepen: async (params) => client.request('note.deepen', params),
+		discover: async (params) => client.request('vault.discover', params),
+		explain: async (params) => client.request('notes.explain', params),
+		embedStatus: async () => client.request('embed.status'),
+		config: async () => client.request('config.show'),
 	};
 }

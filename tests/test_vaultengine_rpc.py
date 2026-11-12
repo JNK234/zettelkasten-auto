@@ -33,8 +33,9 @@ SESSIONS = {
     "sample_vault": FIXTURES / "vault",
     "resolver_vault": FIXTURES / "resolver_vault",
     "sample_vault_format": FIXTURES / "vault",  # served with --format brain: check, fix, coverage, writes, ingest
+    "sample_vault_explore": FIXTURES / "vault",  # served with --format brain: explore, marks, link it, map history
 }
-SESSION_FORMATS = {"sample_vault_format": "brain"}
+SESSION_FORMATS = {"sample_vault_format": "brain", "sample_vault_explore": "brain"}
 REPO_ROOT = Path(__file__).parent.parent
 BRAIN_PATH = REPO_ROOT / "formats" / "brain.yaml"
 RECORD = os.environ.get("VAULTENGINE_RECORD") == "1"
@@ -52,7 +53,7 @@ def normalize(value, vault_root):
         for key, item in value.items():
             if key == "seconds" and isinstance(item, (int, float)):
                 out[key] = 0.0  # keeps the schema type (number)
-            elif key == "last_indexed_at" and isinstance(item, str):
+            elif key in ("last_indexed_at", "at", "snapshot", "computed_at") and isinstance(item, str):
                 out[key] = "<TIMESTAMP>"
             else:
                 out[key] = normalize(item, vault_root)
@@ -116,8 +117,13 @@ class RecordedSessionReplayTests(unittest.TestCase):
             vault.cleanup()
 
     def record(self, path, exchanges, vault):
+        from vaultengine.settings import load_settings
+
         name = path.stem
-        server = RpcServer(VaultService(vault.root, format_path=BRAIN_PATH if name in SESSION_FORMATS else None))
+        # The settings `vault serve <vault> [--format brain]` has: the vault (and format) from its flags.
+        flags = [("vault", str(vault.root), "<vault>")] + ([("format", SESSION_FORMATS[name], "--format")] if name in SESSION_FORMATS else [])
+        settings = load_settings(flags, env={k: v for k, v in os.environ.items() if not k.startswith("VAULTENGINE_")})
+        server = RpcServer(VaultService(vault.root, format_path=BRAIN_PATH if name in SESSION_FORMATS else None, settings=settings))
         try:
             for exchange in exchanges:
                 reply = server.handle_text(wire_line(exchange))
@@ -134,6 +140,9 @@ class RecordedSessionReplayTests(unittest.TestCase):
 
     def test_replay_sample_vault_format(self):
         self.replay("sample_vault_format")
+
+    def test_replay_sample_vault_explore(self):
+        self.replay("sample_vault_explore")
 
 
 class RecordedSessionContentTests(unittest.TestCase):
@@ -172,7 +181,7 @@ class RecordedSessionContentTests(unittest.TestCase):
             responses = exchange["response"] if isinstance(exchange["response"], list) else [exchange["response"]]
             codes.update(r["error"]["code"] for r in filter(None, responses) if "error" in r)
         # -32005 (write failed, rolled back) needs a crash or a concurrent edit; see WriteFailedErrorTests.
-        self.assertEqual(codes, {-32700, -32600, -32601, -32602, -32001, -32002, -32003, -32004, -32006})
+        self.assertEqual(codes, {-32700, -32600, -32601, -32602, -32001, -32002, -32003, -32004, -32006, -32007})
 
 
 class ProtocolErrorTests(unittest.TestCase):
@@ -406,10 +415,12 @@ class SearchAndConnectApiTests(unittest.TestCase):
         self.assertEqual(self.call("note.preview", path="nope.md")["error"]["code"], -32002)
 
     def test_related_suggest_and_unlinked(self):
-        related = self.call("note.related", note="kl-penalty-in-rlhf", limit=2)["result"]
+        related = self.call("note.related", note="kl-penalty-in-rlhf", limit=3)["result"]
         self.assertEqual(related["seed"]["path"], "20_ZETTLEKASTEN/kl-penalty-in-rlhf.md")
-        self.assertEqual(related["hits"][1]["title"], "RLHF")
-        self.assertFalse(related["hits"][1]["linked"])
+        # Tag links are tags: trust-region shares the tag [[policy-gradient-methods]] and comes before RLHF.
+        self.assertIn("shares [[policy-gradient-methods]]", related["hits"][1]["reason"])
+        self.assertEqual(related["hits"][2]["title"], "RLHF")
+        self.assertFalse(related["hits"][2]["linked"])
         missing = self.call("note.related", note="rl-environment-design", limit=1)["result"]
         self.assertEqual((missing["seed"]["path"], len(missing["seed"]["linkers"])), (None, 52))
         self.assertEqual(self.call("note.related", note="nope")["error"]["code"], -32002)
@@ -581,3 +592,70 @@ class PickCacheTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ExploreSessionContentTests(unittest.TestCase):
+    """What the recorded explore session (sample_vault_explore.jsonl, replayed through `vault serve` above) shows."""
+
+    @classmethod
+    def setUpClass(cls):
+        _, exchanges = load_session("sample_vault_explore")
+        cls.by_id = {e["request"]["id"]: e["response"] for e in exchanges}
+
+    def result(self, number):
+        return self.by_id[number]["result"]
+
+    def targets(self, run):
+        return [r["target"] for s in run["sections"] for r in s["results"]]
+
+    def test_the_same_start_by_path_or_name_gives_the_same_answer(self):
+        self.assertEqual(self.result(6), self.result(7))
+        run = self.result(6)
+        self.assertEqual((run["start"], run["start_kind"], run["numbers"]["source"]),
+                         ("20_ZETTLEKASTEN/kl-penalty-in-rlhf.md", "note", "current"))
+        for section in run["sections"]:
+            for item in section["results"]:
+                self.assertEqual(item["lens"], section["lens"])
+                self.assertTrue(item["evidence"] and "\n" not in item["evidence"])
+
+    def test_marks_kept_and_fresh(self):
+        run = self.result(7)
+        first, hidden, role = (next(r for s in run["sections"] for r in s["results"] if r["ref"] == ref) for ref in ("1.1", "6.1", "7.1"))
+        self.assertEqual(self.result(8)["marked"][0]["target"], first["target"])
+        self.assertEqual(self.result(10)["marked"][0]["verdict"], "dismiss")
+        self.assertEqual(self.by_id[11]["error"]["code"], -32007)
+        kept = {(k["lens"], k["target"]): k for k in self.result(12)["kept"]}
+        self.assertEqual(set(kept), {("neighbourhood", first["target"]), ("hidden", hidden["target"])})
+        self.assertEqual(kept[("hidden", hidden["target"])]["evidence"], hidden["evidence"])
+        fresh = self.result(16)
+        self.assertTrue(fresh["fresh"])
+        self.assertFalse(set(self.targets(fresh)) & set(self.targets(run)))  # seen and dismissed: gone
+        self.assertNotIn(role["target"], self.targets(fresh))
+        order = [s["lens"] for s in fresh["sections"]]
+        self.assertEqual(order[-1], "role")  # dismissed from: last
+        self.assertEqual(fresh["numbers"]["source"], "reused")  # a link was written in between: 2 notes changed
+
+    def test_link_writes_both_notes_map_since_sees_the_gap_closed_unlink_restores(self):
+        dry, written = self.result(14), self.result(15)
+        self.assertEqual((dry["status"], dry["written"]), ("dry-run", False))
+        self.assertEqual((written["status"], written["kept"], len(written["files"])), ("written", True, 2))
+        self.assertEqual([f["diff"] for f in dry["files"]], [f["diff"] for f in written["files"]])
+        a, b = written["notes"]
+        for change, other in zip(written["files"], (b, a)):
+            self.assertIn(f"+- [[{Path(other).stem}]] — gap: ", change["diff"])
+        since = self.result(17)
+        closed = [g for g in since["gaps"] if g["status"] == "closed"]
+        self.assertEqual(len(closed), 1)
+        self.assertEqual(closed[0]["added"], [sorted([a, b])])
+        undone = self.result(19)
+        self.assertEqual((undone["status"], undone["recorded"]), ("written", True))
+        for old, new in zip(written["files"], undone["files"]):  # each line it added is removed again
+            added = [l[1:] for l in old["diff"].splitlines() if l.startswith("+") and not l.startswith("+++")]
+            removed = [l[1:] for l in new["diff"].splitlines() if l.startswith("-") and not l.startswith("---")]
+            self.assertEqual(added, removed)
+
+    def test_errors(self):
+        self.assertEqual(self.by_id[1]["error"]["code"], -32001)
+        self.assertEqual(self.by_id[25]["error"]["code"], -32002)
+        self.assertEqual((self.by_id[26]["error"]["code"], self.by_id[26]["error"]["message"]), (-32007, "hidden only run from a note"))
+        self.assertEqual(self.by_id[27]["error"]["code"], -32602)

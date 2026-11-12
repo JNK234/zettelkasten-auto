@@ -93,4 +93,36 @@ The server keeps parsed notes between calls and re-parses only notes whose conte
 
 ## Search and connection methods
 
-`search.query`, `note.preview`, `note.related`, `links.suggest`, `notes.suggest` and `mentions.unlinked` back `vault search`, `related`, `suggest` and `unlinked`. A query syntax error is `-32006` (invalid query), with `data.start`/`data.end` offsets and a `hint`. Examples and result shapes: [Search and connections](search.md#over-json-rpc).
+`search.query`, `note.preview`, `note.related`, `links.suggest`, `notes.suggest` and `mentions.unlinked` back `vault search`, `related`, `suggest` and `unlinked`. A query syntax error is `-32006` (invalid query), with `data.start`/`data.end` offsets and a `hint`. `note.related` and `links.suggest` use the embedding model (`engine.embedding` in [the settings](commands.md#settings-vault-config-show-vault---db-f---format-f---setting-kv---config-file---json)) for their text signal; when it cannot be loaded they still answer from links and tags, and their `text_signal` says so (`available: false` and why); `weights` gives the weights used. Vectors the index lacks are computed for the answer and never written (`text_signal.uncached` counts them). Examples and result shapes: [Search and connections](search.md#over-json-rpc).
+
+## Explore methods
+
+`explore.run`, `explore.mark`, `explore.kept`, `explore.link`, `explore.unlink`, `map.get`, `map.since`,
+`note.deepen`, `vault.discover`, `notes.explain`, `embed.status` and `config.show` back `vault explore`, `mark`,
+`kept`, `link-it`, `unlink`, `map` (`--record`, `--since`), `deepen`, `discover`, `explain`, `embed --status` and
+`config show`, and return exactly what those print with `--json` (without the `vault` and `index` around it): one
+function builds both. Every field, with an example each and how an assistant should use them: [For
+assistants](agents.md).
+
+| method | what | params (bold = required) |
+|---|---|---|
+| `explore.run` | a section per lens from a note, or where to start; remembered for mark and link | `note`, `lenses`, `per_lens` (3–5), `fresh`, `record` (default true), `refresh` |
+| `explore.mark` | keep, dismiss or clear results of the last run | **`verdict`**, **`refs`** |
+| `explore.kept` | what was kept, with lens and evidence | `lens` |
+| `explore.link` | a result (or two notes) made a See Also link in both notes; needs `--format` | `ref` or `a` + `b`, `reason`, `dry_run` (**default true**) |
+| `explore.unlink` | undo it | **`a`**, **`b`**, `dry_run` (**default true**) |
+| `map.get` | the map; `record` saves a snapshot | `limit`, `meaning`, `record` |
+| `map.since` | what changed since a snapshot | **`since`** |
+| `note.deepen` | the five deepen lenses with their numbers | **`note`**, `lenses`, `limit` |
+| `vault.discover` | the seven discover lenses with their numbers | `note`, `lenses`, `limit`, `steps`, `seed` |
+| `notes.explain` | how two notes relate, signal by signal | **`a`**, **`b`**, `words` |
+| `embed.status` | cached vectors for the configured model | |
+| `config.show` | every engine setting and its source | |
+
+`-32007` (not available) is what there is nothing to act on: no explore run yet, a ref that is not in the last run, a
+result that is not two notes to link, no map snapshot, a lens that does not run from this start; `data.hint` says
+what to do. The recorded session `tests/fixtures/rpc/sample_vault_explore.jsonl` (replayed through `vault serve` by
+`tests/test_vaultengine_rpc.py`) calls every one of them on the sample vault: explore twice, keep, dismiss, a ref
+that is not there, kept, map with a snapshot, link it (dry run, then written), explore with fresh, map since (the
+gap closed), unlink (dry run, then written), pivot, deepen, discover, explain, and the errors.
+

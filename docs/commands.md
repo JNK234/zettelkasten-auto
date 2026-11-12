@@ -18,8 +18,227 @@ Timings, dates and the `Created`/`Ingested` times differ on your machine; everyt
 |---|---|
 | 0 | done (for `check`: no violations) |
 | 1 | `check` or `formats --strict` found violations; a write was refused; `ingest` found a duplicate |
-| 2 | bad arguments, no such note, a name already taken, no index for `--changed`, an invalid format file |
+| 2 | bad arguments, no such note, a name already taken, no index for `--changed`, an invalid format file, invalid settings, an embedding model that cannot be loaded |
 | 3 | a write failed and every file was restored |
+
+## Settings: `vault config show [vault] [--db F] [--format F] [--setting K=V]… [--config FILE] [--json]`
+
+Every engine setting is in one place, the `engine:` section of [`config/config.yaml`](../config/config.yaml): the vault,
+the index file, the explore memory, the format, the embedding model, `related.weights` and `related.unlinked_weights`
+(how [`vault related`](search.md#related-notes-links-to-add-notes-to-write) mixes its signals, with and without the
+notes already linked; the second set from [`vault experiment`](experiment.md)), and the explore engine's settings
+(the lenses of [`vault explore`](exploring.md), `explore.weights`: how much each
+signal counts in [`vault explain`](search.md#how-two-notes-relate-vault-explain); the percentile that counts as
+standing out, the topic page types, the seed and the rest of [`vault map`, `deepen` and `discover`](explore.md)). Each one can be overridden, and the first of these that sets it wins:
+
+| Source | How | Example |
+|---|---|---|
+| flag | the vault argument, `--db`, `--format`, or `--setting KEY=VALUE` for any key (repeatable) | `--setting embedding.model_id=my-id` |
+| env | `VAULTENGINE_` + the key in capitals, `__` between levels | `VAULTENGINE_EMBEDDING__MODEL_PATH=/models/potion-base-32M` |
+| file | the `engine:` section of `--config FILE`, else `$VAULTENGINE_CONFIG`, else the repository's `config/config.yaml` | `format: brain` |
+| default | built in | index: `<vault>/.vaultengine/index.sqlite`; model id: the model folder's name |
+
+Relative paths in the file are relative to the file's folder (so the repository's file says
+`model_path: ../models/potion-base-8M`); from a flag or the environment they are relative to the current folder.
+Everything is validated (Pydantic) before a command runs: an unknown key, a wrong type or an unknown provider is an error
+(exit 2) that names the key and where it was set. With `engine.format` set, `--format` can be left out everywhere.
+
+```
+$ vault config show /tmp/sample-vault
+Engine settings · precedence: flag > env > file > default
+  config file  /workspace/zettelkasten-auto/config/config.yaml  (the repository's; --config FILE or $VAULTENGINE_CONFIG for another)
+
+  vault                                /tmp/sample-vault                                                                                                   flag <vault>
+  index                                /tmp/sample-vault/.vaultengine/index.sqlite                                                                         default (<vault>/.vaultengine/index.sqlite)
+  memory                               /tmp/sample-vault/.vaultengine/memory.sqlite                                                                        default (<vault>/.vaultengine/memory.sqlite)
+  format                               (not set)                                                                                                           default
+  embedding.provider                   model2vec                                                                                                           file
+  embedding.model_path                 /workspace/zettelkasten-auto/models/potion-base-8M                                                                  file
+  embedding.model_id                   potion-base-8M                                                                                                      default (the model folder's name)
+  related.weights.graph                0.5                                                                                                                 file
+  related.weights.cocitation           0.0                                                                                                                 file
+  related.weights.coupling             0.0                                                                                                                 file
+  related.weights.tags                 0.2                                                                                                                 file
+  related.weights.text                 0.3                                                                                                                 file
+  related.unlinked_weights.graph       0.1                                                                                                                 file
+  related.unlinked_weights.cocitation  0.05                                                                                                                file
+  related.unlinked_weights.coupling    0.05                                                                                                                file
+  related.unlinked_weights.tags        0.1                                                                                                                 file
+  related.unlinked_weights.text        0.7                                                                                                                 file
+  explore.weights.direct               0.3                                                                                                                 file
+  explore.weights.cocitation           0.15                                                                                                                file
+  explore.weights.coupling             0.15                                                                                                                file
+  explore.weights.tags                 0.1                                                                                                                 file
+  explore.weights.text                 0.3                                                                                                                 file
+  explore.percentile                   90.0                                                                                                                file
+  explore.topic_types                  ['topic', 'page']                                                                                                   file
+  explore.meaning                      False                                                                                                               file
+  explore.meaning_neighbours           1                                                                                                                   file
+  explore.meaning_percentile           50.0                                                                                                                file
+  explore.seed                         42                                                                                                                  file
+  explore.resolution                   1.0                                                                                                                 file
+  explore.path_budget                  20000000                                                                                                            file
+  explore.lenses                       ['neighbourhood', 'cited', 'foundations', 'backbone', 'cluster', 'hidden', 'role', 'gap', 'surprise', 'unwritten']  file
+  explore.start_lenses                 ['gap', 'surprise', 'unwritten', 'topicless']                                                                       file
+  explore.per_lens                     4                                                                                                                   file
+  explore.duplicate_percentile         99.0                                                                                                                file
+  explore.stats_refresh                0.02                                                                                                                file
+  explore.link_section                 See Also                                                                                                            file
+
+  env: VAULTENGINE_<KEY>, "__" between levels (VAULTENGINE_EMBEDDING__MODEL_PATH)
+  flags: the vault argument, --db, --format, and --setting KEY=VALUE for any key
+```
+
+The same with a setting from the environment and one from a flag:
+
+```
+$ VAULTENGINE_FORMAT=brain vault config show /tmp/sample-vault --setting embedding.model_id=potion-8m-test
+Engine settings · precedence: flag > env > file > default
+  config file  /workspace/zettelkasten-auto/config/config.yaml  (the repository's; --config FILE or $VAULTENGINE_CONFIG for another)
+
+  vault                                /tmp/sample-vault                                                                                                   flag <vault>
+  index                                /tmp/sample-vault/.vaultengine/index.sqlite                                                                         default (<vault>/.vaultengine/index.sqlite)
+  memory                               /tmp/sample-vault/.vaultengine/memory.sqlite                                                                        default (<vault>/.vaultengine/memory.sqlite)
+  format                               brain                                                                                                               env VAULTENGINE_FORMAT
+  embedding.provider                   model2vec                                                                                                           file
+  embedding.model_path                 /workspace/zettelkasten-auto/models/potion-base-8M                                                                  file
+  embedding.model_id                   potion-8m-test                                                                                                      flag --setting embedding.model_id
+  related.weights.graph                0.5                                                                                                                 file
+  related.weights.cocitation           0.0                                                                                                                 file
+  related.weights.coupling             0.0                                                                                                                 file
+  related.weights.tags                 0.2                                                                                                                 file
+  related.weights.text                 0.3                                                                                                                 file
+  related.unlinked_weights.graph       0.1                                                                                                                 file
+  related.unlinked_weights.cocitation  0.05                                                                                                                file
+  related.unlinked_weights.coupling    0.05                                                                                                                file
+  related.unlinked_weights.tags        0.1                                                                                                                 file
+  related.unlinked_weights.text        0.7                                                                                                                 file
+  explore.weights.direct               0.3                                                                                                                 file
+  explore.weights.cocitation           0.15                                                                                                                file
+  explore.weights.coupling             0.15                                                                                                                file
+  explore.weights.tags                 0.1                                                                                                                 file
+  explore.weights.text                 0.3                                                                                                                 file
+  explore.percentile                   90.0                                                                                                                file
+  explore.topic_types                  ['topic', 'page']                                                                                                   file
+  explore.meaning                      False                                                                                                               file
+  explore.meaning_neighbours           1                                                                                                                   file
+  explore.meaning_percentile           50.0                                                                                                                file
+  explore.seed                         42                                                                                                                  file
+  explore.resolution                   1.0                                                                                                                 file
+  explore.path_budget                  20000000                                                                                                            file
+  explore.lenses                       ['neighbourhood', 'cited', 'foundations', 'backbone', 'cluster', 'hidden', 'role', 'gap', 'surprise', 'unwritten']  file
+  explore.start_lenses                 ['gap', 'surprise', 'unwritten', 'topicless']                                                                       file
+  explore.per_lens                     4                                                                                                                   file
+  explore.duplicate_percentile         99.0                                                                                                                file
+  explore.stats_refresh                0.02                                                                                                                file
+  explore.link_section                 See Also                                                                                                            file
+
+  env: VAULTENGINE_<KEY>, "__" between levels (VAULTENGINE_EMBEDDING__MODEL_PATH)
+  flags: the vault argument, --db, --format, and --setting KEY=VALUE for any key
+```
+
+```
+$ VAULTENGINE_EMBEDDING__PROVIDER=openai vault related /tmp/sample-vault kl-penalty-in-rlhf; echo "exit $?"
+error: invalid engine settings:
+  engine.embedding.provider: unknown provider 'openai'; known: model2vec  [from env VAULTENGINE_EMBEDDING__PROVIDER]
+  settings: vault, index, memory, format, embedding.provider, embedding.model_path, embedding.model_id, related.weights.graph, related.weights.cocitation, related.weights.coupling, related.weights.tags, related.weights.text, related.unlinked_weights.graph, related.unlinked_weights.cocitation, related.unlinked_weights.coupling, related.unlinked_weights.tags, related.unlinked_weights.text, explore.weights.direct, explore.weights.cocitation, explore.weights.coupling, explore.weights.tags, explore.weights.text, explore.percentile, explore.topic_types, explore.meaning, explore.meaning_neighbours, explore.meaning_percentile, explore.seed, explore.resolution, explore.path_budget, explore.lenses, explore.start_lenses, explore.per_lens, explore.duplicate_percentile, explore.stats_refresh, explore.link_section
+exit 2
+```
+
+## `vault embed <vault> [--status] [--full] [--prune]`
+
+Embeds the notes for `vault related` and the links of `vault suggest`, and caches the vectors in the index. It first
+brings the index up to date (like `vault index`), then embeds every note whose text has no vector for the configured
+model, and nothing else. The model is `engine.embedding` in the settings: `provider: model2vec` reads a static
+[Model2Vec](https://github.com/MinishLab/model2vec) model folder (`tokenizer.json` + `model.safetensors`; the
+repository ships `models/potion-base-8M`), with `tokenizers` and `numpy` only. Another Model2Vec model is a settings
+change: point `model_path` at its folder.
+
+How a note becomes a vector: its title, aliases, headings and body (no frontmatter, code, comments, tags, property keys,
+URLs or TeX math `$…$`/`$$…$$`) are tokenized, unknown tokens are dropped, the rows of the remaining tokens are averaged and the mean is
+normalised to length 1. Vectors are cached by **the SHA-256 of that text and the model id**, so:
+
+- editing a note re-embeds that note only; an edit that leaves the text alone (a tag, blank lines) re-embeds nothing,
+  and a rename re-embeds it (the title is part of the text);
+- a new version of what goes into the text re-parses every note and re-embeds only those whose text changed (leaving
+  out TeX math re-embedded 25 of the sample's 180 notes, the ones with math);
+- changing the model id (or the model, whose folder name is the default id) re-embeds every note. The other id's
+  vectors are kept, so switching back is free, until `--prune` drops them;
+- a vector whose text no note has any more is dropped by the next `vault index`.
+
+Only `vault embed` writes vectors. `vault related`, `vault suggest` and `vault explain` read the cached ones and embed
+a note without one in memory, for that run only, and say so ("180 notes had no cached vector: embedded in memory for
+this run only; `vault embed <vault>` caches them"). `--status`
+only reports, and loads no model; `--full` embeds every note again; `--limit N` paths listed (0 = all).
+
+```
+$ vault embed /tmp/sample-vault --status
+Embeddings: /tmp/sample-vault
+  index 2026-11-09T20:27:13+00:00 (up to date)
+
+  model      potion-base-8M · model2vec · /workspace/zettelkasten-auto/models/potion-base-8M (found)
+  vectors    0 of 180 indexed notes · 180 missing: run `vault embed /tmp/sample-vault`
+  other ids  none
+  cache      0 vectors, 0 B in /tmp/sample-vault/.vaultengine/index.sqlite
+$ vault embed /tmp/sample-vault --limit 2
+Embedded /tmp/sample-vault in 1.69s
+  model      potion-base-8M (model2vec, 256 dims) · /workspace/zettelkasten-auto/models/potion-base-8M
+  index      already up to date
+  vectors    180 embedded, 0 cached (180 notes)
+    + 10_SOURCES/2312.06942 - AI Control - Improving Safety Despite Intentional Subversion.md
+    + 10_SOURCES/2411.00640 - Adding Error Bars to Evals.md
+  … 178 more (--limit 0 shows all)
+```
+
+After editing one note; with another model id; the status under the configured id again; and `--prune`:
+
+```
+$ echo "Edited." >> /tmp/sample-vault/20_ZETTLEKASTEN/kl-penalty-in-rlhf.md
+$ vault embed /tmp/sample-vault
+Embedded /tmp/sample-vault in 0.09s
+  model      potion-base-8M (model2vec, 256 dims) · /workspace/zettelkasten-auto/models/potion-base-8M
+  index      1 parsed (0 added, 1 changed, 0 deleted)
+  vectors    1 embedded, 179 cached (180 notes)
+    + 20_ZETTLEKASTEN/kl-penalty-in-rlhf.md
+$ vault embed /tmp/sample-vault --setting embedding.model_id=potion-8m-test --limit 1
+Embedded /tmp/sample-vault in 1.52s
+  model      potion-8m-test (model2vec, 256 dims) · /workspace/zettelkasten-auto/models/potion-base-8M
+  index      already up to date
+  vectors    180 embedded, 0 cached (180 notes)
+    + 10_SOURCES/2312.06942 - AI Control - Improving Safety Despite Intentional Subversion.md
+  … 179 more (--limit 0 shows all)
+$ vault embed /tmp/sample-vault --status
+Embeddings: /tmp/sample-vault
+  index 2026-11-09T20:27:19+00:00 (up to date)
+
+  model      potion-base-8M · model2vec · /workspace/zettelkasten-auto/models/potion-base-8M (found)
+  vectors    180 of 180 indexed notes (256 dims) · all up to date
+  other ids  potion-8m-test: 180 vectors (256 dims)  (kept for switching back; `vault embed --prune` drops them)
+  cache      360 vectors, 360.0 KiB in /tmp/sample-vault/.vaultengine/index.sqlite
+$ vault embed /tmp/sample-vault --prune
+Embedded /tmp/sample-vault in 0.03s
+  model      potion-base-8M (model2vec, 256 dims) · /workspace/zettelkasten-auto/models/potion-base-8M
+  index      already up to date
+  vectors    0 embedded, 180 cached (180 notes)
+  pruned     180 vectors of other model ids
+```
+
+A model that cannot be loaded is an error for `vault embed`, before anything is written (exit 2). Everywhere else it
+only switches off the text signal: `vault related`, the links of `vault suggest`, drafts and `vault explain` still
+answer from links and tags, and say that the text signal is unavailable and why:
+
+```
+$ vault related /tmp/sample-vault kl-penalty-in-rlhf --setting embedding.model_path=/nope --limit 1
+Related to kl-penalty-in-rlhf
+  20_ZETTLEKASTEN/kl-penalty-in-rlhf.md · index 2026-11-10T15:01:32+00:00
+
+  score = 0.71 × graph + 0.29 × tags · 179 notes compared
+  text signal unavailable: embedding model folder not found: /nope
+    (the other signals still rank; their weights are rescaled to sum to 1)
+
+   1. direct-preference-optimization-dpo                                            1.00      linked
+      linked from it · shares [[reinforcement-learning-from-human-feedback-rlhf]], [[policy-gradient-methods]]
+```
 
 ## `vault formats <vault> -f <format> [--type T] [--note N] [--limit N] [--strict] [--json]`
 

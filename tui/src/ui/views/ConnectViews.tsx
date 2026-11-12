@@ -9,6 +9,25 @@ function Status({linked}: {linked: boolean}) {
 	return linked ? <Text dimColor>linked</Text> : <Text color={theme.warn}>not linked</Text>;
 }
 
+/** "0.5 × graph + 0.3 × text + 0.2 × tags" from the weights the engine used (a signal that is off is left out). */
+export function formula(weights: Record<string, number>, names: Record<string, string>): string {
+	return Object.keys(names)
+		.filter((key) => (weights[key] ?? 0) > 0)
+		.map((key) => `${Number(weights[key]!.toPrecision(2))} × ${names[key]}`)
+		.join(' + ');
+}
+
+/** Without the embedding model the text signal is off (and why); vectors the index lacks were computed for this answer. */
+function TextSignalNote({signal}: {signal: NoteRelatedResult['text_signal']}) {
+	if (!signal.available) {
+		return <Text color={theme.warn}>text signal unavailable: {signal.unavailable} (the other signals still rank)</Text>;
+	}
+	if (signal.uncached > 0) {
+		return <Text dimColor>{plural(signal.uncached, 'note')} had no cached vector: embedded for this answer only; `vault embed` caches them</Text>;
+	}
+	return null;
+}
+
 export function RelatedView({data}: {data: NoteRelatedResult}) {
 	const {seed} = data;
 	const detail = seed.path ?? `no note yet; ${plural(seed.linkers.length, 'note')} link to it`;
@@ -16,7 +35,10 @@ export function RelatedView({data}: {data: NoteRelatedResult}) {
 		<Box flexDirection="column">
 			<Headline title={`Related to ${seed.label}`} detail={detail} />
 			<Body>
-				<Text dimColor>score = 0.5 × graph + 0.3 × text + 0.2 × tags · {plural(data.compared, 'note')} compared</Text>
+				<Text dimColor>
+					score = {formula(data.weights, {graph: 'graph', cocitation: 'cocitation', coupling: 'coupling', text: 'text', tags: 'tags'})} · {plural(data.compared, 'note')} compared
+				</Text>
+				<TextSignalNote signal={data.text_signal} />
 			</Body>
 			{data.hits.length === 0 ? (
 				<Text dimColor>{'     '}nothing related found</Text>
@@ -53,7 +75,15 @@ export function LinksView({data}: {data: LinksSuggestResult}) {
 	const scope = data.note ? ` with ${name(data.note)}` : data.path ? ` in ${data.path}` : '';
 	return (
 		<Box flexDirection="column">
-			<Headline title={`Links to add${scope}`} detail="score = 0.4 × shared neighbours + 0.3 × cited together + 0.3 × similar text" />
+			<Headline
+				title={`Links to add${scope}`}
+				detail={`score = ${formula(data.weights, {shared: 'shared neighbours', cited: 'cited together', tags: 'shared tags', text: 'similar text'})}`}
+			/>
+			{!data.text_signal.available || data.text_signal.uncached > 0 ? (
+				<Body>
+					<TextSignalNote signal={data.text_signal} />
+				</Body>
+			) : null}
 			{data.links.length === 0 ? (
 				<Text dimColor>{'     '}nothing to suggest</Text>
 			) : (

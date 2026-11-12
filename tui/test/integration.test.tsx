@@ -83,9 +83,13 @@ describe('against the real vaultengine server', () => {
 		expect(syntax).toMatchObject({code: -32_006, message: 'this ( is never closed', data: {start: 7, end: 8, hint: 'add ) after the group'}});
 		const preview = await api.preview({path: result.hits[0]!.path, query: 'reward hacking tag:ai-safety'});
 		expect(preview.marks).toBeGreaterThan(0);
-		const related = await api.related({note: 'kl-penalty-in-rlhf', limit: 2});
-		expect(related.hits[1]).toMatchObject({title: 'RLHF', linked: false});
+		const related = await api.related({note: 'kl-penalty-in-rlhf', limit: 3});
+		// Tags: links are tags: trust-region shares [[policy-gradient-methods]] with it and comes before RLHF.
+		expect(related.hits[1]?.reason).toContain('shares [[policy-gradient-methods]]');
+		expect(related.hits[2]).toMatchObject({title: 'RLHF', linked: false});
 		const links = await api.suggestLinks({limit: 1, path: '20_ZETTLEKASTEN'});
+		expect(links.links[0]).toMatchObject({a: '20_ZETTLEKASTEN/in-context-scheming-capability.md', b: '20_ZETTLEKASTEN/scheming-inability-safety-case-closed.md'});
+		expect(links.links[0]?.reason).toContain('shares #frontier-models-in-ai, #ai-safety');
 		expect(links.links[0]?.reason).toContain('cited together by scheming-as-threat-model');
 		const notes = await api.suggestNotes({limit: 1});
 		expect(notes.notes[0]?.name).toBe('rl-environment-design');

@@ -38,12 +38,21 @@ each a similarity from 0 to 1 and each shown in the reason:
 * cited together - the notes that link to both (co-citation), each citing note c
   weighing 1 / ln(1 + the notes c links to), divided the same way (+1 included)
   by the total weight of the notes citing each of the two;
-* similar text - cosine similarity of the two notes' distinctive-term profiles
-  (``related.py``: top 30 terms by sublinear tf x idf).
+* similar text - the centered cosine of the two notes' embeddings (``related.py``:
+  the configured embedding provider, the vault's mean vector subtracted), 0 if negative.
+  The words named are those in both notes that add the most to it.
 
-score = 0.4 * shared + 0.3 * cited + 0.3 * text. Candidates are the pairs with a
-shared neighbour or a co-citation through a note with at most ``HUB_LINKS`` links,
-plus each note's 5 textually closest notes. Hubs (a topic linked from hundreds of
+* shared tags - weighted Jaccard of the two notes' tags, #tags and tag links
+  (``Tags: [[topic]]``, ``tagrule.py``), exactly as ``related`` and ``explain`` score it.
+  Tag links are tags here too: they are not neighbours, and a note that tags two
+  notes does not cite them together, so ``suggest``, ``related`` and ``explain``
+  read the same links the same way.
+
+score = (0.4 * shared + 0.3 * cited + 0.2 * tags + 0.3 * text) / 1.2, i.e. 1/3, 1/4, 1/6
+and 1/4; without the embedding model (missing or broken), the text evidence is left out
+and the other weights are rescaled to sum to 1. Candidates are the pairs with a
+shared neighbour, a co-citation or a shared tag through a node with at most ``HUB_LINKS``
+notes, plus each note's 5 closest notes by embedding. Hubs (a topic linked from hundreds of
 notes, a note that links hundreds) still add their evidence to those candidates,
 but do not make candidates by themselves: that would be every pair of their notes,
 on the weakest evidence there is.
@@ -62,13 +71,13 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from vaultengine.parser import normalize_text, parse_note_with_layout
-from vaultengine.related import Relatedness
+from vaultengine.related import Relatedness, active_weights, tag_label
 from vaultengine.search import field_segments
 from vaultengine.snippets import _tokens
 from vaultengine.tokenize import tokenize
-from vaultengine.vault import link_name
+from vaultengine.vault import link_name, lookup_key
 
-WEIGHTS = {"shared": 0.4, "cited": 0.3, "text": 0.3}
+WEIGHTS = {"shared": 0.4 / 1.2, "cited": 0.3 / 1.2, "tags": 0.2 / 1.2, "text": 0.3 / 1.2}
 HUB_LINKS = 50
 TEXT_NEIGHBOURS = 5
 _BARE_URL = re.compile(r"\b(?:https?|ftp)://[^\s<>\"'\]\)]+|\bwww\.[^\s<>\"'\]\)]+", re.IGNORECASE)
@@ -217,9 +226,11 @@ class LinkSuggestion:
     shared: float
     cited: float
     text: float
+    tags: float = 0.0
     shared_with: list[str] = field(default_factory=list)  # neighbours, strongest first ("(no note yet)" marked)
+    shared_tags: list[str] = field(default_factory=list)  # #tags and [[tag links]] both have, rarest first
     cited_by: list[str] = field(default_factory=list)  # notes linking both, strongest first
-    terms: list[str] = field(default_factory=list)  # shared distinctive terms
+    terms: list[str] = field(default_factory=list)  # words in both notes that add most to their embedding cosine
     reason: str = ""
 
     def to_dict(self) -> dict:
@@ -231,27 +242,29 @@ class LinkSuggester:
         self.conn = conn
         self.engine = engine or Relatedness(conn)
         self.paths = self.engine.paths
-        self.linked = _linked_pairs(conn)
-        # Undirected neighbours of notes and missing notes ("m:" + key), and what each note cites, with lines.
+        self.weights = dict(WEIGHTS)  # the weights of the last suggestions() (text left out without a model)
+        self.linked = _linked_pairs(conn)  # every link, tag links too: a tagged pair is already linked
+        # Undirected neighbours of notes and missing notes ("m:" + key), and what each note cites, from the
+        # graph's link layers, which leave tag links out (they are the tags evidence).
         self.neighbours: dict[str, set[str]] = defaultdict(set)
         self.cites: dict[int, set[int]] = defaultdict(set)  # note -> notes it links to
         self.missing_name: dict[str, str] = {}
-        rows = conn.execute(
-            """SELECT l.source_id, l.target_id, l.status, l.target_key, l.target, l.line, t.kind
-               FROM links l JOIN files s ON s.id = l.source_id LEFT JOIN files t ON t.id = l.target_id
-               WHERE s.kind = 'note' AND l.target != ''"""
-        )
-        for source, target, status, key, written, line, kind in rows:
-            if status == "resolved" and kind == "note" and target != source:
-                a, b = f"n:{source}", f"n:{target}"
-                self.cites[source].add(target)
-            elif status == "unresolved":
-                a, b = f"n:{source}", f"m:{key}"
-                self.missing_name.setdefault(f"m:{key}", written)
+        graph = self.engine.graph
+        name = {}
+        for v in range(len(graph.labels)):
+            if graph.is_missing(v):
+                name[v] = f"m:{lookup_key(graph.labels[v])}"
+                self.missing_name[name[v]] = graph.labels[v]
             else:
+                name[v] = f"n:{graph.note_ids[v]}"
+        for a, targets in enumerate(graph.outgoing):
+            if graph.is_missing(a):
                 continue
-            self.neighbours[a].add(b)
-            self.neighbours[b].add(a)
+            for b in targets:
+                self.neighbours[name[a]].add(name[b])
+                self.neighbours[name[b]].add(name[a])
+                if not graph.is_missing(b):
+                    self.cites[graph.note_ids[a]].add(graph.note_ids[b])
 
     def is_linked(self, a: int, b: int) -> bool:
         return b in self.linked[a] or a in self.linked[b]
@@ -261,26 +274,33 @@ class LinkSuggester:
             return f"{self.missing_name[node]} (no note yet)"
         return link_name(self.paths[int(node[2:])])
 
-    def text_similarity(self) -> dict[tuple[int, int], tuple[float, list[str]]]:
-        """Cosine of the top-30 term profiles for each note's 5 closest notes (both directions kept)."""
-        profiles = {f: self.engine._top(profile) for f, profile in self.engine.all_profiles().items()}
-        norms = {f: math.sqrt(sum(w * w for w in p.values())) for f, p in profiles.items()}
-        by_term: dict[str, list[tuple[int, float]]] = defaultdict(list)
-        for f, profile in profiles.items():
-            for term, weight in profile.items():
-                by_term[term].append((f, weight))
+    def text_similarity(self) -> dict[tuple[int, int], float]:
+        """Centered embedding cosine for each note's 5 closest notes (both directions kept; positive only)."""
+        import numpy as np
+
+        text = self.engine.text
+        if not text.available():
+            return {}
+        ids = text.vectors.file_ids
+        if not ids:
+            return {}
+        centered = text.centered
         result = {}
-        for f, profile in profiles.items():
-            dots: Counter[int] = Counter()
-            for term, weight in profile.items():
-                for other, w in by_term[term]:
-                    if other != f:
-                        dots[other] += weight * w
-            scored = sorted(((dot / (norms[f] * norms[o]), o) for o, dot in dots.items() if norms[f] and norms[o]), reverse=True)
-            for cosine, other in scored[:TEXT_NEIGHBOURS]:
-                pair = (min(f, other), max(f, other))
-                shared = sorted(set(profile) & set(profiles[other]), key=lambda t: -profile[t] * profiles[other][t])[:3]
-                result[pair] = (cosine, shared)
+        k = min(TEXT_NEIGHBOURS, len(ids) - 1)
+        block = 1024  # rows at a time: all the cosines at once would be notes^2 numbers (20 GB at 50,000 notes)
+        for start in range(0, len(ids), block):
+            cosines = centered[start:start + block] @ centered.T
+            cosines[np.arange(cosines.shape[0]), np.arange(start, start + cosines.shape[0])] = -np.inf
+            for offset in range(cosines.shape[0]):
+                row = start + offset
+                if k <= 0 or not centered[row].any():
+                    continue
+                nearest = np.argpartition(-cosines[offset], k - 1)[:k]
+                for other in nearest:
+                    cosine = float(cosines[offset, other])
+                    if cosine > 0:
+                        a, b = ids[row], ids[other]
+                        result[(min(a, b), max(a, b))] = cosine
         return result
 
     def suggestions(self, limit: int | None = 10, for_note: int | None = None, path: str | None = None) -> list[LinkSuggestion]:
@@ -303,7 +323,18 @@ class LinkSuggester:
             if len(targets) <= HUB_LINKS:
                 notes = sorted(targets)
                 candidates.update((a, b) for i, a in enumerate(notes) for b in notes[i + 1 :])
+        engine = self.engine
+        tag_notes: dict[str, list[int]] = defaultdict(list)
+        for f, tags in engine.note_tags.items():  # common tags already left out
+            for t in tags:
+                tag_notes[t].append(f)
+        for t, notes in tag_notes.items():
+            if len(notes) <= HUB_LINKS:
+                notes = sorted(notes)
+                candidates.update((a, b) for i, a in enumerate(notes) for b in notes[i + 1 :])
         text = self.text_similarity()
+        self.weights = active_weights(WEIGHTS, set() if self.engine.text.available() else {"text"})
+        weights = self.weights
         candidates |= set(text)
         candidates = {p for p in candidates if p[0] != p[1] and not self.is_linked(*p)}
         if for_note is not None:
@@ -330,27 +361,33 @@ class LinkSuggester:
             if both_cite:
                 cited[(a, b)] = sum(citer_weight[c] for c in both_cite) / math.sqrt((cited_total[a] + 1) * (cited_total[b] + 1))
                 cited_by[(a, b)] = [(citer_weight[c], c) for c in both_cite]
+        tags = {p: engine.tag_score(engine.note_tags.get(p[0], set()), engine.note_tags.get(p[1], set())) for p in candidates}
         scores = {
-            p: WEIGHTS["shared"] * shared.get(p, 0.0) + WEIGHTS["cited"] * cited.get(p, 0.0) + WEIGHTS["text"] * text.get(p, (0.0, []))[0]
+            p: weights["shared"] * shared.get(p, 0.0) + weights["cited"] * cited.get(p, 0.0) + weights["tags"] * tags[p]
+            + weights["text"] * text.get(p, 0.0)
             for p in candidates
         }
         ranked = sorted(candidates, key=lambda p: (-scores[p], self.paths[p[0]], self.paths[p[1]]))
         found = []
         for a, b in ranked if limit is None else ranked[:limit]:  # details only for what is returned
-            x, terms = text.get((a, b), (0.0, []))
+            x = text.get((a, b), 0.0)
+            terms = self.engine.text.words(self.engine.text.bag(a, self.paths[a]), self.engine.text.bag(b, self.paths[b])) if x > 0 else []
             suggestion = LinkSuggestion(
                 a=self.paths[a], b=self.paths[b], score=scores[(a, b)],
-                shared=shared.get((a, b), 0.0), cited=cited.get((a, b), 0.0), text=x,
+                shared=shared.get((a, b), 0.0), cited=cited.get((a, b), 0.0), text=x, tags=tags[(a, b)],
+                shared_tags=[tag_label(t) for t in sorted(engine.note_tags.get(a, set()) & engine.note_tags.get(b, set()),
+                                                         key=lambda t: (-engine.tag_idf[t], t))],
                 shared_with=[self._name(n) for _, n in sorted(shared_with.get((a, b), []), key=lambda item: (-item[0], item[1]))],
                 cited_by=[link_name(self.paths[n]) for _, n in sorted(cited_by.get((a, b), []), key=lambda item: (-item[0], self.paths[item[1]]))],
-                terms=[t for t in terms if t.isalpha()],  # shown to a person: words (all terms count in the score)
+                terms=terms,
             )
-            suggestion.reason = self.reason(suggestion)
+            suggestion.reason = self.reason(suggestion, self.engine.text.explains)
             found.append(suggestion)
         return found
 
     @staticmethod
-    def reason(s: LinkSuggestion) -> str:
+    def reason(s: LinkSuggestion, explains: bool = True) -> str:
+        """``explains``: the model names words; then "similar text" needs one (as in ``related.py``)."""
         parts = []
 
         def listing(names: list[str], count: int = 2) -> str:
@@ -359,8 +396,12 @@ class LinkSuggester:
 
         if s.shared_with:
             parts.append("shared neighbours: " + listing(s.shared_with))
+        if s.shared_tags:
+            parts.append("shares " + listing(s.shared_tags, 3))
         if s.cited_by:
             parts.append("cited together by " + listing(s.cited_by))
         if s.terms:
             parts.append("similar text (" + ", ".join(s.terms) + ")")
+        elif s.text > 0 and not explains:
+            parts.append("similar text")
         return " · ".join(parts)
