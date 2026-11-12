@@ -21,7 +21,8 @@ snapshots
 
 A *start* is what explore started from: a note path, ``[[missing note]]``, or "" (no starting point). A
 *target* is what a result is about: a note path, ``a ↔ b`` for a pair, ``[[name]]`` for a missing note,
-``community: …`` for a community. Times are ISO 8601, local time, to the second.
+``community: …`` for a community. Times are ISO 8601, local time, to the second; a mark's to the microsecond,
+so marks made within one second still list in the order they were made (``kept``, oldest first).
 """
 
 from __future__ import annotations
@@ -62,8 +63,10 @@ CREATE TABLE IF NOT EXISTS snapshots (id INTEGER PRIMARY KEY, at TEXT NOT NULL, 
 """
 
 
-def now() -> str:
-    return dt.datetime.now().replace(microsecond=0).isoformat()
+def now(precise: bool = False) -> str:
+    """Local time, ISO 8601: to the second, or to the microsecond when ``precise``."""
+    moment = dt.datetime.now()
+    return moment.isoformat(timespec="microseconds") if precise else moment.replace(microsecond=0).isoformat()
 
 
 class MemoryStoreError(ValueError):
@@ -153,7 +156,7 @@ class Memory:
                    DO UPDATE SET verdict = excluded.verdict, at = excluded.at, title = excluded.title,
                    evidence = excluded.evidence""",
                 (result["start"], result["lens"], result["target"], verdict, result["kind"], result["title"],
-                 result["evidence"], link[0], link[1], now()))
+                 result["evidence"], link[0], link[1], now(precise=True)))
 
     def unmark(self, result: dict[str, Any]) -> bool:
         with self.conn:

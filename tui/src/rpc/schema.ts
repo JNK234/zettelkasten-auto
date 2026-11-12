@@ -1066,6 +1066,9 @@ kind: ("note" | "pair" | "link" | "missing" | "community")
 title: string
 evidence: string
 link: (string[] | null)
+/**
+ * When it was marked: ISO 8601, local time, to the microsecond (older marks: to the second).
+ */
 at: string
 }
 export interface ExploreLinkParams {

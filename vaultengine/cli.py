@@ -2336,7 +2336,7 @@ def _cmd_kept(args: argparse.Namespace) -> int:
     for r in rows:
         start = r["start"] or "no starting point"
         out += ["", f"  {_short(r['title'], width - 4)}", f"    {r['lens']} · {r['evidence']}",
-                f"    from {start} · kept {r['at']}"]
+                f"    from {start} · kept {r['at'][:19]}"]
     if not rows:
         out.append("  nothing kept yet (`vault mark keep 2.3` after `vault explore`)")
     print("\n".join(out))

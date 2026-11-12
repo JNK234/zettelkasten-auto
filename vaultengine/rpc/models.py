@@ -1031,7 +1031,7 @@ class KeptItem(Result):
     title: str
     evidence: str
     link: list[str] | None
-    at: str
+    at: str = Field(description="When it was marked: ISO 8601, local time, to the microsecond (older marks: to the second).")
 
 
 class ExploreKeptResult(Result):

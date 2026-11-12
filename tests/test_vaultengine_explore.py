@@ -431,6 +431,22 @@ class UnitTests(unittest.TestCase):
                 with self.assertRaisesRegex(MemoryStoreError, "give a date"):
                     memory.snapshot_since("last week")
 
+    def test_kept_lists_marks_in_the_order_made_within_a_second_and_across_one(self):
+        import datetime as dt
+
+        def mark(memory, lens, target):
+            memory.mark({"start": "a.md", "lens": lens, "target": target, "kind": "note", "title": target,
+                         "evidence": "why"}, "keep")
+
+        for first, second in (("10:00:00.900000", "10:00:00.950000"), ("10:00:00.999000", "10:00:01.001000")):
+            times = iter([dt.datetime.fromisoformat(f"2026-11-12T{t}") for t in (first, second)])
+            clock = type("Clock", (), {"now": staticmethod(lambda: next(times))})
+            with tempfile.TemporaryDirectory() as tmp, Memory(Path(tmp) / "m.sqlite") as memory:
+                with patch("vaultengine.memory.dt", type("Module", (), {"datetime": clock})):
+                    mark(memory, "role", "z.md")  # sorts last by lens and target, but was marked first
+                    mark(memory, "hidden", "b.md")
+                self.assertEqual([k["target"] for k in memory.kept()], ["z.md", "b.md"])
+
     def test_lens_settings_are_validated(self):
         from vaultengine.settings import SettingsError, load_settings
 

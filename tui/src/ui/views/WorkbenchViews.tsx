@@ -22,7 +22,7 @@ export function KeptView({data}: {data: ExploreKeptResult}) {
 						<Box key={`${item.start ?? ''} ${item.lens} ${item.target}`} flexDirection="column" marginTop={1}>
 							<Text wrap="truncate-end">
 								<Text bold>{item.title}</Text>
-								<Text dimColor>  from {item.start ? title(item.start) : 'no starting point'} · {item.at}</Text>
+								<Text dimColor>  from {item.start ? title(item.start) : 'no starting point'} · {item.at.slice(0, 19)}</Text>
 							</Text>
 							<Text dimColor wrap="truncate-end">
 								{'  '}
