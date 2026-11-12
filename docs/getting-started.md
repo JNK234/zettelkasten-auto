@@ -147,6 +147,7 @@ backlinks: ['20_ZETTLEKASTEN/the-environment-not-flops-bottlenecks-agentic-rl.md
 
 ## Next
 
+- Your own vault, day to day: [Daily use](daily-use.md) (a personal config, the first run, the daily and weekly loops).
 - The JSON-RPC server: [The JSON-RPC API](api.md) (`vault serve`, the same session continued).
 - Your own conventions: [The format file](formats.md), then every format command in [Commands](commands.md).
 - The terminal app: [The terminal app](tui.md).
