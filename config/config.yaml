@@ -98,3 +98,7 @@ engine:
     duplicate_percentile: 99   # `vault explore`: near-duplicates (left out of a section) at or above this percentile of note-pair similarity
     link_section: See Also     # `vault link-it`: the section both notes get the link and its reason under
     stats_refresh: 0.02        # `vault explore`: reuse the stored vault-wide numbers until more than this share of notes changed
+  findings:                    # `vault findings` (and pipeline, next, ideas): a link finding is a score at the vault's 99th
+                               # percentile of structural pairs, and at least the floor; at most the cap, best first
+    link_floor: 0.2            # with text in the score, 0.10 let 4,549 links through on a generated 5,000-note vault (1,315 at 0.2)
+    link_limit: 500            # each listed link costs ~7 ms (its similar words): 5,000 notes, 500 links in ~5 s (4,549 took 14 s)

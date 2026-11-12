@@ -526,7 +526,8 @@ class SettingsTests(unittest.TestCase):
                                       "explore.meaning_neighbours", "explore.meaning_percentile",
                                       "explore.seed", "explore.resolution", "explore.path_budget", "explore.lenses",
                                       "explore.start_lenses", "explore.per_lens", "explore.duplicate_percentile",
-                                      "explore.stats_refresh", "explore.link_section"])
+                                      "explore.stats_refresh", "explore.link_section",
+                                      "findings.link_floor", "findings.link_limit"])
         self.assertEqual(rows["related.weights.text"]["value"], "0.3")
         self.assertEqual(rows["related.unlinked_weights.text"]["value"], "0.7")  # from vault experiment, 2026-11-10
         self.assertEqual(rows["explore.topic_types"]["value"], "['topic', 'page']")

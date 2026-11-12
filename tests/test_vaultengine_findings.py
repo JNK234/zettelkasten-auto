@@ -228,6 +228,20 @@ class SameAsPairByPairTests(unittest.TestCase):
         self.assertEqual(len(found), 94)
         self.assertEqual(found, self.reference["findings"])
 
+    def test_link_cap_and_floor(self):
+        """engine.findings.link_limit keeps the best links (the same, in the same order); link_floor raises the bar."""
+        links = [f["id"] for f in self.reference["findings"] if f["method"] == "link"]
+        capped = run_vault("findings", str(self.root), "-f", "core", "--json", "--method", "link", "--limit", "0",
+                           "--setting", "findings.link_limit=3")
+        self.assertEqual(capped.returncode, 0, capped.stderr)
+        data = json.loads(capped.stdout)
+        self.assertEqual([f["id"] for f in data["findings"]], links[:3])
+        self.assertEqual((data["thresholds"]["link"]["limit"], data["thresholds"]["link"]["capped"]), (3, True))
+        high = run_vault("findings", str(self.root), "-f", "core", "--json", "--method", "link", "--limit", "0",
+                         "--setting", "findings.link_floor=0.9")
+        data = json.loads(high.stdout)
+        self.assertEqual((data["findings"], data["thresholds"]["link"]["score"]), ([], 0.9))
+
     def test_every_link_suggestion(self):
         from vaultengine.connect import LinkSuggester
         from vaultengine.findings import counts_for

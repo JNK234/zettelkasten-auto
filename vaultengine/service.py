@@ -484,7 +484,8 @@ class VaultService:
         from vaultengine.findings import Findings, counts_for, skip_for
 
         spec = self._spec()
-        return Findings(self._built_index().conn, skip_for(spec), counts_for(spec), self._engine())
+        return Findings(self._built_index().conn, skip_for(spec), counts_for(spec), self._engine(),
+                        self._engine_settings().engine.findings)
 
     def _index_info(self) -> dict[str, Any]:
         index = self._built_index()

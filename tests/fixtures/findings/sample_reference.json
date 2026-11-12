@@ -16,7 +16,9 @@
 "link": {
 "score": 0.2969,
 "percentile": 99,
-"floor": 0.1
+"floor": 0.2,
+"limit": 500,
+"capped": false
 }
 },
 "findings": [

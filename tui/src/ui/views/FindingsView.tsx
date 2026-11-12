@@ -22,7 +22,8 @@ function thresholds(data: FindingsListResult): string {
 	}
 
 	if (t.link) {
-		parts.push(`links score ${Number(t.link.score).toFixed(2)}+`);
+		const cap = t.link.capped === true ? ` (the best ${String(t.link.limit)})` : '';
+		parts.push(`links score ${Number(t.link.score).toFixed(2)}+${cap}`);
 	}
 
 	return parts.join(' · ');

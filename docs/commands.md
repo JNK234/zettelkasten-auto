@@ -1138,11 +1138,12 @@ Four methods, from `vault suggest` and the link suggestions of `vault suggest --
 | `missing-note` | a note that does not exist that notes link to | as many notes link to it as the 90th percentile of all missing notes (never fewer than 2) |
 | `same-idea` | two missing notes whose names say the same (one is the other plus at most two words) | both are linked from somewhere |
 | `existing-name` | a missing note whose name is probably an existing note's | the 75th percentile of missing notes' linking notes (at least 2) |
-| `link` | two notes that are not linked but probably belong together | shared neighbours or citers (never text alone), and a score at the 99th percentile of such pairs (at least 0.10) |
+| `link` | two notes that are not linked but probably belong together | shared neighbours or citers (never text alone), and a score at the 99th percentile of such pairs (at least `engine.findings.link_floor`, 0.2); at most `engine.findings.link_limit` (500) of them, best first |
 
 The thresholds are nearest-rank percentiles of this vault, with a floor, so they move with the vault and are the same on
 every run of it. The header line says what they came to (on the sample: 3 linking notes, 2, and a score of 0.30), and `--json`
-has them under `thresholds`.
+has them under `thresholds`. When the cap cuts the list the header says so (`links: score 0.20+ (the best 500)`): on a
+generated 5,000-note vault the floor alone still lets 1,315 links through, and each listed link costs about 7 ms to explain.
 
 **The id** is derived from what the finding is: its method and the notes it is about (by lookup key; an existing note by its
 path, a missing one by its name), `<prefix>-<10 hex of SHA-256>`. Its evidence and its rank are not part of it. So the same

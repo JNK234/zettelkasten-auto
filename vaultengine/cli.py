@@ -1099,7 +1099,8 @@ def _findings_for(args: argparse.Namespace, spec):
     if opened is None:
         return None, None
     index, info = opened
-    return Findings(index.conn, skip_for(spec), counts_for(spec), _findings_engine(args, index, spec)), (index, info)
+    return Findings(index.conn, skip_for(spec), counts_for(spec), _findings_engine(args, index, spec),
+                    args.settings.engine.findings), (index, info)
 
 
 def _findings_engine(args: argparse.Namespace, index: VaultIndex, spec):
@@ -1140,7 +1141,7 @@ def _cmd_findings(args: argparse.Namespace) -> int:
     if "existing-name" in t:
         parts.append(f"names: {t['existing-name']['linking_notes']}+")
     if "link" in t:
-        parts.append(f"links: score {t['link']['score']:.2f}+")
+        parts.append(f"links: score {t['link']['score']:.2f}+" + (f" (the best {t['link']['limit']})" if t["link"].get("capped") else ""))
     if parts:
         out.append("  thresholds (percentiles of this vault, with floors): " + ", ".join(parts))
     for method, about in METHODS.items():
@@ -1300,7 +1301,8 @@ def _cmd_next(args: argparse.Namespace) -> int:
     index = None
     if Path(args.db).exists():
         index = VaultIndex.open_existing(args.db)
-        findings = Findings(index.conn, skip_for(spec), counts_for(spec), _findings_engine(args, index, spec))
+        findings = Findings(index.conn, skip_for(spec), counts_for(spec), _findings_engine(args, index, spec),
+                            args.settings.engine.findings)
     else:
         print("note: no index, so no merge or write items (they come from `vault findings`)", file=sys.stderr)
     try:

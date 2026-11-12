@@ -39,7 +39,7 @@ PATH_KEYS = {("vault",), ("index",), ("memory",), ("embedding", "model_path")}
 # Keys that are a path when they look like one (a format is a name or a file).
 MAYBE_PATH_KEYS = {("format",)}
 SECTIONS = {("embedding",), ("related",), ("related", "weights"), ("related", "unlinked_weights"), ("explore",),
-            ("explore", "weights")}
+            ("explore", "weights"), ("findings",)}
 
 
 class SettingsError(Exception):
@@ -214,6 +214,15 @@ class ExploreSettings(_Section):
         return value
 
 
+class FindingsSettings(_Section):
+    """`vault findings` (and pipeline, next, ideas): how selective link findings are (findings.py)."""
+
+    link_floor: float = Field(0.2, ge=0)
+    """A link finding scores at least this, whatever the vault's 99th percentile of structural pairs comes to."""
+    link_limit: int = Field(500, ge=1)
+    """At most this many link findings, the best scores first (counted before notes the format ignores are left out)."""
+
+
 class EngineSettings(_Section):
     vault: Path = Path(".")
     """The vault folder."""
@@ -227,6 +236,7 @@ class EngineSettings(_Section):
     embedding: EmbeddingSettings = EmbeddingSettings()
     related: RelatedSettings = RelatedSettings()
     explore: ExploreSettings = ExploreSettings()
+    findings: FindingsSettings = FindingsSettings()
 
     @property
     def index_path(self) -> Path:

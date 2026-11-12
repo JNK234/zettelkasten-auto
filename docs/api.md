@@ -106,7 +106,7 @@ printf '%s\n' \
 1 error -32008 No baseline for format 'core'; record one with vault.check update_baseline=true
 2 ok True new 0 known 144
 3 ok True new 0 known 144
-4 13 {'link': {'score': 0.2969, 'percentile': 99, 'floor': 0.1}} link-6b21be7696
+4 13 {'link': {'score': 0.2969, 'percentile': 99, 'floor': 0.2, 'limit': 500, 'capped': False}} link-6b21be7696
 5 dry-run [{'path': '20_ZETTLEKASTEN/enterprise-agent-evaluation-challenges.md', 'line': 31, 'link': '[[pass-hat-k-reliability-metric]]', 'action': 'line removed', 'result': ''}]
 6 99 write write [[transcript-spotting-heuristics-for-reward-hacking]]
 ```

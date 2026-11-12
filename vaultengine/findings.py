@@ -10,8 +10,8 @@ Worked out from the index on every run (nothing is stored, nothing is written), 
 * ``existing-name``: a missing note whose name is probably an existing note's
   (``Suggester.close_to_existing``), linked from at least the 75th percentile of missing notes (and 2);
 * ``link``: two notes that are not linked but probably belong linked, with structural evidence
-  (shared neighbours or cited together), scoring at least the 99th percentile of such pairs (and 0.10)
-  (``LinkSuggester``).
+  (shared neighbours or cited together), scoring at least the 99th percentile of such pairs (and
+  ``engine.findings.link_floor``), at most ``engine.findings.link_limit`` of them, best first (``LinkSuggester``).
 
 Thresholds are relative to the vault: nearest-rank percentiles of what it has, with a floor, so they
 move with the vault and are the same on every run of the same vault (``Findings.thresholds`` says
@@ -49,7 +49,7 @@ from vaultengine.vault import link_name, lookup_key
 # Thresholds are relative to the vault: a nearest-rank percentile of what the vault has, never below a floor.
 MISSING_PERCENTILE, MISSING_FLOOR = 90, 2  # linking notes of a missing note, among all missing notes
 EXISTING_PERCENTILE, EXISTING_FLOOR = 75, 2  # linking notes of a name that is probably an existing note
-LINK_PERCENTILE, LINK_FLOOR = 99, 0.10  # score of a link, among pairs with structural evidence
+LINK_PERCENTILE = 99  # score of a link, among pairs with structural evidence (floor and cap: engine.findings)
 METHODS = {
     "missing-note": "a note many notes link to that does not exist",
     "same-idea": "two names for the same idea",
@@ -121,10 +121,14 @@ class Finding:
 
 class Findings:
     def __init__(self, conn: sqlite3.Connection, ignored: Callable[[str], bool] | None = None,
-                 counts: Callable[[str, str | None], bool] | None = None, engine=None) -> None:
+                 counts: Callable[[str, str | None], bool] | None = None, engine=None, settings=None) -> None:
         """``engine``: the ``Relatedness`` link findings score with (its embedding provider and tag rule);
-        default: one built on first use from the configured settings."""
+        default: one built on first use from the configured settings. ``settings``: ``FindingsSettings``
+        (the link floor and cap); default: their defaults."""
+        from vaultengine.settings import FindingsSettings
+
         self.conn = conn
+        self.settings = settings or FindingsSettings()
         self.ignored = ignored or (lambda path: False)
         self.counts = counts
         self.suggester = Suggester(conn, engine, counts=counts)
@@ -225,9 +229,10 @@ class Findings:
     def links(self) -> list[Finding]:
         suggester = LinkSuggester(self.conn, self.suggester.engine, self.counts)
         found = []
-        ranked = suggester.suggestions(limit=None, min_score=LINK_FLOOR, structural_percentile=LINK_PERCENTILE)
-        self.thresholds["link"] = {"score": round(suggester.threshold or LINK_FLOOR, 4), "percentile": LINK_PERCENTILE,
-                                   "floor": LINK_FLOOR}
+        floor, cap = self.settings.link_floor, self.settings.link_limit
+        ranked = suggester.suggestions(limit=cap, min_score=floor, structural_percentile=LINK_PERCENTILE)
+        self.thresholds["link"] = {"score": round(suggester.threshold or floor, 4), "percentile": LINK_PERCENTILE,
+                                   "floor": floor, "limit": cap, "capped": len(ranked) >= cap}
         for s in ranked:
             if not (s.shared_with or s.cited_by) or self.ignored(s.a) or self.ignored(s.b):
                 continue
